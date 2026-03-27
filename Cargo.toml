@@ -1,0 +1,24 @@
+[package]
+name = "smelt"
+version = "0.1.0"
+edition = "2024"
+authors = ["Francisco Parra <francisco.parra.o@usach.cl>"]
+description = "A machine learning framework for Rust, inspired by mlr3"
+license = "MIT"
+repository = "https://github.com/franciscoparrao/smelt"
+keywords = ["machine-learning", "classification", "regression", "ml", "data-science"]
+categories = ["science", "algorithms"]
+
+[dependencies]
+ndarray = "0.16"
+rand = "0.9"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+rayon = "1.10"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "learners"
+harness = false
