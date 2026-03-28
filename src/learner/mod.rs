@@ -2,10 +2,24 @@
 //!
 //! Each learner implements the `Learner` trait.
 
+pub mod tree;
+pub mod knn;
+pub mod linear_regression;
+pub mod logistic_regression;
+pub mod bagging;
+
 use ndarray::Array2;
 use crate::task::{ClassificationTask, RegressionTask};
 use crate::prediction::Prediction;
 use crate::Result;
+
+pub use tree::decision_tree::DecisionTree;
+pub use tree::random_forest::RandomForest;
+pub use tree::gradient_boosting::GradientBoosting;
+pub use knn::KNearestNeighbors;
+pub use linear_regression::LinearRegression;
+pub use logistic_regression::LogisticRegression;
+pub use bagging::Bagging;
 
 /// Core trait for classification learners.
 pub trait Learner: Send + Sync {

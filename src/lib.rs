@@ -14,20 +14,23 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust,no_run
+//! ```rust
 //! use smelt::prelude::*;
+//! use ndarray::array;
 //!
 //! // Define a classification task
-//! let task = ClassificationTask::new("iris", features, target);
+//! let features = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]];
+//! let target = vec![0, 0, 1, 1];
+//! let task = ClassificationTask::new("example", features, target).unwrap();
 //!
 //! // Train a learner
-//! let model = DecisionTree::default().train(&task).unwrap();
+//! let model = DecisionTree::default().train_classif(&task).unwrap();
 //!
-//! // Predict
-//! let pred = model.predict(&new_data);
-//!
-//! // Evaluate
-//! let acc = Accuracy.score(&pred);
+//! // Predict and evaluate
+//! let pred = model.predict(task.features()).unwrap()
+//!     .with_truth_classif(task.target().to_vec());
+//! let acc = Accuracy.score(&pred).unwrap();
+//! assert!(acc > 0.0);
 //! ```
 
 pub mod task;
@@ -35,8 +38,12 @@ pub mod learner;
 pub mod prediction;
 pub mod resample;
 pub mod measure;
+pub mod benchmark;
 pub mod preprocess;
 pub mod tuning;
+pub mod importance;
+pub mod data;
+pub mod serialize;
 
 mod error;
 
@@ -45,9 +52,15 @@ pub use error::{SmeltError, Result};
 /// Convenience re-exports for `use smelt::prelude::*`
 pub mod prelude {
     pub use crate::task::{Task, ClassificationTask, RegressionTask};
-    pub use crate::learner::Learner;
+    pub use crate::learner::{Learner, DecisionTree, KNearestNeighbors, LinearRegression, LogisticRegression, RandomForest, GradientBoosting, Bagging};
     pub use crate::prediction::Prediction;
-    pub use crate::resample::{Resample, CrossValidation, Holdout};
-    pub use crate::measure::{Measure, Accuracy, Rmse, Mae};
+    pub use crate::resample::{Resample, CrossValidation, Holdout, SpatialBlockCV, SpatialBufferCV};
+    pub use crate::measure::{Measure, Accuracy, Precision, Recall, F1Score, LogLoss, AucRoc, Rmse, Mae, RSquared, Mape};
+    pub use crate::preprocess::{Transformer, StandardScaler, MinMaxScaler, Imputer, ImputeStrategy, OneHotEncoder, LabelEncoder, Pipeline};
+    pub use crate::tuning::{GridSearch, RandomSearch, TuneResult, ParamDistribution};
+    pub use crate::importance::{FeatureImportance, permutation_importance_classif, permutation_importance_regress};
+    pub use crate::data::CsvLoader;
+    pub use crate::serialize::{SerializableModel, save_json, load_json};
+    pub use crate::benchmark::{self, BenchmarkResult};
     pub use crate::error::{SmeltError, Result};
 }

@@ -1,7 +1,9 @@
 //! Predictions: output of trained models.
 
+use serde::{Serialize, Deserialize};
+
 /// Holds predictions and (optionally) ground truth for evaluation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Prediction {
     /// Classification: predicted class labels + optional probabilities.
     Classification {

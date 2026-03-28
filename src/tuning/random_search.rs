@@ -1,0 +1,140 @@
+//! Random search over hyperparameter distributions.
+
+use rand::Rng;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+use crate::task::{ClassificationTask, RegressionTask};
+use crate::learner::Learner;
+use crate::measure::Measure;
+use crate::resample::Resample;
+use crate::benchmark;
+use crate::Result;
+use super::{ParamSet, ParamSpace, ParamDistribution, TuneResult};
+
+/// Random search over hyperparameter distributions.
+///
+/// Samples `n_iter` random configurations and evaluates them using
+/// cross-validation. Often more efficient than grid search for
+/// high-dimensional parameter spaces.
+///
+/// # Examples
+///
+/// ```
+/// use smelt::prelude::*;
+/// use smelt::tuning::{RandomSearch, ParamSpace, ParamDistribution};
+/// use ndarray::array;
+///
+/// let features = array![
+///     [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+///     [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+/// ];
+/// let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+/// let task = ClassificationTask::new("tune", features, target).unwrap();
+///
+/// let mut space = ParamSpace::new();
+/// space.insert("max_depth".into(), ParamDistribution::Choice(vec![1.0, 3.0, 5.0, 10.0]));
+///
+/// let rs = RandomSearch::new(
+///     |params| Box::new(DecisionTree::new()
+///         .with_max_depth(params["max_depth"] as usize)),
+///     space,
+/// ).with_n_iter(5).with_seed(42);
+///
+/// let cv = CrossValidation::new(2).with_seed(42);
+/// let result = rs.tune_classif(&task, &cv, &Accuracy).unwrap();
+/// ```
+pub struct RandomSearch {
+    factory: Box<dyn Fn(&ParamSet) -> Box<dyn Learner> + Send + Sync>,
+    param_space: ParamSpace,
+    n_iter: usize,
+    seed: u64,
+}
+
+impl RandomSearch {
+    pub fn new(
+        factory: impl Fn(&ParamSet) -> Box<dyn Learner> + Send + Sync + 'static,
+        param_space: ParamSpace,
+    ) -> Self {
+        Self {
+            factory: Box::new(factory),
+            param_space,
+            n_iter: 10,
+            seed: 42,
+        }
+    }
+
+    pub fn with_n_iter(mut self, n: usize) -> Self {
+        self.n_iter = n;
+        self
+    }
+
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    fn sample_params(&self, rng: &mut impl Rng) -> ParamSet {
+        let mut params = ParamSet::new();
+        for (name, dist) in &self.param_space {
+            let value = match dist {
+                ParamDistribution::Uniform(low, high) => {
+                    rng.random_range(*low..=*high)
+                }
+                ParamDistribution::LogUniform(low, high) => {
+                    let log_low = low.log10();
+                    let log_high = high.log10();
+                    let log_val = rng.random_range(log_low..=log_high);
+                    10.0f64.powf(log_val)
+                }
+                ParamDistribution::Choice(values) => {
+                    let idx = rng.random_range(0..values.len());
+                    values[idx]
+                }
+            };
+            params.insert(name.clone(), value);
+        }
+        params
+    }
+
+    /// Tune for classification.
+    pub fn tune_classif(
+        &self,
+        task: &ClassificationTask,
+        resampling: &dyn Resample,
+        measure: &dyn Measure,
+    ) -> Result<TuneResult> {
+        let mut rng = StdRng::seed_from_u64(self.seed);
+        let mut results = Vec::with_capacity(self.n_iter);
+
+        for _ in 0..self.n_iter {
+            let params = self.sample_params(&mut rng);
+            let mut learner = (self.factory)(&params);
+            let bench = benchmark::resample_classif(&mut *learner, task, resampling, &[measure])?;
+            let mean_score = bench.mean_scores()[0];
+            results.push((params, mean_score));
+        }
+
+        Ok(TuneResult::select_best(results, measure.id().to_string(), measure.maximize()))
+    }
+
+    /// Tune for regression.
+    pub fn tune_regress(
+        &self,
+        task: &RegressionTask,
+        resampling: &dyn Resample,
+        measure: &dyn Measure,
+    ) -> Result<TuneResult> {
+        let mut rng = StdRng::seed_from_u64(self.seed);
+        let mut results = Vec::with_capacity(self.n_iter);
+
+        for _ in 0..self.n_iter {
+            let params = self.sample_params(&mut rng);
+            let mut learner = (self.factory)(&params);
+            let bench = benchmark::resample_regress(&mut *learner, task, resampling, &[measure])?;
+            let mean_score = bench.mean_scores()[0];
+            results.push((params, mean_score));
+        }
+
+        Ok(TuneResult::select_best(results, measure.id().to_string(), measure.maximize()))
+    }
+}

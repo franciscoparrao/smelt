@@ -1,8 +1,12 @@
-//! Resampling strategies: cross-validation, holdout, bootstrap.
+//! Resampling strategies: cross-validation, holdout, bootstrap, spatial.
+
+pub mod spatial;
 
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+
+pub use spatial::{SpatialBlockCV, SpatialBufferCV};
 
 /// Trait for resampling strategies.
 pub trait Resample {

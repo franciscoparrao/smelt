@@ -20,6 +20,7 @@ pub trait Task {
 }
 
 /// Classification task with discrete target labels.
+#[derive(Debug)]
 pub struct ClassificationTask {
     id: String,
     features: Array2<f64>,
@@ -82,6 +83,7 @@ impl Task for ClassificationTask {
 }
 
 /// Regression task with continuous target values.
+#[derive(Debug)]
 pub struct RegressionTask {
     id: String,
     features: Array2<f64>,

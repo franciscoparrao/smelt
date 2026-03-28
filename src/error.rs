@@ -22,6 +22,15 @@ pub enum SmeltError {
     #[error("feature '{0}' not found")]
     FeatureNotFound(String),
 
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("CSV error: {0}")]
+    Csv(String),
+
+    #[error("JSON error: {0}")]
+    Json(String),
+
     #[error("{0}")]
     Other(String),
 }
