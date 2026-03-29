@@ -16,8 +16,8 @@ use super::{Node, LeafValue, TreeBuilder};
 /// # Examples
 ///
 /// ```
-/// use smelt::prelude::*;
-/// use smelt::learner::DecisionTree;
+/// use smelt_ml::prelude::*;
+/// use smelt_ml::learner::DecisionTree;
 /// use ndarray::array;
 ///
 /// let features = array![[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]];

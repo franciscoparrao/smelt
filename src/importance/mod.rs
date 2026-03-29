@@ -28,8 +28,8 @@ pub struct FeatureImportance {
 /// # Examples
 ///
 /// ```
-/// use smelt::prelude::*;
-/// use smelt::importance::permutation_importance_classif;
+/// use smelt_ml::prelude::*;
+/// use smelt_ml::importance::permutation_importance_classif;
 /// use ndarray::array;
 ///
 /// let features = array![[0.0, 99.0], [0.1, 42.0], [1.0, 99.0], [1.1, 42.0]];

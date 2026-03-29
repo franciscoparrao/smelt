@@ -13,8 +13,8 @@ use crate::{SmeltError, Result};
 /// # Examples
 ///
 /// ```
-/// use smelt::prelude::*;
-/// use smelt::learner::LinearRegression;
+/// use smelt_ml::prelude::*;
+/// use smelt_ml::learner::LinearRegression;
 /// use ndarray::array;
 ///
 /// let features = array![[1.0], [2.0], [3.0], [4.0]];

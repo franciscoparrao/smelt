@@ -13,8 +13,8 @@ use crate::Result;
 /// # Examples
 ///
 /// ```
-/// use smelt::prelude::*;
-/// use smelt::learner::KNearestNeighbors;
+/// use smelt_ml::prelude::*;
+/// use smelt_ml::learner::KNearestNeighbors;
 /// use ndarray::array;
 ///
 /// let features = array![[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0]];

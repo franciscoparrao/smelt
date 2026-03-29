@@ -11,7 +11,7 @@ use super::Transformer;
 /// # Examples
 ///
 /// ```
-/// use smelt::preprocess::{Transformer, StandardScaler};
+/// use smelt_ml::preprocess::{Transformer, StandardScaler};
 /// use ndarray::array;
 ///
 /// let mut scaler = StandardScaler::new();
@@ -82,7 +82,7 @@ impl Transformer for StandardScaler {
 /// # Examples
 ///
 /// ```
-/// use smelt::preprocess::{Transformer, MinMaxScaler};
+/// use smelt_ml::preprocess::{Transformer, MinMaxScaler};
 /// use ndarray::array;
 ///
 /// let mut scaler = MinMaxScaler::new();

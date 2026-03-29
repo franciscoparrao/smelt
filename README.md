@@ -7,7 +7,7 @@ The name refers to smelting -- refining raw data into useful models.
 ## Quick Start
 
 ```rust
-use smelt::prelude::*;
+use smelt_ml::prelude::*;
 use ndarray::array;
 
 // Define a classification task
@@ -28,7 +28,7 @@ let acc = Accuracy.score(&pred).unwrap();
 ## Pipeline
 
 ```rust
-use smelt::prelude::*;
+use smelt_ml::prelude::*;
 
 // Chain preprocessing + learner
 let mut pipe = Pipeline::new(
@@ -45,8 +45,8 @@ println!("Mean accuracy: {:.3}", result.mean_scores()[0]);
 ## Hyperparameter Tuning
 
 ```rust
-use smelt::prelude::*;
-use smelt::tuning::ParamGrid;
+use smelt_ml::prelude::*;
+use smelt_ml::tuning::ParamGrid;
 
 let mut grid = ParamGrid::new();
 grid.insert("max_depth".into(), vec![3.0, 5.0, 10.0]);

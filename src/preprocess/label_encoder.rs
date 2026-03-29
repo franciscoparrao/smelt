@@ -11,7 +11,7 @@ use crate::{SmeltError, Result};
 /// # Examples
 ///
 /// ```
-/// use smelt::preprocess::LabelEncoder;
+/// use smelt_ml::preprocess::LabelEncoder;
 ///
 /// let encoder = LabelEncoder::fit(&["cat", "dog", "cat", "bird"]);
 /// let encoded = encoder.encode(&["bird", "cat", "dog"]).unwrap();

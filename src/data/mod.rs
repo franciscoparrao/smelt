@@ -11,7 +11,7 @@ use crate::{SmeltError, Result};
 /// # Examples
 ///
 /// ```no_run
-/// use smelt::data::CsvLoader;
+/// use smelt_ml::data::CsvLoader;
 ///
 /// let task = CsvLoader::from_path("iris.csv")
 ///     .target("species")

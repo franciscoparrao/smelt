@@ -15,7 +15,7 @@ use super::Transformer;
 /// # Examples
 ///
 /// ```
-/// use smelt::prelude::*;
+/// use smelt_ml::prelude::*;
 /// use ndarray::array;
 ///
 /// let features = array![[1.0, 100.0], [2.0, 200.0], [3.0, 300.0], [4.0, 400.0]];

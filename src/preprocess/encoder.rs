@@ -12,7 +12,7 @@ use super::Transformer;
 /// # Examples
 ///
 /// ```
-/// use smelt::preprocess::{Transformer, OneHotEncoder};
+/// use smelt_ml::preprocess::{Transformer, OneHotEncoder};
 /// use ndarray::array;
 ///
 /// // Column 0 has categories {0, 1, 2}

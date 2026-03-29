@@ -1,5 +1,5 @@
 use ndarray::{array, Array2};
-use smelt::prelude::*;
+use smelt_ml::prelude::*;
 
 // ── Task tests ──────────────────────────────────────────────────────
 
@@ -1167,7 +1167,7 @@ fn pipeline_nested_in_bagging() {
 
 #[test]
 fn grid_search_classif_finds_best() {
-    use smelt::tuning::ParamGrid;
+    use smelt_ml::tuning::ParamGrid;
 
     let features = array![
         [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
@@ -1198,7 +1198,7 @@ fn grid_search_classif_finds_best() {
 
 #[test]
 fn grid_search_regress() {
-    use smelt::tuning::ParamGrid;
+    use smelt_ml::tuning::ParamGrid;
 
     let features = array![
         [1.0], [2.0], [3.0], [4.0], [5.0],
@@ -1227,7 +1227,7 @@ fn grid_search_regress() {
 
 #[test]
 fn grid_search_multi_param() {
-    use smelt::tuning::ParamGrid;
+    use smelt_ml::tuning::ParamGrid;
 
     let features = array![
         [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
@@ -1256,7 +1256,7 @@ fn grid_search_multi_param() {
 
 #[test]
 fn random_search_classif() {
-    use smelt::tuning::ParamSpace;
+    use smelt_ml::tuning::ParamSpace;
 
     let features = array![
         [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
@@ -1285,7 +1285,7 @@ fn random_search_classif() {
 
 #[test]
 fn random_search_uniform() {
-    use smelt::tuning::ParamSpace;
+    use smelt_ml::tuning::ParamSpace;
 
     let features = array![
         [1.0], [2.0], [3.0], [4.0], [5.0],
@@ -1315,7 +1315,7 @@ fn random_search_uniform() {
 
 #[test]
 fn random_search_deterministic() {
-    use smelt::tuning::ParamSpace;
+    use smelt_ml::tuning::ParamSpace;
 
     let features = array![[0.0], [1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0]];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
@@ -1344,7 +1344,7 @@ fn random_search_deterministic() {
 
 #[test]
 fn random_search_log_uniform() {
-    use smelt::tuning::ParamSpace;
+    use smelt_ml::tuning::ParamSpace;
 
     let features = array![
         [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],

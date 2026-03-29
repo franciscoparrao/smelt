@@ -20,8 +20,8 @@ use super::{ParamSet, ParamSpace, ParamDistribution, TuneResult};
 /// # Examples
 ///
 /// ```
-/// use smelt::prelude::*;
-/// use smelt::tuning::{RandomSearch, ParamSpace, ParamDistribution};
+/// use smelt_ml::prelude::*;
+/// use smelt_ml::tuning::{RandomSearch, ParamSpace, ParamDistribution};
 /// use ndarray::array;
 ///
 /// let features = array![

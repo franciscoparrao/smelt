@@ -15,7 +15,7 @@
 //! ## Quick Start
 //!
 //! ```rust
-//! use smelt::prelude::*;
+//! use smelt_ml::prelude::*;
 //! use ndarray::array;
 //!
 //! // Define a classification task
@@ -49,7 +49,7 @@ mod error;
 
 pub use error::{SmeltError, Result};
 
-/// Convenience re-exports for `use smelt::prelude::*`
+/// Convenience re-exports for `use smelt_ml::prelude::*`
 pub mod prelude {
     pub use crate::task::{Task, ClassificationTask, RegressionTask};
     pub use crate::learner::{Learner, DecisionTree, KNearestNeighbors, LinearRegression, LogisticRegression, RandomForest, GradientBoosting, Bagging};

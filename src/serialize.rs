@@ -23,7 +23,7 @@ use crate::{SmeltError, Result};
 /// # Examples
 ///
 /// ```no_run
-/// use smelt::serialize::{SerializableModel, save_json, load_json};
+/// use smelt_ml::serialize::{SerializableModel, save_json, load_json};
 ///
 /// // save_json(&model, "model.json").unwrap();
 /// // let loaded = load_json("model.json").unwrap();

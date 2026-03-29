@@ -20,7 +20,7 @@ pub enum ImputeStrategy {
 /// # Examples
 ///
 /// ```
-/// use smelt::preprocess::{Transformer, Imputer, ImputeStrategy};
+/// use smelt_ml::preprocess::{Transformer, Imputer, ImputeStrategy};
 /// use ndarray::array;
 ///
 /// let mut imp = Imputer::new(ImputeStrategy::Mean);

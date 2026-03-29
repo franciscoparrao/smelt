@@ -16,8 +16,8 @@ use super::{ParamSet, ParamGrid, TuneResult, cartesian_product};
 /// # Examples
 ///
 /// ```
-/// use smelt::prelude::*;
-/// use smelt::tuning::{GridSearch, ParamGrid};
+/// use smelt_ml::prelude::*;
+/// use smelt_ml::tuning::{GridSearch, ParamGrid};
 /// use ndarray::array;
 ///
 /// let features = array![

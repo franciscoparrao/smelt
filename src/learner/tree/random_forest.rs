@@ -20,7 +20,7 @@ use super::{Node, LeafValue, TreeBuilder};
 /// # Examples
 ///
 /// ```
-/// use smelt::prelude::*;
+/// use smelt_ml::prelude::*;
 /// use ndarray::array;
 ///
 /// let features = array![[0.0, 0.0], [0.1, 0.1], [1.0, 1.0], [1.1, 0.9]];

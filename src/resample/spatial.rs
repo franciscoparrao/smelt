@@ -14,7 +14,7 @@ use super::Resample;
 /// # Examples
 ///
 /// ```
-/// use smelt::resample::{Resample, SpatialBlockCV};
+/// use smelt_ml::resample::{Resample, SpatialBlockCV};
 ///
 /// let coords = vec![(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0),
 ///                   (2.0, 2.0), (3.0, 2.0), (2.0, 3.0), (3.0, 3.0)];
@@ -89,7 +89,7 @@ impl Resample for SpatialBlockCV {
 /// # Examples
 ///
 /// ```
-/// use smelt::resample::{Resample, SpatialBufferCV};
+/// use smelt_ml::resample::{Resample, SpatialBufferCV};
 ///
 /// let coords = vec![(0.0, 0.0), (0.1, 0.0), (10.0, 10.0), (10.1, 10.0)];
 /// let cv = SpatialBufferCV::new(2, coords, 1.0).with_seed(42);
