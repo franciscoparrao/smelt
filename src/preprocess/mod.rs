@@ -4,6 +4,7 @@ pub mod scaler;
 pub mod imputer;
 pub mod encoder;
 pub mod label_encoder;
+pub mod smote;
 pub mod pipeline;
 
 use ndarray::Array2;
@@ -13,6 +14,7 @@ pub use scaler::{StandardScaler, MinMaxScaler};
 pub use imputer::{Imputer, ImputeStrategy};
 pub use encoder::OneHotEncoder;
 pub use label_encoder::LabelEncoder;
+pub use smote::Smote;
 pub use pipeline::Pipeline;
 
 /// Trait for feature transformers (scalers, encoders, imputers).

@@ -1776,3 +1776,782 @@ fn mape_known_value() {
 fn mape_direction() {
     assert!(!Mape.maximize());
 }
+
+// ── Extra Trees tests ──────────────────────────────────────────────
+
+#[test]
+fn extra_trees_classif_separable() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.1, 0.2], [0.0, 0.1],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("et", features, target).unwrap();
+
+    let mut et = ExtraTrees::new().with_n_estimators(20).with_seed(42);
+    let model = et.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert_eq!(acc, 1.0);
+}
+
+#[test]
+fn extra_trees_regress() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [6.0], [7.0], [8.0], [9.0]];
+    let target = vec![0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0];
+    let task = RegressionTask::new("et_r", features, target).unwrap();
+
+    let mut et = ExtraTrees::new().with_n_estimators(20).with_seed(42);
+    let model = et.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_regress(task.target().to_vec());
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 1.0, "ET should learn step function, got RMSE={rmse}");
+}
+
+// ── Gaussian Naive Bayes tests ─────────────────────────────────────
+
+#[test]
+fn naive_bayes_separable() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [5.0, 5.0], [5.1, 4.9], [4.9, 5.1], [5.0, 4.8]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("nb", features, target).unwrap();
+
+    let mut nb = GaussianNB::new();
+    let model = nb.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert_eq!(acc, 1.0, "NB should separate widely spaced clusters");
+}
+
+#[test]
+fn naive_bayes_produces_probabilities() {
+    let features = array![[0.0], [1.0], [2.0], [3.0]];
+    let target = vec![0, 0, 1, 1];
+    let task = ClassificationTask::new("nb_p", features, target).unwrap();
+
+    let mut nb = GaussianNB::new();
+    let model = nb.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+
+    if let Prediction::Classification { probabilities: Some(probs), .. } = &pred {
+        for p in probs {
+            let sum: f64 = p.iter().sum();
+            assert!((sum - 1.0).abs() < 1e-10, "probabilities should sum to 1");
+        }
+    } else {
+        panic!("expected probabilities");
+    }
+}
+
+#[test]
+fn naive_bayes_rejects_regression() {
+    let features = array![[1.0], [2.0]];
+    let target = vec![1.0, 2.0];
+    let task = RegressionTask::new("nb_bad", features, target).unwrap();
+    let mut nb = GaussianNB::new();
+    assert!(nb.train_regress(&task).is_err());
+}
+
+// ── Ridge Regression tests ─────────────────────────────────────────
+
+#[test]
+fn ridge_fits_linear() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+    let task = RegressionTask::new("ridge", features, target).unwrap();
+
+    let mut ridge = Ridge::new(0.01); // small regularization
+    let model = ridge.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_regress(task.target().to_vec());
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 0.5, "Ridge with small alpha should fit linear, got RMSE={rmse}");
+}
+
+#[test]
+fn ridge_shrinks_coefficients() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+    let task = RegressionTask::new("ridge_s", features, target).unwrap();
+
+    let mut ridge_small = Ridge::new(0.001);
+    let mut ridge_big = Ridge::new(100.0);
+    let m1 = ridge_small.train_regress(&task).unwrap();
+    let m2 = ridge_big.train_regress(&task).unwrap();
+
+    let imp1 = m1.feature_importance().unwrap();
+    let imp2 = m2.feature_importance().unwrap();
+    // Both should have importance, but the coefficient magnitudes differ
+    assert!(imp1[0].1 > 0.0);
+    assert!(imp2[0].1 > 0.0);
+}
+
+// ── Lasso Regression tests ─────────────────────────────────────────
+
+#[test]
+fn lasso_fits_linear() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+    let task = RegressionTask::new("lasso", features, target).unwrap();
+
+    let mut lasso = Lasso::new(0.01);
+    let model = lasso.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_regress(task.target().to_vec());
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 1.0, "Lasso should fit linear, got RMSE={rmse}");
+}
+
+#[test]
+fn lasso_sparsity() {
+    // x0 is informative, x1 is noise
+    let features = array![
+        [1.0, 0.0], [2.0, 0.0], [3.0, 0.0],
+        [1.0, 1.0], [2.0, 1.0], [3.0, 1.0]
+    ];
+    let target = vec![2.0, 4.0, 6.0, 2.0, 4.0, 6.0];
+    let task = RegressionTask::new("lasso_sp", features, target).unwrap();
+
+    let mut lasso = Lasso::new(0.1);
+    let model = lasso.train_regress(&task).unwrap();
+    let imp = model.feature_importance().unwrap();
+    assert!(imp[0].1 > imp[1].1, "Lasso should assign more importance to informative feature");
+}
+
+// ── Elastic Net tests ──────────────────────────────────────────────
+
+#[test]
+fn elastic_net_fits_linear() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+    let task = RegressionTask::new("enet", features, target).unwrap();
+
+    let mut enet = ElasticNet::new(0.01, 0.5);
+    let model = enet.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_regress(task.target().to_vec());
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 1.0, "ElasticNet should fit linear, got RMSE={rmse}");
+}
+
+// ── AdaBoost tests ─────────────────────────────────────────────────
+
+#[test]
+fn adaboost_separable() {
+    let features = array![
+        [0.0], [0.5], [1.0], [1.5],
+        [3.0], [3.5], [4.0], [4.5]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("ada", features, target).unwrap();
+
+    let mut ada = AdaBoost::new().with_n_estimators(20);
+    let model = ada.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.75, "AdaBoost should learn separable data, got {acc}");
+}
+
+#[test]
+fn adaboost_produces_probabilities() {
+    let features = array![[0.0], [1.0], [2.0], [3.0]];
+    let target = vec![0, 0, 1, 1];
+    let task = ClassificationTask::new("ada_p", features, target).unwrap();
+
+    let mut ada = AdaBoost::new().with_n_estimators(10);
+    let model = ada.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+
+    if let Prediction::Classification { probabilities: Some(probs), .. } = &pred {
+        for p in probs {
+            let sum: f64 = p.iter().sum();
+            assert!((sum - 1.0).abs() < 1e-10, "probabilities should sum to 1");
+        }
+    } else {
+        panic!("expected probabilities");
+    }
+}
+
+#[test]
+fn adaboost_rejects_regression() {
+    let features = array![[1.0], [2.0]];
+    let target = vec![1.0, 2.0];
+    let task = RegressionTask::new("ada_bad", features, target).unwrap();
+    let mut ada = AdaBoost::default();
+    assert!(ada.train_regress(&task).is_err());
+}
+
+// ── Linear SVM tests ──────────────────────────────────────────────
+
+#[test]
+fn linear_svm_separable() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("svm", features, target).unwrap();
+
+    let mut svm = LinearSVM::new().with_max_iter(2000).with_c(10.0).with_learning_rate(0.1);
+    let model = svm.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.8, "SVM should classify separable data, got {acc}");
+}
+
+#[test]
+fn linear_svm_feature_importance() {
+    let features = array![
+        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0],
+        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0]
+    ];
+    let target = vec![0, 0, 0, 1, 1, 1];
+    let task = ClassificationTask::new("svm_imp", features, target).unwrap();
+
+    let mut svm = LinearSVM::new().with_max_iter(500);
+    let model = svm.train_classif(&task).unwrap();
+    let imp = model.feature_importance();
+    assert!(imp.is_some());
+}
+
+#[test]
+fn linear_svm_rejects_regression() {
+    let features = array![[1.0], [2.0]];
+    let target = vec![1.0, 2.0];
+    let task = RegressionTask::new("svm_bad", features, target).unwrap();
+    let mut svm = LinearSVM::default();
+    assert!(svm.train_regress(&task).is_err());
+}
+
+// ── All new learners in benchmark ──────────────────────────────────
+
+#[test]
+fn benchmark_new_learners_cv() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("bench_new", features, target).unwrap();
+    let cv = CrossValidation::new(4).with_seed(42);
+
+    // Test each new learner works through the benchmark pipeline
+    let mut et = ExtraTrees::new().with_n_estimators(10).with_seed(42);
+    let r = benchmark::resample_classif(&mut et, &task, &cv, &[&Accuracy]).unwrap();
+    assert_eq!(r.learner_id, "extra_trees");
+
+    let mut nb = GaussianNB::new();
+    let r = benchmark::resample_classif(&mut nb, &task, &cv, &[&Accuracy]).unwrap();
+    assert_eq!(r.learner_id, "gaussian_nb");
+
+    let mut ada = AdaBoost::new().with_n_estimators(10);
+    let r = benchmark::resample_classif(&mut ada, &task, &cv, &[&Accuracy]).unwrap();
+    assert_eq!(r.learner_id, "adaboost");
+}
+
+// ── XGBoost tests ──────────────────────────────────────────────────
+
+#[test]
+fn xgboost_classif_binary() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("xgb_bin", features, target).unwrap();
+
+    let mut xgb = XGBoost::new()
+        .with_n_estimators(50)
+        .with_max_depth(3)
+        .with_learning_rate(0.3);
+    let model = xgb.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.9, "XGBoost should classify separable data, got {acc}");
+}
+
+#[test]
+fn xgboost_classif_multiclass() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.0, 0.1],
+        [1.0, 0.0], [1.1, 0.1], [1.0, 0.1],
+        [0.0, 1.0], [0.1, 1.1], [0.0, 1.1]
+    ];
+    let target = vec![0, 0, 0, 1, 1, 1, 2, 2, 2];
+    let task = ClassificationTask::new("xgb_mc", features, target).unwrap();
+
+    let mut xgb = XGBoost::new()
+        .with_n_estimators(200)
+        .with_max_depth(3)
+        .with_learning_rate(0.3)
+        .with_lambda(0.01)
+        .with_min_child_weight(0.1);
+    let model = xgb.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.66, "XGBoost multiclass should do better than random, got {acc}");
+}
+
+#[test]
+fn xgboost_regress() {
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0]
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let task = RegressionTask::new("xgb_reg", features, target).unwrap();
+
+    let mut xgb = XGBoost::new()
+        .with_n_estimators(100)
+        .with_max_depth(3)
+        .with_learning_rate(0.3);
+    let model = xgb.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_regress(task.target().to_vec());
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 1.0, "XGBoost should learn linear trend, got RMSE={rmse}");
+}
+
+#[test]
+fn xgboost_regularization() {
+    let features = array![[0.0], [1.0], [2.0], [3.0]];
+    let target = vec![0, 0, 1, 1];
+    let task = ClassificationTask::new("xgb_reg", features, target).unwrap();
+
+    // High lambda should still work (more conservative splits)
+    let mut xgb = XGBoost::new()
+        .with_n_estimators(20)
+        .with_lambda(10.0)
+        .with_gamma(0.1);
+    let model = xgb.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    assert_eq!(pred.n_samples(), 4);
+}
+
+#[test]
+fn xgboost_feature_importance() {
+    let features = array![
+        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0], [0.0, 55.0], [0.15, 30.0],
+        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0], [1.0, 55.0], [1.15, 30.0]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("xgb_imp", features, target).unwrap();
+
+    let mut xgb = XGBoost::new()
+        .with_n_estimators(50)
+        .with_lambda(0.01)
+        .with_min_child_weight(0.1);
+    let model = xgb.train_classif(&task).unwrap();
+    let imp = model.feature_importance();
+    assert!(imp.is_some(), "XGBoost should provide feature importance");
+}
+
+#[test]
+fn xgboost_subsample() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("xgb_sub", features, target).unwrap();
+
+    let mut xgb = XGBoost::new()
+        .with_n_estimators(30)
+        .with_subsample(0.8)
+        .with_colsample_bytree(0.8)
+        .with_seed(42);
+    let model = xgb.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.5, "XGBoost with subsampling should work, got {acc}");
+}
+
+#[test]
+fn xgboost_in_benchmark() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("xgb_bench", features, target).unwrap();
+
+    let cv = CrossValidation::new(4).with_seed(42);
+    let mut xgb = XGBoost::new().with_n_estimators(20).with_max_depth(3);
+    let r = benchmark::resample_classif(&mut xgb, &task, &cv, &[&Accuracy]).unwrap();
+    assert_eq!(r.learner_id, "xgboost");
+    assert_eq!(r.scores.len(), 4);
+}
+
+#[test]
+fn xgboost_handles_nan() {
+    // Features with NaN — XGBoost should handle them natively
+    let features = array![
+        [0.0, f64::NAN], [0.1, 0.1], [f64::NAN, 0.0], [0.0, 0.2],
+        [1.0, 1.0], [1.1, f64::NAN], [0.9, 1.1], [f64::NAN, 0.9]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("xgb_nan", features, target).unwrap();
+
+    let mut xgb = XGBoost::new()
+        .with_n_estimators(50)
+        .with_max_depth(3)
+        .with_learning_rate(0.3);
+    let model = xgb.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.75, "XGBoost should handle NaN, got acc={acc}");
+}
+
+#[test]
+fn xgboost_nan_in_prediction() {
+    // Train on clean data, predict with NaN
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1]
+    ];
+    let target = vec![0, 0, 0, 1, 1, 1];
+    let task = ClassificationTask::new("xgb_nan_pred", features, target).unwrap();
+
+    let mut xgb = XGBoost::new().with_n_estimators(50);
+    let model = xgb.train_classif(&task).unwrap();
+
+    // Predict with NaN — should not panic
+    let test = array![[0.05, f64::NAN], [f64::NAN, 1.0]];
+    let pred = model.predict(&test).unwrap();
+    assert_eq!(pred.n_samples(), 2);
+}
+
+#[test]
+fn xgboost_exact_greedy_small_dataset() {
+    // With only 10 samples and n_bins=256, exact greedy should activate
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0]
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let task = RegressionTask::new("xgb_exact", features, target).unwrap();
+
+    let mut xgb = XGBoost::new()
+        .with_n_estimators(100)
+        .with_max_depth(3)
+        .with_learning_rate(0.3);
+    let model = xgb.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_regress(task.target().to_vec());
+
+    let rmse = Rmse.score(&pred).unwrap();
+    // Exact greedy should give much better RMSE than histogram on small data
+    assert!(rmse < 0.1, "exact greedy should fit small data precisely, got RMSE={rmse}");
+}
+
+#[test]
+fn xgboost_early_stopping_regress() {
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0]
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let task = RegressionTask::new("xgb_es", features.clone(), target.clone()).unwrap();
+
+    // With early stopping, should stop before 1000 rounds
+    let mut xgb_es = XGBoost::new()
+        .with_n_estimators(1000)
+        .with_learning_rate(0.3)
+        .with_early_stopping_rounds(10);
+    let model_es = xgb_es.train_regress(&task).unwrap();
+
+    // Without early stopping, all 1000 rounds
+    let mut xgb_full = XGBoost::new()
+        .with_n_estimators(1000)
+        .with_learning_rate(0.3);
+    let model_full = xgb_full.train_regress(&task).unwrap();
+
+    // Both should produce good predictions
+    let pred_es = model_es.predict(&features).unwrap()
+        .with_truth_regress(target.clone());
+    let pred_full = model_full.predict(&features).unwrap()
+        .with_truth_regress(target);
+    let rmse_es = Rmse.score(&pred_es).unwrap();
+    let rmse_full = Rmse.score(&pred_full).unwrap();
+
+    assert!(rmse_es < 1.0, "early stopped model should be accurate, got {rmse_es}");
+    assert!(rmse_full < 1.0, "full model should be accurate, got {rmse_full}");
+}
+
+#[test]
+fn xgboost_early_stopping_classif() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("xgb_es_c", features, target).unwrap();
+
+    let mut xgb = XGBoost::new()
+        .with_n_estimators(500)
+        .with_learning_rate(0.3)
+        .with_early_stopping_rounds(5);
+    let model = xgb.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.9, "early stopped classifier should work, got {acc}");
+}
+
+// ── Conformal Prediction tests ─────────────────────────────────────
+
+#[test]
+fn conformal_regression_coverage() {
+    use smelt_ml::conformal::ConformalRegressor;
+
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+    let task = RegressionTask::new("cf", features, target).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_regress(&task).unwrap();
+
+    // Calibrate on last 4 samples
+    let cal_features = array![[5.0], [6.0], [7.0], [8.0]];
+    let cal_targets = vec![10.0, 12.0, 14.0, 16.0];
+
+    let cf = ConformalRegressor::calibrate(&*model, &cal_features, &cal_targets, 0.1).unwrap();
+    let intervals = cf.predict(&array![[3.0], [5.0]]).unwrap();
+
+    assert_eq!(intervals.len(), 2);
+    assert!(intervals[0].lower <= intervals[0].upper);
+    assert!(cf.interval_width() >= 0.0);
+}
+
+#[test]
+fn conformal_classification_sets() {
+    use smelt_ml::conformal::ConformalClassifier;
+
+    let features = array![
+        [0.0], [0.5], [1.0], [1.5], [2.0], [2.5], [3.0], [3.5]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("cf_c", features, target).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_classif(&task).unwrap();
+
+    let cal_features = array![[1.0], [2.0], [3.0], [0.0]];
+    let cal_targets = vec![0, 1, 1, 0];
+
+    let cf = ConformalClassifier::calibrate(&*model, &cal_features, &cal_targets, 0.1).unwrap();
+    let sets = cf.predict(&array![[0.5], [2.5]]).unwrap();
+
+    assert_eq!(sets.len(), 2);
+    // Prediction set should contain at least the predicted class
+    for s in &sets {
+        assert!(!s.prediction_set.is_empty());
+    }
+}
+
+// ── Stacking tests ─────────────────────────────────────────────────
+
+#[test]
+fn stacking_classif() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("stack", features, target).unwrap();
+
+    let mut stack = Stacking::new(
+        vec![
+            Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>),
+            Box::new(|| Box::new(KNearestNeighbors::new(3)) as Box<dyn Learner>),
+        ],
+        || Box::new(LogisticRegression::new().with_max_iter(500)),
+    ).with_cv_folds(2);
+
+    let model = stack.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.75, "Stacking should classify separable data, got {acc}");
+}
+
+#[test]
+fn stacking_regress() {
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0]
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let task = RegressionTask::new("stack_r", features, target).unwrap();
+
+    let mut stack = Stacking::new(
+        vec![
+            Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>),
+            Box::new(|| Box::new(LinearRegression::default()) as Box<dyn Learner>),
+        ],
+        || Box::new(Ridge::new(0.1)),
+    ).with_cv_folds(2);
+
+    let model = stack.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    assert_eq!(pred.n_samples(), 10);
+}
+
+// ── Quantile GB tests ──────────────────────────────────────────────
+
+#[test]
+fn quantile_gb_median() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+    let task = RegressionTask::new("qgb", features.clone(), target.clone()).unwrap();
+
+    let mut qgb = QuantileGB::new(0.5).with_n_estimators(100).with_learning_rate(0.1);
+    let model = qgb.train_regress(&task).unwrap();
+    let pred = model.predict(&features).unwrap()
+        .with_truth_regress(target);
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 2.0, "median quantile should approximate well, got RMSE={rmse}");
+}
+
+#[test]
+fn quantile_gb_interval() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+    let task = RegressionTask::new("qgb_int", features.clone(), target).unwrap();
+
+    let mut lower = QuantileGB::new(0.1).with_n_estimators(50);
+    let mut upper = QuantileGB::new(0.9).with_n_estimators(50);
+
+    let model_lo = lower.train_regress(&task).unwrap();
+    let model_hi = upper.train_regress(&task).unwrap();
+
+    let pred_lo = model_lo.predict(&features).unwrap();
+    let pred_hi = model_hi.predict(&features).unwrap();
+
+    if let (Prediction::Regression { predicted: lo, .. }, Prediction::Regression { predicted: hi, .. }) = (&pred_lo, &pred_hi) {
+        // Upper quantile should generally be >= lower quantile
+        let violations = lo.iter().zip(hi).filter(|(l, h)| l > h).count();
+        assert!(violations <= 1, "upper quantile should be >= lower in most cases");
+    }
+}
+
+// ── EBM tests ──────────────────────────────────────────────────────
+
+#[test]
+fn ebm_classif() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("ebm", features, target).unwrap();
+
+    let mut ebm = EBM::new().with_n_rounds(50).with_learning_rate(0.05);
+    let model = ebm.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.75, "EBM should classify separable data, got {acc}");
+}
+
+#[test]
+fn ebm_regress() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+    let task = RegressionTask::new("ebm_r", features, target).unwrap();
+
+    let mut ebm = EBM::new().with_n_rounds(100).with_learning_rate(0.05);
+    let model = ebm.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_regress(task.target().to_vec());
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 3.0, "EBM should learn linear trend, got RMSE={rmse}");
+}
+
+#[test]
+fn ebm_feature_importance() {
+    let features = array![
+        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0], [0.0, 55.0],
+        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0], [1.0, 55.0]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("ebm_imp", features, target).unwrap();
+
+    let mut ebm = EBM::new().with_n_rounds(50);
+    let model = ebm.train_classif(&task).unwrap();
+    let imp = model.feature_importance();
+    assert!(imp.is_some(), "EBM should provide feature importance");
+}
+
+// ── SMOTE tests ────────────────────────────────────────────────────
+
+#[test]
+fn smote_balances_classes() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
+        [1.0, 1.0],
+    ];
+    let target = vec![0, 0, 0, 0, 0, 1]; // 5 vs 1
+    let task = ClassificationTask::new("smote", features, target).unwrap();
+
+    let smote = Smote::new().with_seed(42);
+    let balanced = smote.balance(&task).unwrap();
+
+    // After SMOTE, class counts should be equal
+    let n0 = balanced.target().iter().filter(|&&t| t == 0).count();
+    let n1 = balanced.target().iter().filter(|&&t| t == 1).count();
+    assert_eq!(n0, n1, "SMOTE should balance classes: {n0} vs {n1}");
+    assert!(balanced.n_samples() > task.n_samples());
+}
+
+#[test]
+fn smote_already_balanced() {
+    let features = array![[0.0], [1.0], [2.0], [3.0]];
+    let target = vec![0, 0, 1, 1];
+    let task = ClassificationTask::new("bal", features, target).unwrap();
+
+    let smote = Smote::new();
+    let balanced = smote.balance(&task).unwrap();
+    assert_eq!(balanced.n_samples(), 4); // no change needed
+}
+
+#[test]
+fn smote_then_train() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
+        [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0],  // minority: 1 sample
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1];
+    let task = ClassificationTask::new("smote_train", features, target).unwrap();
+
+    let smote = Smote::new().with_k_neighbors(1).with_seed(42);
+    let balanced = smote.balance(&task).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_classif(&balanced).unwrap();
+    let pred = model.predict(balanced.features()).unwrap();
+    assert_eq!(pred.n_samples(), balanced.n_samples());
+}

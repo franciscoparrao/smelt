@@ -1,0 +1,203 @@
+//! Extra Trees (Extremely Randomized Trees): ensemble with random thresholds and no bootstrap.
+
+use ndarray::Array2;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+use rayon::prelude::*;
+use serde::{Serialize, Deserialize};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::learner::{Learner, TrainedModel};
+use crate::prediction::Prediction;
+use crate::Result;
+use super::{Node, LeafValue, TreeBuilder};
+
+/// Extremely Randomized Trees learner.
+///
+/// Like Random Forest but with two key differences:
+/// - No bootstrap sampling (uses all training data)
+/// - Random split thresholds instead of optimal ones
+///
+/// Often faster than RF and can achieve better generalization.
+///
+/// # Examples
+///
+/// ```
+/// use smelt_ml::prelude::*;
+/// use ndarray::array;
+///
+/// let features = array![[0.0, 0.0], [0.1, 0.1], [1.0, 1.0], [1.1, 0.9]];
+/// let target = vec![0, 0, 1, 1];
+/// let task = ClassificationTask::new("et_demo", features, target).unwrap();
+///
+/// let mut et = ExtraTrees::new().with_n_estimators(10).with_seed(42);
+/// let model = et.train_classif(&task).unwrap();
+/// ```
+pub struct ExtraTrees {
+    n_estimators: usize,
+    max_depth: Option<usize>,
+    min_samples_split: usize,
+    min_samples_leaf: usize,
+    max_features_fraction: f64,
+    seed: u64,
+}
+
+impl Default for ExtraTrees {
+    fn default() -> Self {
+        Self {
+            n_estimators: 100,
+            max_depth: None,
+            min_samples_split: 2,
+            min_samples_leaf: 1,
+            max_features_fraction: 0.0, // sqrt heuristic
+            seed: 42,
+        }
+    }
+}
+
+impl ExtraTrees {
+    pub fn new() -> Self { Self::default() }
+    pub fn with_n_estimators(mut self, n: usize) -> Self { self.n_estimators = n; self }
+    pub fn with_max_depth(mut self, d: usize) -> Self { self.max_depth = Some(d); self }
+    pub fn with_min_samples_split(mut self, n: usize) -> Self { self.min_samples_split = n; self }
+    pub fn with_min_samples_leaf(mut self, n: usize) -> Self { self.min_samples_leaf = n; self }
+    pub fn with_max_features_fraction(mut self, f: f64) -> Self { self.max_features_fraction = f; self }
+    pub fn with_seed(mut self, seed: u64) -> Self { self.seed = seed; self }
+
+    fn max_features_count(&self, n_features: usize) -> usize {
+        if self.max_features_fraction <= 0.0 {
+            (n_features as f64).sqrt().ceil() as usize
+        } else {
+            (n_features as f64 * self.max_features_fraction).ceil().max(1.0) as usize
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TrainedExtraTrees {
+    pub(crate) trees: Vec<Node>,
+    pub(crate) feature_names: Vec<String>,
+    pub(crate) feature_importances: Vec<f64>,
+    pub(crate) n_classes: Option<usize>,
+    pub(crate) is_classifier: bool,
+}
+
+impl TrainedModel for TrainedExtraTrees {
+    fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        if self.is_classifier {
+            let n_classes = self.n_classes.unwrap();
+            let n_trees = self.trees.len() as f64;
+            let mut predicted = Vec::with_capacity(features.nrows());
+            let mut probabilities = Vec::with_capacity(features.nrows());
+
+            for row in features.rows() {
+                let mut avg_probs = vec![0.0; n_classes];
+                for tree in &self.trees {
+                    if let LeafValue::Class(_, probs) = tree.predict_one(row) {
+                        for (j, p) in probs.iter().enumerate() {
+                            avg_probs[j] += p;
+                        }
+                    }
+                }
+                for p in &mut avg_probs { *p /= n_trees; }
+                let pred_class = avg_probs.iter().enumerate()
+                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                    .unwrap().0;
+                predicted.push(pred_class);
+                probabilities.push(avg_probs);
+            }
+
+            Ok(Prediction::Classification { predicted, truth: None, probabilities: Some(probabilities) })
+        } else {
+            let n_trees = self.trees.len() as f64;
+            let predicted: Vec<f64> = features.rows().into_iter()
+                .map(|row| {
+                    self.trees.iter()
+                        .map(|t| match t.predict_one(row) { LeafValue::Value(v) => *v, _ => unreachable!() })
+                        .sum::<f64>() / n_trees
+                })
+                .collect();
+            Ok(Prediction::regression(predicted))
+        }
+    }
+
+    fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
+        let total: f64 = self.feature_importances.iter().sum();
+        if total == 0.0 { return None; }
+        Some(self.feature_names.iter().zip(&self.feature_importances)
+            .map(|(name, &imp)| (name.clone(), imp / total)).collect())
+    }
+}
+
+impl Learner for ExtraTrees {
+    fn id(&self) -> &str { "extra_trees" }
+
+    fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        let features = task.features();
+        let target = task.target();
+        let n_samples = task.n_samples();
+        let n_features = task.n_features();
+        let n_classes = task.n_classes();
+        let max_feat = self.max_features_count(n_features);
+        // No bootstrap — use all samples
+        let indices: Vec<usize> = (0..n_samples).collect();
+
+        let results: Vec<(Node, Vec<f64>)> = (0..self.n_estimators)
+            .into_par_iter()
+            .map(|i| {
+                let mut rng = StdRng::seed_from_u64(self.seed.wrapping_add(i as u64));
+                let mut builder = TreeBuilder::new(
+                    self.max_depth, self.min_samples_split, self.min_samples_leaf,
+                    Some(max_feat), n_features,
+                ).with_random_splits(true);
+                let root = builder.build_classifier(&features.view(), target, &indices, n_classes, 0, &mut rng);
+                (root, builder.feature_importances)
+            })
+            .collect();
+
+        let mut total_imp = vec![0.0; n_features];
+        let mut trees = Vec::with_capacity(self.n_estimators);
+        for (root, imp) in results {
+            for (j, v) in imp.iter().enumerate() { total_imp[j] += v; }
+            trees.push(root);
+        }
+
+        Ok(Box::new(TrainedExtraTrees {
+            trees, feature_names: task.feature_names().to_vec(),
+            feature_importances: total_imp, n_classes: Some(n_classes), is_classifier: true,
+        }))
+    }
+
+    fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        let features = task.features();
+        let target = task.target();
+        let n_samples = task.n_samples();
+        let n_features = task.n_features();
+        let max_feat = self.max_features_count(n_features);
+        let indices: Vec<usize> = (0..n_samples).collect();
+
+        let results: Vec<(Node, Vec<f64>)> = (0..self.n_estimators)
+            .into_par_iter()
+            .map(|i| {
+                let mut rng = StdRng::seed_from_u64(self.seed.wrapping_add(i as u64));
+                let mut builder = TreeBuilder::new(
+                    self.max_depth, self.min_samples_split, self.min_samples_leaf,
+                    Some(max_feat), n_features,
+                ).with_random_splits(true);
+                let root = builder.build_regressor(&features.view(), target, &indices, 0, &mut rng);
+                (root, builder.feature_importances)
+            })
+            .collect();
+
+        let mut total_imp = vec![0.0; n_features];
+        let mut trees = Vec::with_capacity(self.n_estimators);
+        for (root, imp) in results {
+            for (j, v) in imp.iter().enumerate() { total_imp[j] += v; }
+            trees.push(root);
+        }
+
+        Ok(Box::new(TrainedExtraTrees {
+            trees, feature_names: task.feature_names().to_vec(),
+            feature_importances: total_imp, n_classes: None, is_classifier: false,
+        }))
+    }
+}

@@ -3,6 +3,7 @@
 pub mod decision_tree;
 pub mod random_forest;
 pub mod gradient_boosting;
+pub mod extra_trees;
 
 use ndarray::{ArrayView1, ArrayView2};
 use rand::Rng;
@@ -53,6 +54,8 @@ pub(crate) struct TreeBuilder {
     /// If Some, only consider these features at each split (for Random Forest).
     /// If None, consider all features.
     max_features: Option<usize>,
+    /// If true, pick a random threshold per feature instead of the optimal one (Extra Trees).
+    random_splits: bool,
     pub(crate) feature_importances: Vec<f64>,
     n_features: usize,
 }
@@ -70,9 +73,15 @@ impl TreeBuilder {
             min_samples_split,
             min_samples_leaf,
             max_features,
+            random_splits: false,
             feature_importances: vec![0.0; n_features],
             n_features,
         }
+    }
+
+    pub(crate) fn with_random_splits(mut self, random: bool) -> Self {
+        self.random_splits = random;
+        self
     }
 
     fn candidate_features(&self, rng: &mut impl Rng) -> Vec<usize> {
@@ -101,7 +110,7 @@ impl TreeBuilder {
 
         let candidates = self.candidate_features(rng);
         if let Some((feat, threshold, left_idx, right_idx, gain)) =
-            self.best_split_classif(features, target, indices, n_classes, &candidates)
+            self.best_split_classif(features, target, indices, n_classes, &candidates, rng)
         {
             if left_idx.len() < self.min_samples_leaf
                 || right_idx.len() < self.min_samples_leaf
@@ -141,7 +150,7 @@ impl TreeBuilder {
 
         let candidates = self.candidate_features(rng);
         if let Some((feat, threshold, left_idx, right_idx, gain)) =
-            self.best_split_regress(features, target, indices, &candidates)
+            self.best_split_regress(features, target, indices, &candidates, rng)
         {
             if left_idx.len() < self.min_samples_leaf
                 || right_idx.len() < self.min_samples_leaf
@@ -171,6 +180,7 @@ impl TreeBuilder {
         indices: &[usize],
         n_classes: usize,
         candidate_features: &[usize],
+        rng: &mut impl Rng,
     ) -> Option<(usize, f64, Vec<usize>, Vec<usize>, f64)> {
         let parent_gini = gini(target, indices, n_classes);
         let n = indices.len() as f64;
@@ -184,13 +194,26 @@ impl TreeBuilder {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
-            for i in 1..sorted.len() {
-                let prev_val = features[[sorted[i - 1], feat]];
-                let curr_val = features[[sorted[i], feat]];
-                if (curr_val - prev_val).abs() < f64::EPSILON {
+            let split_points: Vec<usize> = if self.random_splits {
+                // Extra Trees: one random threshold per feature
+                let min_val = features[[sorted[0], feat]];
+                let max_val = features[[sorted[sorted.len() - 1], feat]];
+                if (max_val - min_val).abs() < f64::EPSILON {
                     continue;
                 }
+                let threshold = rng.random_range(min_val..max_val);
+                match sorted.iter().position(|&idx| features[[idx, feat]] > threshold) {
+                    Some(pos) if pos > 0 => vec![pos],
+                    _ => continue,
+                }
+            } else {
+                // Standard: all valid split points
+                (1..sorted.len())
+                    .filter(|&i| (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs() >= f64::EPSILON)
+                    .collect()
+            };
 
+            for i in split_points {
                 let left_idx = &sorted[..i];
                 let right_idx = &sorted[i..];
 
@@ -200,7 +223,7 @@ impl TreeBuilder {
 
                 if gain > best_gain {
                     best_gain = gain;
-                    let threshold = (prev_val + curr_val) / 2.0;
+                    let threshold = (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
                     best = Some((feat, threshold, left_idx.to_vec(), right_idx.to_vec(), gain));
                 }
             }
@@ -215,6 +238,7 @@ impl TreeBuilder {
         target: &[f64],
         indices: &[usize],
         candidate_features: &[usize],
+        rng: &mut impl Rng,
     ) -> Option<(usize, f64, Vec<usize>, Vec<usize>, f64)> {
         let parent_mse = mse(target, indices);
         let n = indices.len() as f64;
@@ -228,13 +252,24 @@ impl TreeBuilder {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
-            for i in 1..sorted.len() {
-                let prev_val = features[[sorted[i - 1], feat]];
-                let curr_val = features[[sorted[i], feat]];
-                if (curr_val - prev_val).abs() < f64::EPSILON {
+            let split_points: Vec<usize> = if self.random_splits {
+                let min_val = features[[sorted[0], feat]];
+                let max_val = features[[sorted[sorted.len() - 1], feat]];
+                if (max_val - min_val).abs() < f64::EPSILON {
                     continue;
                 }
+                let threshold = rng.random_range(min_val..max_val);
+                match sorted.iter().position(|&idx| features[[idx, feat]] > threshold) {
+                    Some(pos) if pos > 0 => vec![pos],
+                    _ => continue,
+                }
+            } else {
+                (1..sorted.len())
+                    .filter(|&i| (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs() >= f64::EPSILON)
+                    .collect()
+            };
 
+            for i in split_points {
                 let left_idx = &sorted[..i];
                 let right_idx = &sorted[i..];
 
@@ -244,7 +279,7 @@ impl TreeBuilder {
 
                 if gain > best_gain {
                     best_gain = gain;
-                    let threshold = (prev_val + curr_val) / 2.0;
+                    let threshold = (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
                     best = Some((feat, threshold, left_idx.to_vec(), right_idx.to_vec(), gain));
                 }
             }

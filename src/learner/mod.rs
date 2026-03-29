@@ -6,6 +6,14 @@ pub mod tree;
 pub mod knn;
 pub mod linear_regression;
 pub mod logistic_regression;
+pub mod regularized;
+pub mod naive_bayes;
+pub mod adaboost;
+pub mod svm;
+pub mod xgboost;
+pub mod stacking;
+pub mod quantile;
+pub mod ebm;
 pub mod bagging;
 
 use ndarray::Array2;
@@ -16,9 +24,18 @@ use crate::Result;
 pub use tree::decision_tree::DecisionTree;
 pub use tree::random_forest::RandomForest;
 pub use tree::gradient_boosting::GradientBoosting;
+pub use tree::extra_trees::ExtraTrees;
 pub use knn::KNearestNeighbors;
 pub use linear_regression::LinearRegression;
 pub use logistic_regression::LogisticRegression;
+pub use regularized::{Ridge, Lasso, ElasticNet};
+pub use naive_bayes::GaussianNB;
+pub use adaboost::AdaBoost;
+pub use svm::LinearSVM;
+pub use xgboost::XGBoost;
+pub use stacking::Stacking;
+pub use quantile::QuantileGB;
+pub use ebm::EBM;
 pub use bagging::Bagging;
 
 /// Core trait for classification learners.
