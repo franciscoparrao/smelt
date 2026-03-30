@@ -2,9 +2,11 @@
 
 pub mod grid_search;
 pub mod random_search;
+pub mod bayesian;
 
 pub use grid_search::GridSearch;
 pub use random_search::RandomSearch;
+pub use bayesian::BayesianOptimizer;
 
 use std::collections::HashMap;
 

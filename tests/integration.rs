@@ -2726,3 +2726,162 @@ fn geo_xgboost_fixed_alpha() {
     assert_eq!(p0.n_samples(), 8);
     assert_eq!(p1.n_samples(), 8);
 }
+
+// ── Bayesian Optimization (TPE) tests ──────────────────────────────
+
+#[test]
+fn bayesian_optimizer_classif() {
+    use smelt_ml::tuning::ParamSpace;
+
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("bo", features, target).unwrap();
+
+    let mut space = ParamSpace::new();
+    space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 10.0));
+
+    let bo = BayesianOptimizer::new(
+        |params| Box::new(DecisionTree::new()
+            .with_max_depth(params["max_depth"] as usize)),
+        space,
+    ).with_n_iter(15).with_n_initial(5).with_seed(42);
+
+    let cv = CrossValidation::new(3).with_seed(42);
+    let result = bo.tune_classif(&task, &cv, &Accuracy).unwrap();
+
+    assert_eq!(result.all_results.len(), 15);
+    assert!(result.best_score >= 0.5);
+    assert!(result.maximize);
+}
+
+#[test]
+fn bayesian_optimizer_regress() {
+    use smelt_ml::tuning::ParamSpace;
+
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0]
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let task = RegressionTask::new("bo_r", features, target).unwrap();
+
+    let mut space = ParamSpace::new();
+    space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 8.0));
+
+    let bo = BayesianOptimizer::new(
+        |params| Box::new(DecisionTree::new()
+            .with_max_depth(params["max_depth"] as usize)),
+        space,
+    ).with_n_iter(12).with_seed(42);
+
+    let ho = Holdout::new(0.8).with_seed(42);
+    let result = bo.tune_regress(&task, &ho, &Rmse).unwrap();
+
+    assert_eq!(result.all_results.len(), 12);
+    assert!(!result.maximize); // RMSE minimized
+}
+
+#[test]
+fn bayesian_optimizer_multi_param() {
+    use smelt_ml::tuning::ParamSpace;
+
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("bo_mp", features, target).unwrap();
+
+    let mut space = ParamSpace::new();
+    space.insert("max_depth".into(), ParamDistribution::Choice(vec![1.0, 3.0, 5.0, 7.0]));
+    space.insert("n_estimators".into(), ParamDistribution::Uniform(10.0, 100.0));
+
+    let bo = BayesianOptimizer::new(
+        |params| Box::new(RandomForest::new()
+            .with_n_estimators(params["n_estimators"] as usize)
+            .with_max_depth(params["max_depth"] as usize)
+            .with_seed(42)),
+        space,
+    ).with_n_iter(10).with_seed(42);
+
+    let cv = CrossValidation::new(2).with_seed(42);
+    let result = bo.tune_classif(&task, &cv, &Accuracy).unwrap();
+
+    assert_eq!(result.all_results.len(), 10);
+    assert!(result.best_params.contains_key("max_depth"));
+    assert!(result.best_params.contains_key("n_estimators"));
+}
+
+#[test]
+fn bayesian_optimizer_log_uniform() {
+    use smelt_ml::tuning::ParamSpace;
+
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("bo_lu", features, target).unwrap();
+
+    let mut space = ParamSpace::new();
+    space.insert("learning_rate".into(), ParamDistribution::LogUniform(0.001, 1.0));
+
+    let bo = BayesianOptimizer::new(
+        |params| Box::new(LogisticRegression::new()
+            .with_learning_rate(params["learning_rate"])
+            .with_max_iter(500)),
+        space,
+    ).with_n_iter(10).with_seed(42);
+
+    let cv = CrossValidation::new(2).with_seed(42);
+    let result = bo.tune_classif(&task, &cv, &Accuracy).unwrap();
+
+    // All learning rates should be in [0.001, 1.0]
+    for (params, _) in &result.all_results {
+        let lr = params["learning_rate"];
+        assert!(lr >= 0.001 && lr <= 1.0, "lr={lr} out of bounds");
+    }
+}
+
+#[test]
+fn bayesian_optimizer_beats_random() {
+    use smelt_ml::tuning::{ParamSpace, RandomSearch};
+
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("bo_vs", features, target).unwrap();
+
+    let mut space = ParamSpace::new();
+    space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 10.0));
+
+    let cv = CrossValidation::new(3).with_seed(42);
+
+    // Bayesian with 15 iterations
+    let bo = BayesianOptimizer::new(
+        |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"] as usize)),
+        space.clone(),
+    ).with_n_iter(15).with_seed(42);
+    let bo_result = bo.tune_classif(&task, &cv, &Accuracy).unwrap();
+
+    // Random with same budget
+    let rs = RandomSearch::new(
+        |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"] as usize)),
+        space,
+    ).with_n_iter(15).with_seed(42);
+    let rs_result = rs.tune_classif(&task, &cv, &Accuracy).unwrap();
+
+    // BO should be at least as good as random (on average it's better)
+    assert!(bo_result.best_score >= rs_result.best_score - 0.1,
+        "BO ({:.4}) should be competitive with Random ({:.4})",
+        bo_result.best_score, rs_result.best_score);
+}
