@@ -83,6 +83,7 @@ pub struct TrainedExtraTrees {
 
 impl TrainedModel for TrainedExtraTrees {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.feature_names.len())?;
         if self.is_classifier {
             let n_classes = self.n_classes.unwrap();
             let n_trees = self.trees.len() as f64;

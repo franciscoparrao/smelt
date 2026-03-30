@@ -46,6 +46,7 @@ pub mod conformal;
 pub mod data;
 pub mod serialize;
 
+pub mod validate;
 mod error;
 
 pub use error::{SmeltError, Result};

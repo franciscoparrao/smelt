@@ -93,6 +93,7 @@ pub struct TrainedLinearSVM {
 
 impl TrainedModel for TrainedLinearSVM {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.feature_names.len())?;
         let p = features.ncols();
         let mut predicted = Vec::with_capacity(features.nrows());
         let mut probabilities = Vec::with_capacity(features.nrows());

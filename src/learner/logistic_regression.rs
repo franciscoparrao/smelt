@@ -117,21 +117,32 @@ pub struct TrainedLogisticRegression {
     pub(crate) classifiers: Vec<Array1<f64>>,
     pub(crate) n_classes: usize,
     pub(crate) feature_names: Vec<String>,
+    /// Internal scaling parameters (mean, std per feature). Applied automatically.
+    pub(crate) scale_means: Vec<f64>,
+    pub(crate) scale_stds: Vec<f64>,
+}
+
+impl TrainedLogisticRegression {
+    /// Apply internal scaling to a row.
+    #[inline]
+    fn scale_value(&self, j: usize, val: f64) -> f64 {
+        (val - self.scale_means[j]) / self.scale_stds[j]
+    }
 }
 
 impl TrainedModel for TrainedLogisticRegression {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.feature_names.len())?;
         let p = features.ncols();
         let mut predicted = Vec::with_capacity(features.nrows());
         let mut probabilities = Vec::with_capacity(features.nrows());
 
         for row in features.rows() {
             if self.n_classes == 2 {
-                // Binary: single classifier
                 let w = &self.classifiers[0];
                 let mut z = w[p]; // bias
                 for j in 0..p {
-                    z += row[j] * w[j];
+                    z += self.scale_value(j, row[j]) * w[j];
                 }
                 let prob = sigmoid(z);
                 predicted.push(if prob >= 0.5 { 1 } else { 0 });
@@ -142,7 +153,7 @@ impl TrainedModel for TrainedLogisticRegression {
                     .map(|w| {
                         let mut z = w[p];
                         for j in 0..p {
-                            z += row[j] * w[j];
+                            z += self.scale_value(j, row[j]) * w[j];
                         }
                         sigmoid(z)
                     })
@@ -203,19 +214,38 @@ impl Learner for LogisticRegression {
         let x = task.features();
         let target = task.target();
         let n_classes = task.n_classes();
+        let n_features = task.n_features();
+        let n_samples = task.n_samples() as f64;
+
+        // Auto-scale features (standardization)
+        let mut means = vec![0.0; n_features];
+        let mut stds = vec![0.0; n_features];
+        for j in 0..n_features {
+            let col = x.column(j);
+            let mean = col.sum() / n_samples;
+            let var = col.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n_samples;
+            means[j] = mean;
+            stds[j] = if var > 0.0 { var.sqrt() } else { 1.0 };
+        }
+
+        // Create scaled feature matrix
+        let mut x_scaled = x.clone();
+        for i in 0..x.nrows() {
+            for j in 0..n_features {
+                x_scaled[[i, j]] = (x[[i, j]] - means[j]) / stds[j];
+            }
+        }
 
         let classifiers = if n_classes == 2 {
-            // Binary: train one classifier for class 1
             let y_binary: Vec<f64> = target.iter().map(|&t| if t == 1 { 1.0 } else { 0.0 }).collect();
-            vec![train_binary(x, &y_binary, self.learning_rate, self.max_iter, self.tol)]
+            vec![train_binary(&x_scaled, &y_binary, self.learning_rate, self.max_iter, self.tol)]
         } else {
-            // OVR: one classifier per class
             (0..n_classes)
                 .map(|c| {
                     let y_binary: Vec<f64> = target.iter()
                         .map(|&t| if t == c { 1.0 } else { 0.0 })
                         .collect();
-                    train_binary(x, &y_binary, self.learning_rate, self.max_iter, self.tol)
+                    train_binary(&x_scaled, &y_binary, self.learning_rate, self.max_iter, self.tol)
                 })
                 .collect()
         };
@@ -224,6 +254,8 @@ impl Learner for LogisticRegression {
             classifiers,
             n_classes,
             feature_names: task.feature_names().to_vec(),
+            scale_means: means,
+            scale_stds: stds,
         }))
     }
 

@@ -63,6 +63,7 @@ pub struct TrainedKnnClassifier {
 
 impl TrainedModel for TrainedKnnClassifier {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.features.ncols())?;
         let k = self.k.min(self.features.nrows());
         let mut predicted = Vec::with_capacity(features.nrows());
         let mut probabilities = Vec::with_capacity(features.nrows());
@@ -98,6 +99,7 @@ pub struct TrainedKnnRegressor {
 
 impl TrainedModel for TrainedKnnRegressor {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.features.ncols())?;
         let k = self.k.min(self.features.nrows());
         let predicted: Vec<f64> = features.rows().into_iter()
             .map(|row| {

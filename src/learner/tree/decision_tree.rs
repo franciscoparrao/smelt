@@ -75,6 +75,7 @@ pub struct TrainedDecisionTree {
 
 impl TrainedModel for TrainedDecisionTree {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.feature_names.len())?;
         if self.is_classifier {
             let mut predicted = Vec::with_capacity(features.nrows());
             let mut probabilities = Vec::with_capacity(features.nrows());

@@ -51,6 +51,7 @@ fn gaussian_log_pdf(x: f64, mean: f64, var: f64) -> f64 {
 
 impl TrainedModel for TrainedGaussianNB {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.feature_names.len())?;
         let mut predicted = Vec::with_capacity(features.nrows());
         let mut probabilities = Vec::with_capacity(features.nrows());
 

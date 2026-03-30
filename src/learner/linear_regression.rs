@@ -102,6 +102,7 @@ pub struct TrainedLinearRegression {
 
 impl TrainedModel for TrainedLinearRegression {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.feature_names.len())?;
         let n_features = features.ncols();
         let predicted: Vec<f64> = features.rows().into_iter()
             .map(|row| {

@@ -75,6 +75,7 @@ struct TrainedEBM {
 
 impl TrainedModel for TrainedEBM {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.feature_names.len())?;
         let n_samples = features.nrows();
         let n_features = self.shape_trees.len();
 

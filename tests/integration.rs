@@ -66,6 +66,53 @@ fn task_wrong_feature_names_count() {
     assert!(matches!(err, SmeltError::DimensionMismatch { .. }));
 }
 
+// ── Validation tests ────────────────────────────────────────────────
+
+#[test]
+fn predict_wrong_n_features_errors() {
+    let features = array![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]];
+    let target = vec![0, 0, 1, 1];
+    let task = ClassificationTask::new("val", features, target).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_classif(&task).unwrap();
+
+    // Predict with wrong number of features
+    let bad_features = array![[1.0]]; // 1 feature instead of 2
+    let err = model.predict(&bad_features);
+    assert!(err.is_err(), "predicting with wrong n_features should fail");
+}
+
+#[test]
+fn predict_wrong_n_features_regression() {
+    let features = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0], [9.0, 10.0]];
+    let target = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+    let task = RegressionTask::new("val_r", features, target).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_regress(&task).unwrap();
+
+    let bad = array![[1.0, 2.0, 3.0]]; // 3 features instead of 2
+    assert!(model.predict(&bad).is_err());
+}
+
+#[test]
+fn task_zero_columns_rejected() {
+    let features = Array2::<f64>::zeros((5, 0));
+    let target = vec![0, 1, 0, 1, 0];
+    assert!(ClassificationTask::new("zero", features, target).is_err());
+}
+
+#[test]
+fn validate_check_no_nan() {
+    use smelt_ml::validate::check_no_nan;
+    let clean = array![[1.0, 2.0], [3.0, 4.0]];
+    assert!(check_no_nan(&clean).is_ok());
+
+    let dirty = array![[1.0, f64::NAN], [3.0, 4.0]];
+    assert!(check_no_nan(&dirty).is_err());
+}
+
 // ── Prediction tests ────────────────────────────────────────────────
 
 #[test]

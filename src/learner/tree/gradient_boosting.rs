@@ -138,6 +138,7 @@ pub struct TrainedGradientBoosting {
 
 impl TrainedModel for TrainedGradientBoosting {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.feature_names.len())?;
         match &self.mode {
             GBMode::Regression => {
                 let predicted: Vec<f64> = features.rows().into_iter()

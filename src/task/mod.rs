@@ -4,6 +4,7 @@
 
 use ndarray::Array2;
 use crate::{SmeltError, Result};
+// validate module used by learner predict methods
 
 /// Core trait for all task types.
 pub trait Task {
@@ -43,6 +44,9 @@ impl ClassificationTask {
                 expected: features.nrows(),
                 got: target.len(),
             });
+        }
+        if features.ncols() == 0 {
+            return Err(SmeltError::InvalidParameter("features must have at least 1 column".into()));
         }
         let n_features = features.ncols();
         let n_classes = target.iter().copied().max().unwrap_or(0) + 1;
@@ -105,6 +109,9 @@ impl RegressionTask {
                 expected: features.nrows(),
                 got: target.len(),
             });
+        }
+        if features.ncols() == 0 {
+            return Err(SmeltError::InvalidParameter("features must have at least 1 column".into()));
         }
         let n_features = features.ncols();
         Ok(Self {

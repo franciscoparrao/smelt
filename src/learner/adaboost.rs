@@ -115,6 +115,7 @@ fn train_stump(
 
 impl TrainedModel for TrainedAdaBoost {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.feature_names.len())?;
         let mut predicted = Vec::with_capacity(features.nrows());
         let mut probabilities = Vec::with_capacity(features.nrows());
 
