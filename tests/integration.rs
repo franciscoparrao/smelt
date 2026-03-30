@@ -2602,3 +2602,127 @@ fn smote_then_train() {
     let pred = model.predict(balanced.features()).unwrap();
     assert_eq!(pred.n_samples(), balanced.n_samples());
 }
+
+// ── Geographical-XGBoost tests ─────────────────────────────────────
+
+#[test]
+fn geo_xgboost_basic_regression() {
+    // Spatially varying relationship: target depends on position
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0]
+    ];
+    // Target varies spatially: low values on left, high on right
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let coords: Vec<(f64, f64)> = (0..10).map(|i| (i as f64, 0.0)).collect();
+    let task = RegressionTask::new("geo", features.clone(), target.clone()).unwrap();
+
+    let mut gxgb = GeoXGBoost::new(coords)
+        .with_bandwidth(4)
+        .with_n_estimators(50)
+        .with_max_depth(3);
+    let model = gxgb.train_regress(&task).unwrap();
+    let pred = model.predict(&features).unwrap()
+        .with_truth_regress(target);
+
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 5.0, "G-XGBoost should learn spatial pattern, got RMSE={rmse}");
+}
+
+#[test]
+fn geo_xgboost_spatial_heterogeneity() {
+    // Two spatial clusters with different relationships
+    // Left cluster: y = x, Right cluster: y = -x + 20
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],       // left cluster
+        [1.0], [2.0], [3.0], [4.0], [5.0]         // right cluster (same x, different y)
+    ];
+    let target = vec![
+        1.0, 2.0, 3.0, 4.0, 5.0,     // y = x
+        19.0, 18.0, 17.0, 16.0, 15.0  // y = -x + 20
+    ];
+    let coords: Vec<(f64, f64)> = vec![
+        (0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0),
+        (100.0, 0.0), (101.0, 0.0), (102.0, 0.0), (103.0, 0.0), (104.0, 0.0),
+    ];
+    let task = RegressionTask::new("hetero", features.clone(), target.clone()).unwrap();
+
+    // G-XGBoost should handle this better than global XGBoost
+    let mut gxgb = GeoXGBoost::new(coords)
+        .with_bandwidth(4)
+        .with_n_estimators(50);
+    let model = gxgb.train_regress(&task).unwrap();
+    let pred = model.predict(&features).unwrap()
+        .with_truth_regress(target.clone());
+    let gxgb_rmse = Rmse.score(&pred).unwrap();
+
+    // Compare with global XGBoost
+    let mut xgb = XGBoost::new().with_n_estimators(50);
+    let global_model = xgb.train_regress(&task).unwrap();
+    let global_pred = global_model.predict(&features).unwrap()
+        .with_truth_regress(target);
+    let global_rmse = Rmse.score(&global_pred).unwrap();
+
+    // G-XGBoost should perform at least as well as global
+    assert!(gxgb_rmse <= global_rmse + 1.0,
+        "G-XGBoost ({gxgb_rmse:.2}) should be competitive with global XGBoost ({global_rmse:.2})");
+}
+
+#[test]
+fn geo_xgboost_feature_importance() {
+    let features = array![
+        [0.0, 99.0], [1.0, 42.0], [2.0, 13.0], [3.0, 77.0],
+        [4.0, 99.0], [5.0, 42.0], [6.0, 13.0], [7.0, 77.0]
+    ];
+    let target = vec![0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0];
+    let coords: Vec<(f64, f64)> = (0..8).map(|i| (i as f64, 0.0)).collect();
+    let task = RegressionTask::new("geo_imp", features, target).unwrap();
+
+    let mut gxgb = GeoXGBoost::new(coords)
+        .with_bandwidth(4)
+        .with_n_estimators(30);
+    let model = gxgb.train_regress(&task).unwrap();
+    let imp = model.feature_importance();
+    assert!(imp.is_some(), "G-XGBoost should provide feature importance");
+}
+
+#[test]
+fn geo_xgboost_coords_mismatch_error() {
+    let features = array![[1.0], [2.0], [3.0]];
+    let target = vec![1.0, 2.0, 3.0];
+    let coords = vec![(0.0, 0.0), (1.0, 0.0)]; // only 2 coords for 3 samples
+    let task = RegressionTask::new("bad", features, target).unwrap();
+
+    let mut gxgb = GeoXGBoost::new(coords);
+    assert!(gxgb.train_regress(&task).is_err());
+}
+
+#[test]
+fn geo_xgboost_rejects_classification() {
+    let features = array![[1.0], [2.0]];
+    let target = vec![0, 1];
+    let task = ClassificationTask::new("bad", features, target).unwrap();
+    let mut gxgb = GeoXGBoost::new(vec![(0.0, 0.0), (1.0, 0.0)]);
+    assert!(gxgb.train_classif(&task).is_err());
+}
+
+#[test]
+fn geo_xgboost_fixed_alpha() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+    let coords: Vec<(f64, f64)> = (0..8).map(|i| (i as f64, 0.0)).collect();
+    let task = RegressionTask::new("alpha", features.clone(), target.clone()).unwrap();
+
+    // alpha=0 should be pure global, alpha=1 pure local
+    let mut g0 = GeoXGBoost::new(coords.clone()).with_alpha(0.0).with_n_estimators(30).with_bandwidth(3);
+    let m0 = g0.train_regress(&task).unwrap();
+    let p0 = m0.predict(&features).unwrap();
+
+    let mut g1 = GeoXGBoost::new(coords).with_alpha(1.0).with_n_estimators(30).with_bandwidth(3);
+    let m1 = g1.train_regress(&task).unwrap();
+    let p1 = m1.predict(&features).unwrap();
+
+    // Both should produce valid predictions
+    assert_eq!(p0.n_samples(), 8);
+    assert_eq!(p1.n_samples(), 8);
+}
