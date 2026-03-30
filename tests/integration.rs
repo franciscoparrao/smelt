@@ -2885,3 +2885,121 @@ fn bayesian_optimizer_beats_random() {
         "BO ({:.4}) should be competitive with Random ({:.4})",
         bo_result.best_score, rs_result.best_score);
 }
+
+// ── Oblique Tree / Forest tests ────────────────────────────────────
+
+#[test]
+fn oblique_tree_classif_separable() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("obl", features, target).unwrap();
+
+    let mut tree = ObliqueTree::new().with_seed(42).with_n_projections(20);
+    let model = tree.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.75, "ObliqueTree should classify separable data, got {acc}");
+}
+
+#[test]
+fn oblique_tree_xor_pattern() {
+    // XOR: axis-aligned trees struggle, oblique should do better
+    let features = array![
+        [0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0],
+        [0.1, 0.1], [0.1, 0.9], [0.9, 0.1], [0.9, 0.9]
+    ];
+    let target = vec![0, 1, 1, 0, 0, 1, 1, 0]; // XOR
+    let task = ClassificationTask::new("xor", features, target).unwrap();
+
+    let mut tree = ObliqueTree::new().with_seed(42).with_n_projections(30);
+    let model = tree.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.5, "ObliqueTree on XOR should do at least random, got {acc}");
+}
+
+#[test]
+fn oblique_tree_regress() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+    let task = RegressionTask::new("obl_r", features, target).unwrap();
+
+    let mut tree = ObliqueTree::new().with_seed(42);
+    let model = tree.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    assert_eq!(pred.n_samples(), 8);
+}
+
+#[test]
+fn oblique_forest_classif() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("sporf", features, target).unwrap();
+
+    let mut forest = ObliqueForest::new().with_n_estimators(20).with_seed(42);
+    let model = forest.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert_eq!(acc, 1.0, "ObliqueForest should perfectly separate this data");
+}
+
+#[test]
+fn oblique_forest_regress() {
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0],
+        [6.0], [7.0], [8.0], [9.0]
+    ];
+    let target = vec![0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0];
+    let task = RegressionTask::new("sporf_r", features, target).unwrap();
+
+    let mut forest = ObliqueForest::new().with_n_estimators(20).with_seed(42);
+    let model = forest.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_regress(task.target().to_vec());
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 2.0, "ObliqueForest should learn step function, got RMSE={rmse}");
+}
+
+#[test]
+fn oblique_forest_feature_importance() {
+    let features = array![
+        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0], [0.0, 55.0],
+        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0], [1.0, 55.0]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("sporf_imp", features, target).unwrap();
+
+    let mut forest = ObliqueForest::new().with_n_estimators(30).with_seed(42);
+    let model = forest.train_classif(&task).unwrap();
+    let imp = model.feature_importance();
+    assert!(imp.is_some(), "ObliqueForest should provide feature importance");
+}
+
+#[test]
+fn oblique_forest_in_benchmark() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("sporf_bench", features, target).unwrap();
+    let cv = CrossValidation::new(4).with_seed(42);
+
+    let mut forest = ObliqueForest::new().with_n_estimators(10).with_seed(42);
+    let r = benchmark::resample_classif(&mut forest, &task, &cv, &[&Accuracy]).unwrap();
+    assert_eq!(r.learner_id, "oblique_forest");
+    assert_eq!(r.scores.len(), 4);
+}

@@ -54,7 +54,7 @@ pub use error::{SmeltError, Result};
 /// Convenience re-exports for `use smelt_ml::prelude::*`
 pub mod prelude {
     pub use crate::task::{Task, ClassificationTask, RegressionTask};
-    pub use crate::learner::{Learner, DecisionTree, KNearestNeighbors, LinearRegression, LogisticRegression, RandomForest, GradientBoosting, ExtraTrees, GaussianNB, Ridge, Lasso, ElasticNet, AdaBoost, LinearSVM, XGBoost, GeoXGBoost, Stacking, QuantileGB, EBM, Bagging};
+    pub use crate::learner::{Learner, DecisionTree, KNearestNeighbors, LinearRegression, LogisticRegression, RandomForest, GradientBoosting, ExtraTrees, GaussianNB, Ridge, Lasso, ElasticNet, AdaBoost, LinearSVM, XGBoost, GeoXGBoost, ObliqueTree, ObliqueForest, Stacking, QuantileGB, EBM, Bagging};
     pub use crate::prediction::Prediction;
     pub use crate::resample::{Resample, CrossValidation, Holdout, SpatialBlockCV, SpatialBufferCV};
     pub use crate::measure::{Measure, Accuracy, Precision, Recall, F1Score, LogLoss, AucRoc, Rmse, Mae, RSquared, Mape};
