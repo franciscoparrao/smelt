@@ -3241,3 +3241,154 @@ fn filter_mutual_info_regression() {
     // Feature 0 has higher MI with target
     assert_eq!(selected[0], 0);
 }
+
+// ── K-Means tests ──────────────────────────────────────────────────
+
+#[test]
+fn kmeans_two_clusters() {
+    use smelt_ml::cluster::KMeans;
+    let data = array![[0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [5.0, 5.0], [5.1, 4.9], [4.9, 5.1]];
+    let result = KMeans::new(2).fit(&data).unwrap();
+    assert_eq!(result.n_clusters, 2);
+    // First 3 samples should be in one cluster, last 3 in another
+    assert_eq!(result.labels[0], result.labels[1]);
+    assert_eq!(result.labels[3], result.labels[4]);
+    assert_ne!(result.labels[0], result.labels[3]);
+}
+
+#[test]
+fn kmeans_silhouette() {
+    use smelt_ml::cluster::KMeans;
+    let data = array![[0.0, 0.0], [0.1, 0.1], [5.0, 5.0], [5.1, 5.1]];
+    let result = KMeans::new(2).fit(&data).unwrap();
+    let sil = result.silhouette_score(&data);
+    assert!(sil > 0.5, "well-separated clusters should have high silhouette, got {sil}");
+}
+
+// ── DBSCAN tests ───────────────────────────────────────────────────
+
+#[test]
+fn dbscan_finds_clusters() {
+    use smelt_ml::cluster::DBSCAN;
+    let data = array![[0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [5.0, 5.0], [5.1, 5.1]];
+    let result = DBSCAN::new(0.5, 2).fit(&data).unwrap();
+    assert!(result.n_clusters >= 2, "should find at least 2 clusters");
+}
+
+#[test]
+fn dbscan_noise_detection() {
+    use smelt_ml::cluster::DBSCAN;
+    // Outlier at (100, 100)
+    let data = array![[0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [100.0, 100.0]];
+    let result = DBSCAN::new(0.5, 2).fit(&data).unwrap();
+    assert_eq!(result.labels[3], -1, "outlier should be noise (-1)");
+}
+
+// ── PCA tests ──────────────────────────────────────────────────────
+
+#[test]
+fn pca_reduces_dimensions() {
+    let data = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0], [10.0, 11.0, 12.0]];
+    let mut pca = PCA::new(2);
+    let reduced = pca.fit_transform(&data).unwrap();
+    assert_eq!(reduced.ncols(), 2);
+    assert_eq!(reduced.nrows(), 4);
+}
+
+#[test]
+fn pca_in_pipeline() {
+    let features = array![
+        [0.0, 0.0, 0.0], [0.1, 0.1, 0.1], [0.2, 0.0, 0.2], [0.0, 0.2, 0.1],
+        [1.0, 1.0, 1.0], [1.1, 0.9, 1.1], [0.9, 1.1, 0.9], [1.0, 0.9, 1.0]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("pca_pipe", features, target).unwrap();
+
+    let mut pipe = Pipeline::new(
+        vec![Box::new(PCA::new(2))],
+        Box::new(DecisionTree::default()),
+    );
+    let model = pipe.train_classif(&task).unwrap();
+    // predict needs 3 features (original), pipeline transforms internally
+    let test = array![[0.5, 0.5, 0.5]];
+    let pred = model.predict(&test).unwrap();
+    assert_eq!(pred.n_samples(), 1);
+}
+
+// ── RFE tests ──────────────────────────────────────────────────────
+
+#[test]
+fn rfe_selects_features() {
+    let features = array![
+        [0.0, 42.0, 99.0], [0.1, 13.0, 55.0], [0.2, 99.0, 42.0], [0.0, 55.0, 13.0],
+        [1.0, 42.0, 99.0], [1.1, 13.0, 55.0], [1.2, 99.0, 42.0], [1.0, 55.0, 13.0],
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("rfe", features, target).unwrap();
+
+    let mut rfe = RFE::classif(|| Box::new(DecisionTree::default()), 2);
+    let target_f64: Vec<f64> = task.target().iter().map(|&t| t as f64).collect();
+    rfe.fit_supervised(task.features(), &target_f64).unwrap();
+
+    let selected = rfe.selected_indices().unwrap();
+    assert_eq!(selected.len(), 2);
+}
+
+// ── Benchmark Design tests ─────────────────────────────────────────
+
+#[test]
+fn benchmark_design_multi_learner() {
+    use smelt_ml::benchmark_design::benchmark_classif;
+
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("bd", features, target).unwrap();
+
+    let mut learners: Vec<Box<dyn Learner>> = vec![
+        Box::new(DecisionTree::default()),
+        Box::new(KNearestNeighbors::new(3)),
+        Box::new(GaussianNB::new()),
+    ];
+    let cv = CrossValidation::new(2).with_seed(42);
+    let result = benchmark_classif(&mut learners, &[&task], &cv, &[&Accuracy, &F1Score]).unwrap();
+
+    assert_eq!(result.entries.len(), 3); // 3 learners × 1 task
+    for entry in &result.entries {
+        assert_eq!(entry.measure_ids.len(), 2);
+    }
+    // summary() should produce a readable table
+    let summary = result.summary();
+    assert!(summary.contains("decision_tree"));
+}
+
+// ── Hyperband tests ────────────────────────────────────────────────
+
+#[test]
+fn hyperband_classif() {
+    use smelt_ml::tuning::{Hyperband, ParamSpace, ParamDistribution};
+
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("hb", features, target).unwrap();
+
+    let mut space = ParamSpace::new();
+    space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 8.0));
+
+    let hb = Hyperband::new(
+        |params| Box::new(DecisionTree::new()
+            .with_max_depth(params["max_depth"] as usize)),
+        space,
+    ).with_max_folds(4).with_seed(42);
+
+    let result = hb.tune_classif(&task, &Accuracy).unwrap();
+    assert!(result.best_score >= 0.5);
+    assert!(!result.all_results.is_empty());
+}

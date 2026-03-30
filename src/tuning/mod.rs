@@ -3,10 +3,12 @@
 pub mod grid_search;
 pub mod random_search;
 pub mod bayesian;
+pub mod hyperband;
 
 pub use grid_search::GridSearch;
 pub use random_search::RandomSearch;
 pub use bayesian::BayesianOptimizer;
+pub use hyperband::Hyperband;
 
 use std::collections::HashMap;
 

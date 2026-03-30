@@ -6,6 +6,8 @@ pub mod encoder;
 pub mod label_encoder;
 pub mod smote;
 pub mod filter;
+pub mod pca;
+pub mod rfe;
 pub mod pipeline;
 
 use ndarray::Array2;
@@ -17,6 +19,8 @@ pub use encoder::OneHotEncoder;
 pub use label_encoder::LabelEncoder;
 pub use smote::Smote;
 pub use filter::FilterSelector;
+pub use pca::PCA;
+pub use rfe::RFE;
 pub use pipeline::Pipeline;
 
 /// Trait for feature transformers (scalers, encoders, imputers).
