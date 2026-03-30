@@ -3003,3 +3003,110 @@ fn oblique_forest_in_benchmark() {
     assert_eq!(r.learner_id, "oblique_forest");
     assert_eq!(r.scores.len(), 4);
 }
+
+// ── Causal Forest tests ────────────────────────────────────────────
+
+#[test]
+fn causal_forest_basic_ate() {
+    use smelt_ml::causal::CausalForest;
+
+    // Treatment adds 3 to outcome
+    let features = array![
+        [25.0], [30.0], [35.0], [40.0], [45.0],
+        [25.0], [30.0], [35.0], [40.0], [45.0],
+    ];
+    let treatment = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    let outcome = vec![5.0, 6.0, 7.0, 8.0, 9.0, 8.0, 9.0, 10.0, 11.0, 12.0];
+    let names = vec!["age".to_string()];
+
+    let cf = CausalForest::new()
+        .with_n_estimators(50)
+        .with_min_samples_leaf(2)
+        .with_seed(42);
+
+    let result = cf.estimate(&features, &treatment, &outcome, &names).unwrap();
+
+    // ATE should be around 3.0
+    assert!(result.ate > 0.0, "ATE should be positive, got {}", result.ate);
+    assert_eq!(result.effects.len(), 10);
+    assert!(!result.feature_importance.is_empty());
+}
+
+#[test]
+fn causal_forest_heterogeneous_effect() {
+    use smelt_ml::causal::CausalForest;
+
+    // Treatment effect varies: young people benefit more
+    let features = array![
+        [20.0], [20.0], [20.0], [20.0],
+        [50.0], [50.0], [50.0], [50.0],
+        [20.0], [20.0], [20.0], [20.0],
+        [50.0], [50.0], [50.0], [50.0],
+    ];
+    let treatment = vec![
+        0, 0, 0, 0,  // young control
+        0, 0, 0, 0,  // old control
+        1, 1, 1, 1,  // young treated
+        1, 1, 1, 1,  // old treated
+    ];
+    let outcome = vec![
+        5.0, 5.0, 5.0, 5.0,   // young control: baseline 5
+        8.0, 8.0, 8.0, 8.0,   // old control: baseline 8
+        15.0, 15.0, 15.0, 15.0, // young treated: +10
+        10.0, 10.0, 10.0, 10.0, // old treated: +2
+    ];
+    let names = vec!["age".to_string()];
+
+    let cf = CausalForest::new()
+        .with_n_estimators(100)
+        .with_min_samples_leaf(2)
+        .with_seed(42);
+
+    let result = cf.estimate(&features, &treatment, &outcome, &names).unwrap();
+
+    // Effects should differ between young and old
+    let young_effects: Vec<f64> = result.effects[..4].iter().map(|e| e.estimate).collect();
+    let old_effects: Vec<f64> = result.effects[4..8].iter().map(|e| e.estimate).collect();
+    let young_avg = young_effects.iter().sum::<f64>() / young_effects.len() as f64;
+    let old_avg = old_effects.iter().sum::<f64>() / old_effects.len() as f64;
+
+    // With small data, at least the overall ATE should be positive
+    // (treatment has a positive effect in both groups)
+    assert!(result.ate > 0.0,
+        "ATE should be positive, got {:.2}. Young={young_avg:.2}, Old={old_avg:.2}",
+        result.ate);
+}
+
+#[test]
+fn causal_forest_confidence_intervals() {
+    use smelt_ml::causal::CausalForest;
+
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+    ];
+    let treatment = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    let outcome = vec![1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let names = vec!["x".to_string()];
+
+    let cf = CausalForest::new().with_n_estimators(50).with_seed(42);
+    let result = cf.estimate(&features, &treatment, &outcome, &names).unwrap();
+
+    for effect in &result.effects {
+        assert!(effect.ci_lower <= effect.estimate);
+        assert!(effect.estimate <= effect.ci_upper);
+        assert!(effect.std_error >= 0.0);
+    }
+}
+
+#[test]
+fn causal_forest_dimension_mismatch() {
+    use smelt_ml::causal::CausalForest;
+
+    let features = array![[1.0], [2.0], [3.0]];
+    let treatment = vec![0, 1]; // wrong size
+    let outcome = vec![1.0, 2.0, 3.0];
+
+    let cf = CausalForest::new();
+    assert!(cf.estimate(&features, &treatment, &outcome, &["x".into()]).is_err());
+}

@@ -43,6 +43,7 @@ pub mod preprocess;
 pub mod tuning;
 pub mod importance;
 pub mod conformal;
+pub mod causal;
 pub mod data;
 pub mod serialize;
 
