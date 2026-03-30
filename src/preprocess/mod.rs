@@ -5,6 +5,7 @@ pub mod imputer;
 pub mod encoder;
 pub mod label_encoder;
 pub mod smote;
+pub mod filter;
 pub mod pipeline;
 
 use ndarray::Array2;
@@ -15,6 +16,7 @@ pub use imputer::{Imputer, ImputeStrategy};
 pub use encoder::OneHotEncoder;
 pub use label_encoder::LabelEncoder;
 pub use smote::Smote;
+pub use filter::FilterSelector;
 pub use pipeline::Pipeline;
 
 /// Trait for feature transformers (scalers, encoders, imputers).
@@ -31,9 +33,21 @@ pub trait Transformer: Send + Sync {
     /// Apply the learned transformation. Fails if not fitted.
     fn transform(&self, features: &Array2<f64>) -> Result<Array2<f64>>;
 
+    /// Fit with access to target values (for supervised filters like information gain).
+    /// Default: ignores target and delegates to `fit`.
+    fn fit_supervised(&mut self, features: &Array2<f64>, _target: &[f64]) -> Result<()> {
+        self.fit(features)
+    }
+
     /// Convenience: fit on data and immediately transform it.
     fn fit_transform(&mut self, features: &Array2<f64>) -> Result<Array2<f64>> {
         self.fit(features)?;
+        self.transform(features)
+    }
+
+    /// Supervised fit + transform.
+    fn fit_transform_supervised(&mut self, features: &Array2<f64>, target: &[f64]) -> Result<Array2<f64>> {
+        self.fit_supervised(features, target)?;
         self.transform(features)
     }
 

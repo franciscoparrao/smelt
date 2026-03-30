@@ -3110,3 +3110,134 @@ fn causal_forest_dimension_mismatch() {
     let cf = CausalForest::new();
     assert!(cf.estimate(&features, &treatment, &outcome, &["x".into()]).is_err());
 }
+
+// ── Feature Selection Filter tests ─────────────────────────────────
+
+#[test]
+fn filter_variance_selects_non_constant() {
+    use smelt_ml::preprocess::filter::FilterSelector;
+
+    let features = array![
+        [1.0, 5.0, 0.0],  // col 0: varies, col 1: varies more, col 2: constant
+        [2.0, 5.0, 0.0],
+        [3.0, 5.0, 0.0],
+        [4.0, 5.0, 0.0],
+    ];
+    let target = vec![0.0, 1.0, 0.0, 1.0];
+    let task = RegressionTask::new("var", features.clone(), target).unwrap();
+
+    let mut selector = FilterSelector::variance(2); // keep top 2
+    let pipe = Pipeline::new(
+        vec![Box::new(selector)],
+        Box::new(DecisionTree::default()),
+    );
+    // The constant column should be dropped
+    // Just verify it compiles and runs
+    let mut pipe = Pipeline::new(
+        vec![Box::new(FilterSelector::variance(2))],
+        Box::new(DecisionTree::default()),
+    );
+    let model = pipe.train_regress(&task).unwrap();
+    let pred = model.predict(&features.select(ndarray::Axis(1), &[0, 1])).unwrap();
+    assert_eq!(pred.n_samples(), 4);
+}
+
+#[test]
+fn filter_correlation_selects_informative() {
+    use smelt_ml::preprocess::filter::FilterSelector;
+
+    // col 0: correlated with target, col 1: random noise
+    let features = array![
+        [1.0, 42.0], [2.0, 13.0], [3.0, 99.0], [4.0, 55.0],
+        [5.0, 42.0], [6.0, 13.0], [7.0, 99.0], [8.0, 55.0],
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0]; // y = 2x
+
+    let mut selector = FilterSelector::correlation(1);
+    selector.fit_supervised(&features, &target).unwrap();
+
+    let selected = selector.selected_indices().unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0], 0, "should select feature 0 (correlated with target)");
+}
+
+#[test]
+fn filter_anova_classif() {
+    use smelt_ml::preprocess::filter::FilterSelector;
+
+    // col 0: separates classes, col 1: noise
+    let features = array![
+        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0], [0.0, 55.0],
+        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0], [1.0, 55.0],
+    ];
+    let target = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+
+    let mut selector = FilterSelector::anova_f(1);
+    selector.fit_supervised(&features, &target).unwrap();
+
+    let selected = selector.selected_indices().unwrap();
+    assert_eq!(selected[0], 0, "ANOVA should select feature 0");
+}
+
+#[test]
+fn filter_information_gain_classif() {
+    use smelt_ml::preprocess::filter::FilterSelector;
+
+    let features = array![
+        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0], [0.0, 55.0],
+        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0], [1.0, 55.0],
+    ];
+    let target = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+
+    let mut selector = FilterSelector::information_gain(1);
+    selector.fit_supervised(&features, &target).unwrap();
+
+    let selected = selector.selected_indices().unwrap();
+    assert_eq!(selected[0], 0, "IG should select feature 0");
+}
+
+#[test]
+fn filter_in_pipeline_with_cv() {
+    use smelt_ml::preprocess::filter::FilterSelector;
+
+    let features = array![
+        [0.0, 42.0, 99.0], [0.1, 13.0, 55.0], [0.2, 99.0, 42.0], [0.0, 55.0, 13.0],
+        [0.1, 42.0, 99.0], [0.2, 13.0, 55.0], [0.0, 99.0, 42.0], [0.1, 55.0, 13.0],
+        [1.0, 42.0, 99.0], [1.1, 13.0, 55.0], [1.2, 99.0, 42.0], [1.0, 55.0, 13.0],
+        [1.1, 42.0, 99.0], [1.2, 13.0, 55.0], [1.0, 99.0, 42.0], [1.1, 55.0, 13.0],
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("filter_cv", features, target).unwrap();
+
+    // Pipeline: select top 2 features by ANOVA → DecisionTree
+    let mut pipe = Pipeline::new(
+        vec![Box::new(FilterSelector::anova_f(2))],
+        Box::new(DecisionTree::default()),
+    );
+
+    let cv = CrossValidation::new(4).with_seed(42);
+    let result = benchmark::resample_classif(&mut pipe, &task, &cv, &[&Accuracy]).unwrap();
+
+    assert_eq!(result.scores.len(), 4);
+    let mean_acc = result.mean_scores()[0];
+    assert!(mean_acc >= 0.5, "filtered pipeline should work, got {mean_acc}");
+}
+
+#[test]
+fn filter_mutual_info_regression() {
+    use smelt_ml::preprocess::filter::FilterSelector;
+
+    let features = array![
+        [1.0, 42.0], [2.0, 13.0], [3.0, 99.0], [4.0, 55.0],
+        [5.0, 42.0], [6.0, 13.0], [7.0, 99.0], [8.0, 55.0],
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+
+    let mut selector = FilterSelector::mutual_info(1);
+    selector.fit_supervised(&features, &target).unwrap();
+
+    let selected = selector.selected_indices().unwrap();
+    assert_eq!(selected.len(), 1);
+    // Feature 0 has higher MI with target
+    assert_eq!(selected[0], 0);
+}

@@ -59,7 +59,7 @@ pub mod prelude {
     pub use crate::prediction::Prediction;
     pub use crate::resample::{Resample, CrossValidation, Holdout, SpatialBlockCV, SpatialBufferCV};
     pub use crate::measure::{Measure, Accuracy, Precision, Recall, F1Score, LogLoss, AucRoc, Rmse, Mae, RSquared, Mape};
-    pub use crate::preprocess::{Transformer, StandardScaler, MinMaxScaler, Imputer, ImputeStrategy, OneHotEncoder, LabelEncoder, Smote, Pipeline};
+    pub use crate::preprocess::{Transformer, StandardScaler, MinMaxScaler, Imputer, ImputeStrategy, OneHotEncoder, LabelEncoder, Smote, FilterSelector, Pipeline};
     pub use crate::tuning::{GridSearch, RandomSearch, BayesianOptimizer, TuneResult, ParamDistribution};
     pub use crate::importance::{FeatureImportance, permutation_importance_classif, permutation_importance_regress};
     pub use crate::data::CsvLoader;

@@ -78,9 +78,11 @@ impl Learner for Pipeline {
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let mut features = task.features().clone();
         let mut names = task.feature_names().to_vec();
+        // Pass target as f64 for supervised filters
+        let target_f64: Vec<f64> = task.target().iter().map(|&t| t as f64).collect();
 
         for transformer in &mut self.transformers {
-            features = transformer.fit_transform(&features)?;
+            features = transformer.fit_transform_supervised(&features, &target_f64)?;
             names = transformer.transform_names(&names)?;
         }
 
@@ -104,9 +106,10 @@ impl Learner for Pipeline {
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         let mut features = task.features().clone();
         let mut names = task.feature_names().to_vec();
+        let target_f64 = task.target();
 
         for transformer in &mut self.transformers {
-            features = transformer.fit_transform(&features)?;
+            features = transformer.fit_transform_supervised(&features, target_f64)?;
             names = transformer.transform_names(&names)?;
         }
 
