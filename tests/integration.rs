@@ -3762,3 +3762,77 @@ fn lightgbm_multiclass() {
     let acc = Accuracy.score(&pred).unwrap();
     assert!(acc >= 0.33, "LightGBM multiclass should work, got {acc}");
 }
+
+// ── CatBoost tests ─────────────────────────────────────────────────
+
+#[test]
+fn catboost_classif_binary() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("cb", features, target).unwrap();
+
+    let mut cb = CatBoost::new().with_n_estimators(50).with_depth(3).with_learning_rate(0.1);
+    let model = cb.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.5, "CatBoost should classify, got {acc}");
+}
+
+#[test]
+fn catboost_regress() {
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0]
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let task = RegressionTask::new("cb_r", features, target).unwrap();
+
+    let mut cb = CatBoost::new().with_n_estimators(100).with_depth(3);
+    let model = cb.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_regress(task.target().to_vec());
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 3.0, "CatBoost should learn linear, got RMSE={rmse}");
+}
+
+#[test]
+fn catboost_with_categoricals() {
+    // Feature 1 is categorical: 0.0=cat_A, 1.0=cat_B
+    let features = array![
+        [0.5, 0.0], [0.6, 0.0], [0.7, 0.0], [0.8, 0.0],
+        [0.5, 1.0], [0.6, 1.0], [0.7, 1.0], [0.8, 1.0]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("cb_cat", features, target).unwrap();
+
+    let mut cb = CatBoost::new()
+        .with_n_estimators(50)
+        .with_depth(3)
+        .with_cat_features(vec![1]); // mark feature 1 as categorical
+    let model = cb.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.5, "CatBoost with categoricals should work, got {acc}");
+}
+
+#[test]
+fn catboost_in_benchmark() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("cb_b", features, target).unwrap();
+
+    let cv = CrossValidation::new(4).with_seed(42);
+    let mut cb = CatBoost::new().with_n_estimators(30).with_depth(3);
+    let r = benchmark::resample_classif(&mut cb, &task, &cv, &[&Accuracy]).unwrap();
+    assert_eq!(r.learner_id, "catboost");
+}
