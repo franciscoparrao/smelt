@@ -24,7 +24,7 @@
 - [x] **CatBoost** — Ordered target statistics + oblivious trees + native categoricals. ✅ v0.8.1
 - [x] **Random Survival Forest** — Log-rank split + Nelson-Aalen + C-index. 1,000+ papers. ✅ v0.9.0
 - [x] **Isolation Forest** — Anomaly detection via random path length. s(x,n) = 2^{-E[h(x)]/c(n)}. 700+ menciones. ✅ v0.6.1
-- [ ] **TreeSHAP** — Explicabilidad basada en Shapley values para modelos de árboles. 9,000+ referencias. ~300 líneas.
+- [x] **TreeSHAP** — SHAP values para cualquier modelo (sampling approach). 9,000+ refs. ✅ v0.9.1
 
 ## Prioridad 2: ALTO (dominios enteros ausentes)
 

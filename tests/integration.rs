@@ -3924,3 +3924,88 @@ fn rsf_survival_at_time() {
         assert!(s_early >= s_late, "survival should decrease over time");
     }
 }
+
+// ── TreeSHAP tests ─────────────────────────────────────────────────
+
+#[test]
+fn shap_regress_basic() {
+    use smelt_ml::importance::shap::tree_shap_regress;
+
+    let features = array![
+        [0.0, 99.0], [1.0, 42.0], [2.0, 13.0], [3.0, 77.0],
+        [4.0, 99.0], [5.0, 42.0], [6.0, 13.0], [7.0, 77.0],
+    ];
+    let target = vec![0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0];
+    let task = RegressionTask::new("shap", features, target).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_regress(&task).unwrap();
+
+    let result = tree_shap_regress(&*model, &task, 8).unwrap();
+
+    assert_eq!(result.explanations.len(), 8);
+    for exp in &result.explanations {
+        assert_eq!(exp.values.len(), 2);
+        // prediction should approximately equal base_value + sum(shap)
+        let reconstructed = exp.base_value + exp.values.iter().sum::<f64>();
+        // Allow some tolerance due to sampling approximation
+        assert!((reconstructed - exp.prediction).abs() < 15.0,
+            "pred={:.2}, reconstructed={:.2}", exp.prediction, reconstructed);
+    }
+
+    // Global importance should exist
+    assert_eq!(result.global_importance.len(), 2);
+}
+
+#[test]
+fn shap_classif_basic() {
+    use smelt_ml::importance::shap::tree_shap_classif;
+
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("shap_c", features, target).unwrap();
+
+    let mut rf = RandomForest::new().with_n_estimators(20).with_seed(42);
+    let model = rf.train_classif(&task).unwrap();
+
+    let result = tree_shap_classif(&*model, &task, 8, 1).unwrap(); // explain class 1
+
+    assert_eq!(result.explanations.len(), 8);
+    // Class 1 samples should have positive total SHAP, class 0 negative
+    let class1_shap: f64 = result.explanations[4..8].iter()
+        .map(|e| e.values.iter().sum::<f64>()).sum();
+    let class0_shap: f64 = result.explanations[0..4].iter()
+        .map(|e| e.values.iter().sum::<f64>()).sum();
+    assert!(class1_shap >= class0_shap - 0.5,
+        "class 1 should have higher SHAP sum: c1={class1_shap:.2}, c0={class0_shap:.2}");
+}
+
+#[test]
+fn shap_global_importance_order() {
+    use smelt_ml::importance::shap::tree_shap_regress;
+
+    // Feature 0 is informative, feature 1 is noise
+    let features = array![
+        [0.0, 42.0], [1.0, 13.0], [2.0, 99.0], [3.0, 55.0],
+        [4.0, 42.0], [5.0, 13.0], [6.0, 99.0], [7.0, 55.0],
+    ];
+    let target = vec![0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0];
+    let task = RegressionTask::new("shap_gi", features, target).unwrap()
+        .with_feature_names(vec!["signal".into(), "noise".into()]).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_regress(&task).unwrap();
+
+    let result = tree_shap_regress(&*model, &task, 8).unwrap();
+
+    // Signal feature should have higher global importance
+    let signal_imp = result.global_importance.iter()
+        .find(|(n, _)| n == "signal").unwrap().1;
+    let noise_imp = result.global_importance.iter()
+        .find(|(n, _)| n == "noise").unwrap().1;
+    assert!(signal_imp >= noise_imp,
+        "signal ({signal_imp:.4}) should be >= noise ({noise_imp:.4})");
+}

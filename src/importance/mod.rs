@@ -1,4 +1,6 @@
-//! Model-agnostic feature importance via permutation.
+//! Model-agnostic feature importance via permutation and SHAP.
+
+pub mod shap;
 
 use rand::seq::SliceRandom;
 use rand::rngs::StdRng;
