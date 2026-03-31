@@ -44,6 +44,7 @@ pub mod tuning;
 pub mod importance;
 pub mod conformal;
 pub mod causal;
+pub mod survival;
 pub mod cluster;
 pub mod multilabel;
 pub mod multioutput;

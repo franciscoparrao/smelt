@@ -3836,3 +3836,91 @@ fn catboost_in_benchmark() {
     let r = benchmark::resample_classif(&mut cb, &task, &cv, &[&Accuracy]).unwrap();
     assert_eq!(r.learner_id, "catboost");
 }
+
+// ── Random Survival Forest tests ───────────────────────────────────
+
+#[test]
+fn rsf_basic_prediction() {
+    use smelt_ml::survival::{RandomSurvivalForest, SurvivalEvent};
+
+    let features = array![
+        [25.0, 0.0], [30.0, 1.0], [35.0, 0.0], [40.0, 1.0],
+        [50.0, 0.0], [55.0, 1.0], [60.0, 0.0], [65.0, 1.0],
+    ];
+    let events = vec![
+        SurvivalEvent { time: 10.0, event: true },
+        SurvivalEvent { time: 15.0, event: false },
+        SurvivalEvent { time: 8.0, event: true },
+        SurvivalEvent { time: 20.0, event: false },
+        SurvivalEvent { time: 5.0, event: true },
+        SurvivalEvent { time: 12.0, event: true },
+        SurvivalEvent { time: 3.0, event: true },
+        SurvivalEvent { time: 7.0, event: false },
+    ];
+
+    let rsf = RandomSurvivalForest::new().with_n_estimators(50).with_seed(42);
+    let predictions = rsf.fit_predict(&features, &events).unwrap();
+
+    assert_eq!(predictions.len(), 8);
+    for pred in &predictions {
+        assert!(!pred.times.is_empty());
+        assert!(!pred.survival.is_empty());
+        // Survival should be monotonically non-increasing
+        for w in pred.survival.windows(2) {
+            assert!(w[0] >= w[1] - 1e-10, "survival should decrease: {} >= {}", w[0], w[1]);
+        }
+    }
+}
+
+#[test]
+fn rsf_concordance_index() {
+    use smelt_ml::survival::{RandomSurvivalForest, SurvivalEvent, concordance_index};
+
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0],
+    ];
+    // Higher feature value = shorter survival (clear signal)
+    let events = vec![
+        SurvivalEvent { time: 100.0, event: true },
+        SurvivalEvent { time: 80.0, event: true },
+        SurvivalEvent { time: 60.0, event: true },
+        SurvivalEvent { time: 50.0, event: true },
+        SurvivalEvent { time: 40.0, event: true },
+        SurvivalEvent { time: 30.0, event: true },
+        SurvivalEvent { time: 20.0, event: true },
+        SurvivalEvent { time: 10.0, event: true },
+    ];
+
+    let rsf = RandomSurvivalForest::new().with_n_estimators(50).with_seed(42);
+    let predictions = rsf.fit_predict(&features, &events).unwrap();
+
+    let c_idx = concordance_index(&predictions, &events);
+    assert!(c_idx >= 0.0 && c_idx <= 1.0);
+    // With a clear monotonic relationship, C-index should be reasonable
+    assert!(c_idx >= 0.4, "C-index should be above random (0.5), got {c_idx}");
+}
+
+#[test]
+fn rsf_survival_at_time() {
+    use smelt_ml::survival::{RandomSurvivalForest, SurvivalEvent};
+
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]];
+    let events = vec![
+        SurvivalEvent { time: 5.0, event: true },
+        SurvivalEvent { time: 10.0, event: true },
+        SurvivalEvent { time: 15.0, event: false },
+        SurvivalEvent { time: 20.0, event: true },
+        SurvivalEvent { time: 25.0, event: true },
+        SurvivalEvent { time: 30.0, event: false },
+    ];
+
+    let rsf = RandomSurvivalForest::new().with_n_estimators(30).with_seed(42);
+    let preds = rsf.fit_predict(&features, &events).unwrap();
+
+    // Survival at time 0 should be ~1.0, and decrease over time
+    for pred in &preds {
+        let s_early = pred.survival_at(1.0);
+        let s_late = pred.survival_at(100.0);
+        assert!(s_early >= s_late, "survival should decrease over time");
+    }
+}
