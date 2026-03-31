@@ -46,6 +46,7 @@ pub mod conformal;
 pub mod causal;
 pub mod cluster;
 pub mod multilabel;
+pub mod multioutput;
 pub mod benchmark_design;
 pub mod data;
 pub mod serialize;

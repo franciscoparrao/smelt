@@ -29,7 +29,7 @@
 ## Prioridad 2: ALTO (dominios enteros ausentes)
 
 - [x] **Multi-label Classification (Classifier Chains)** — Train C_j on X + previous labels. 2,000+ papers. ✅ v0.6.1
-- [ ] **Multi-output / Multi-target Regression** — Multi-target trees, regressor chains. 1,000+ papers. ~250 líneas.
+- [x] **Multi-output / Multi-target Regression** — Regressor Chains. 1,000+ papers. ✅ v0.7.0
 - [x] **Quantile Regression Forest** — QRF con weighted quantiles de las hojas. 602 papers. ✅ v0.7.0
 - [ ] **Hoeffding Trees (Streaming)** — VFDT + HAT adaptivo. Split con Hoeffding bound. Ni sklearn ni mlr3 lo tienen. ~300 líneas.
 - [ ] **Dynamic Ensemble Selection (META-DES)** — Selección dinámica por instancia. Superior a stacking estático. 339 papers. ~250 líneas.
@@ -40,7 +40,7 @@
 - [ ] **Extreme Learning Machine (ELM)** — Random weights + pseudoinverse. Ultra-rápido. 4,620 citas. ~150 líneas.
 - [ ] **Deep Forest / gcForest** — Cascada de forests emulando deep learning. ~300 líneas.
 - [ ] **Cost-Sensitive Learning** — Soporte de cost matrix en learners. Esencial para medicina/finanzas. ~150 líneas.
-- [ ] **Conformalized Quantile Regression (CQR)** — CP + quantile regression. Intervalos más ajustados. ~150 líneas.
+- [x] **Conformalized Quantile Regression (CQR)** — CP + quantile regression. Intervalos adaptativos. ✅ v0.7.0
 
 ## Prioridad 4: DIFERENCIADORES (único en Rust)
 

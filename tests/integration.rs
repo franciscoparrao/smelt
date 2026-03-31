@@ -3611,3 +3611,78 @@ fn adasyn_focuses_on_boundary() {
     let balanced = adasyn.balance(&task).unwrap();
     assert!(balanced.n_samples() > 5);
 }
+
+// ── Multi-output Regression tests ──────────────────────────────────
+
+#[test]
+fn regressor_chain_basic() {
+    use smelt_ml::multioutput::RegressorChain;
+
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]];
+    let targets = vec![
+        vec![2.0, 10.0], vec![4.0, 20.0], vec![6.0, 30.0],
+        vec![8.0, 40.0], vec![10.0, 50.0], vec![12.0, 60.0],
+    ];
+
+    let rc = RegressorChain::new(|| Box::new(DecisionTree::default()));
+    let model = rc.fit(&features, &targets).unwrap();
+    let pred = model.predict(&features).unwrap();
+
+    assert_eq!(pred.n_samples, 6);
+    assert_eq!(pred.n_targets, 2);
+    for row in &pred.values {
+        assert_eq!(row.len(), 2);
+    }
+}
+
+#[test]
+fn regressor_chain_rmse() {
+    use smelt_ml::multioutput::RegressorChain;
+
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]];
+    let targets = vec![
+        vec![2.0, 1.0], vec![4.0, 4.0], vec![6.0, 9.0],
+        vec![8.0, 16.0], vec![10.0, 25.0], vec![12.0, 36.0],
+    ];
+
+    let rc = RegressorChain::new(|| Box::new(DecisionTree::default()));
+    let model = rc.fit(&features, &targets).unwrap();
+    let pred = model.predict(&features).unwrap();
+
+    let rmse = model.mean_rmse(&pred, &targets);
+    assert!(rmse >= 0.0);
+}
+
+// ── CQR tests ──────────────────────────────────────────────────────
+
+#[test]
+fn cqr_adaptive_intervals() {
+    use smelt_ml::conformal::cqr::CQR;
+
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0],
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let task = RegressionTask::new("cqr", features.clone(), target.clone()).unwrap();
+
+    // Train lower (0.1) and upper (0.9) quantile models
+    let mut lower_gb = QuantileGB::new(0.1).with_n_estimators(50).with_learning_rate(0.1);
+    let mut upper_gb = QuantileGB::new(0.9).with_n_estimators(50).with_learning_rate(0.1);
+
+    let lower_model = lower_gb.train_regress(&task).unwrap();
+    let upper_model = upper_gb.train_regress(&task).unwrap();
+
+    // Calibrate on last 4 samples
+    let cal_features = array![[7.0], [8.0], [9.0], [10.0]];
+    let cal_targets = vec![14.0, 16.0, 18.0, 20.0];
+
+    let cqr = CQR::calibrate(&*lower_model, &*upper_model, &cal_features, &cal_targets, 0.1).unwrap();
+    let intervals = cqr.predict(&array![[3.0], [6.0]]).unwrap();
+
+    assert_eq!(intervals.len(), 2);
+    for iv in &intervals {
+        assert!(iv.lower <= iv.prediction);
+        assert!(iv.prediction <= iv.upper);
+    }
+}

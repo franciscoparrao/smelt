@@ -3,6 +3,8 @@
 //! Model-agnostic wrapper that produces predictions with guaranteed coverage.
 //! Works with any trained model without retraining.
 
+pub mod cqr;
+
 use ndarray::Array2;
 use crate::learner::TrainedModel;
 use crate::prediction::Prediction;
