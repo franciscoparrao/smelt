@@ -3686,3 +3686,79 @@ fn cqr_adaptive_intervals() {
         assert!(iv.prediction <= iv.upper);
     }
 }
+
+// ── LightGBM tests ─────────────────────────────────────────────────
+
+#[test]
+fn lightgbm_classif_binary() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("lgbm", features, target).unwrap();
+
+    let mut lgbm = LightGBM::new()
+        .with_n_estimators(50)
+        .with_num_leaves(8)
+        .with_learning_rate(0.1);
+    let model = lgbm.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.5, "LightGBM should classify separable data, got {acc}");
+}
+
+#[test]
+fn lightgbm_regress() {
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0]
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let task = RegressionTask::new("lgbm_r", features, target).unwrap();
+
+    let mut lgbm = LightGBM::new()
+        .with_n_estimators(100)
+        .with_learning_rate(0.1);
+    let model = lgbm.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_regress(task.target().to_vec());
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 2.0, "LightGBM should learn linear trend, got RMSE={rmse}");
+}
+
+#[test]
+fn lightgbm_in_benchmark() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("lgbm_b", features, target).unwrap();
+
+    let cv = CrossValidation::new(4).with_seed(42);
+    let mut lgbm = LightGBM::new().with_n_estimators(30).with_num_leaves(8);
+    let r = benchmark::resample_classif(&mut lgbm, &task, &cv, &[&Accuracy]).unwrap();
+    assert_eq!(r.learner_id, "lightgbm");
+}
+
+#[test]
+fn lightgbm_multiclass() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.0, 0.1], [0.1, 0.0],
+        [1.0, 0.0], [1.1, 0.1], [1.0, 0.1], [1.1, 0.0],
+        [0.0, 1.0], [0.1, 1.1], [0.0, 1.1], [0.1, 1.0]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2];
+    let task = ClassificationTask::new("lgbm_mc", features, target).unwrap();
+
+    let mut lgbm = LightGBM::new().with_n_estimators(50).with_learning_rate(0.1);
+    let model = lgbm.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.33, "LightGBM multiclass should work, got {acc}");
+}

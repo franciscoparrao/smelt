@@ -20,7 +20,7 @@
 
 ## Prioridad 1: CRÍTICO (evidencia masiva en la literatura)
 
-- [ ] **LightGBM** — GOSS + EFB + leaf-wise growth. 32,467 citas. >50% de estudios recientes lo usan como baseline. ~500 líneas.
+- [x] **LightGBM** — GOSS + leaf-wise growth + histogram splits. 32,467 citas. ✅ v0.8.0
 - [ ] **CatBoost** — Ordered target statistics + ordered boosting + oblivious trees. Manejo nativo de categoricals. ~500 líneas.
 - [ ] **Random Survival Forest** — Log-rank split + Nelson-Aalen estimator + C-index. 1,000+ papers. Subfield entero ausente. ~400 líneas.
 - [x] **Isolation Forest** — Anomaly detection via random path length. s(x,n) = 2^{-E[h(x)]/c(n)}. 700+ menciones. ✅ v0.6.1
