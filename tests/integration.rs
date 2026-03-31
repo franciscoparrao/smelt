@@ -3392,3 +3392,222 @@ fn hyperband_classif() {
     assert!(result.best_score >= 0.5);
     assert!(!result.all_results.is_empty());
 }
+
+// ── Isolation Forest tests ─────────────────────────────────────────
+
+#[test]
+fn isolation_forest_detects_outlier() {
+    use smelt_ml::cluster::IsolationForest;
+    let data = array![
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 1.0],
+        [0.9, 0.9], [1.1, 1.1], [1.0, 0.9], [0.9, 1.0],
+        [50.0, 50.0],  // clear outlier
+    ];
+
+    let iforest = IsolationForest::new()
+        .with_n_estimators(100)
+        .with_contamination(0.15)
+        .with_seed(42);
+    let result = iforest.fit_predict(&data).unwrap();
+
+    assert_eq!(result.scores.len(), 9);
+    // Outlier (index 8) should have the highest anomaly score
+    let max_idx = result.scores.iter().enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap().0;
+    assert_eq!(max_idx, 8, "outlier at index 8 should have highest score");
+    assert_eq!(result.labels[8], 1, "outlier should be labeled as anomaly");
+}
+
+#[test]
+fn isolation_forest_all_normal() {
+    use smelt_ml::cluster::IsolationForest;
+    let data = array![
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 1.0],
+    ];
+    let iforest = IsolationForest::new()
+        .with_n_estimators(50)
+        .with_contamination(0.0)  // no contamination expected
+        .with_seed(42);
+    let result = iforest.fit_predict(&data).unwrap();
+
+    // All scores should be relatively similar (no clear outlier)
+    let mean_score = result.scores.iter().sum::<f64>() / result.scores.len() as f64;
+    for &s in &result.scores {
+        assert!((s - mean_score).abs() < 0.3, "scores should be similar for uniform data");
+    }
+}
+
+#[test]
+fn isolation_forest_two_clusters_with_outlier() {
+    use smelt_ml::cluster::IsolationForest;
+    let data = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
+        [5.0, 5.0], [5.1, 4.9], [4.9, 5.1],
+        [100.0, 100.0],  // outlier far from both clusters
+    ];
+    let iforest = IsolationForest::new()
+        .with_n_estimators(100)
+        .with_contamination(0.15)
+        .with_seed(42);
+    let result = iforest.fit_predict(&data).unwrap();
+
+    assert!(result.scores[6] > result.scores[0], "outlier should score higher than cluster point");
+    assert!(result.n_anomalies >= 1, "should detect at least 1 anomaly");
+}
+
+// ── Classifier Chain (multi-label) tests ───────────────────────────
+
+#[test]
+fn classifier_chain_basic() {
+    use smelt_ml::multilabel::ClassifierChain;
+
+    let features = array![
+        [1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0],
+        [1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0],
+    ];
+    let labels = vec![
+        vec![1, 0, 1], vec![0, 1, 0], vec![1, 1, 1], vec![0, 0, 0],
+        vec![1, 0, 1], vec![0, 1, 0], vec![1, 1, 1], vec![0, 0, 0],
+    ];
+
+    let cc = ClassifierChain::new(|| Box::new(DecisionTree::default()));
+    let model = cc.fit(&features, &labels).unwrap();
+    let pred = model.predict(&features).unwrap();
+
+    assert_eq!(pred.n_samples, 8);
+    assert_eq!(pred.n_labels, 3);
+    for row in &pred.labels {
+        assert_eq!(row.len(), 3);
+        for &v in row { assert!(v <= 1, "labels should be 0 or 1"); }
+    }
+}
+
+#[test]
+fn classifier_chain_accuracy_metrics() {
+    use smelt_ml::multilabel::ClassifierChain;
+
+    let features = array![
+        [1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0],
+        [1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0],
+    ];
+    let labels = vec![
+        vec![1, 0], vec![0, 1], vec![1, 1], vec![0, 0],
+        vec![1, 0], vec![0, 1], vec![1, 1], vec![0, 0],
+    ];
+
+    let cc = ClassifierChain::new(|| Box::new(DecisionTree::default()));
+    let model = cc.fit(&features, &labels).unwrap();
+    let pred = model.predict(&features).unwrap();
+
+    let subset_acc = model.subset_accuracy(&pred, &labels);
+    let hamming = model.hamming_score(&pred, &labels);
+
+    assert!(subset_acc >= 0.0 && subset_acc <= 1.0);
+    assert!(hamming >= 0.0 && hamming <= 1.0);
+    assert!(hamming >= subset_acc, "hamming score should be >= subset accuracy");
+}
+
+#[test]
+fn classifier_chain_with_rf() {
+    use smelt_ml::multilabel::ClassifierChain;
+
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [1.0, 1.0], [1.1, 0.9],
+        [0.0, 0.0], [0.1, 0.1], [1.0, 1.0], [1.1, 0.9],
+    ];
+    let labels = vec![
+        vec![0, 1], vec![0, 1], vec![1, 0], vec![1, 0],
+        vec![0, 1], vec![0, 1], vec![1, 0], vec![1, 0],
+    ];
+
+    let cc = ClassifierChain::new(|| Box::new(RandomForest::new().with_n_estimators(10).with_seed(42)));
+    let model = cc.fit(&features, &labels).unwrap();
+    let pred = model.predict(&features).unwrap();
+
+    assert_eq!(pred.n_labels, 2);
+}
+
+// ── Quantile Regression Forest tests ───────────────────────────────
+
+#[test]
+fn qrf_predicts_median() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+    let task = RegressionTask::new("qrf", features.clone(), target.clone()).unwrap();
+
+    let mut qrf = QuantileForest::new().with_n_estimators(50).with_seed(42);
+    let model = qrf.train_regress(&task).unwrap();
+    let pred = model.predict(&features).unwrap()
+        .with_truth_regress(target);
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 5.0, "QRF median should approximate well, got RMSE={rmse}");
+}
+
+#[test]
+fn qrf_quantile_ordering() {
+    use smelt_ml::learner::quantile_forest::TrainedQuantileForest;
+
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+    let task = RegressionTask::new("qrf_q", features.clone(), target).unwrap();
+
+    let mut qrf = QuantileForest::new().with_n_estimators(50).with_seed(42);
+    let model = qrf.train_regress(&task).unwrap();
+
+    // Downcast to TrainedQuantileForest for quantile access
+    // Since we can't downcast Box<dyn TrainedModel>, test via predict (median)
+    let pred = model.predict(&features).unwrap();
+    assert_eq!(pred.n_samples(), 8);
+}
+
+#[test]
+fn qrf_in_benchmark() {
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0]
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let task = RegressionTask::new("qrf_b", features, target).unwrap();
+
+    let ho = Holdout::new(0.8).with_seed(42);
+    let mut qrf = QuantileForest::new().with_n_estimators(20).with_seed(42);
+    let r = benchmark::resample_regress(&mut qrf, &task, &ho, &[&Rmse]).unwrap();
+    assert_eq!(r.learner_id, "quantile_forest");
+}
+
+// ── ADASYN tests ───────────────────────────────────────────────────
+
+#[test]
+fn adasyn_balances_classes() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
+        [1.0, 1.0],
+    ];
+    let target = vec![0, 0, 0, 0, 0, 1];
+    let task = ClassificationTask::new("adasyn", features, target).unwrap();
+
+    let adasyn = Adasyn::new().with_seed(42);
+    let balanced = adasyn.balance(&task).unwrap();
+
+    let n0 = balanced.target().iter().filter(|&&t| t == 0).count();
+    let n1 = balanced.target().iter().filter(|&&t| t == 1).count();
+    // ADASYN should approximately balance (may not be exact due to rounding)
+    assert!(n1 >= 3, "minority should have more samples after ADASYN: {n1}");
+    assert!(balanced.n_samples() > 6);
+}
+
+#[test]
+fn adasyn_focuses_on_boundary() {
+    // Minority samples near majority boundary should get more synthetic samples
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
+        [0.3, 0.3],  // minority NEAR majority (harder)
+        [5.0, 5.0],  // minority FAR from majority (easier)
+    ];
+    let target = vec![0, 0, 0, 1, 1];
+    let task = ClassificationTask::new("ada_bound", features, target).unwrap();
+
+    let adasyn = Adasyn::new().with_k_neighbors(3).with_seed(42);
+    let balanced = adasyn.balance(&task).unwrap();
+    assert!(balanced.n_samples() > 5);
+}

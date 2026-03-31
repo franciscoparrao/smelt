@@ -1,6 +1,6 @@
 [package]
 name = "smelt-ml"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 authors = ["Francisco Parra <francisco.parra.o@usach.cl>"]
 description = "A machine learning framework for Rust, inspired by mlr3"
@@ -9,6 +9,7 @@ repository = "https://github.com/franciscoparrao/smelt"
 keywords = ["machine-learning", "classification", "regression", "ml", "data-science"]
 categories = ["science", "algorithms"]
 readme = "README.md"
+exclude = ["docs/WOS/", "tests/xgboost_*.py", "tests/real_benchmark.py"]
 
 [dependencies]
 ndarray = { version = "0.16", features = ["serde"] }

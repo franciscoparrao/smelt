@@ -15,6 +15,7 @@ pub mod geo_xgboost;
 pub mod oblique;
 pub mod stacking;
 pub mod quantile;
+pub mod quantile_forest;
 pub mod ebm;
 pub mod bagging;
 
@@ -39,6 +40,7 @@ pub use geo_xgboost::GeoXGBoost;
 pub use oblique::{ObliqueTree, ObliqueForest};
 pub use stacking::Stacking;
 pub use quantile::QuantileGB;
+pub use quantile_forest::QuantileForest;
 pub use ebm::EBM;
 pub use bagging::Bagging;
 

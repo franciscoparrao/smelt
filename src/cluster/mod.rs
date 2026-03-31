@@ -1,4 +1,8 @@
-//! Unsupervised clustering: K-Means and DBSCAN.
+//! Unsupervised clustering and anomaly detection.
+
+pub mod isolation_forest;
+
+pub use isolation_forest::IsolationForest;
 
 use ndarray::{Array2, ArrayView1};
 use rand::Rng;
