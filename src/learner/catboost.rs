@@ -191,7 +191,7 @@ impl CBBins {
 }
 
 fn build_oblivious_tree(
-    features: &Array2<f64>,
+    bins: &CBBins,
     grads: &[f64],
     hess: &[f64],
     indices: &[usize],
@@ -200,7 +200,6 @@ fn build_oblivious_tree(
     lambda: f64,
 ) -> ObliviousTree {
     let n_leaves = 1 << depth;
-    let bins = CBBins::build(features, 64); // fewer bins for oblivious trees
     let mut splits = Vec::with_capacity(depth);
     let mut partitions: Vec<Vec<usize>> = vec![indices.to_vec()];
 
@@ -401,11 +400,12 @@ impl Learner for CatBoost {
         let mut preds = vec![initial; ns];
         let mut trees = Vec::with_capacity(self.n_estimators);
         let indices: Vec<usize> = (0..ns).collect();
+        let bins = CBBins::build(&encoded, 64);
 
         for _ in 0..self.n_estimators {
             let grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
             let hess = vec![1.0; ns];
-            let tree = build_oblivious_tree(&encoded, &grads, &hess, &indices,
+            let tree = build_oblivious_tree(&bins, &grads, &hess, &indices,
                 self.depth, nf, self.lambda);
             for i in 0..ns { preds[i] += self.learning_rate * tree.predict_one(encoded.row(i)); }
             trees.push(tree);
@@ -445,11 +445,12 @@ impl CatBoost {
         let mut fv = vec![initial; ns];
         let mut trees = Vec::with_capacity(self.n_estimators);
         let indices: Vec<usize> = (0..ns).collect();
+        let bins = CBBins::build(&encoded, 64);
 
         for _ in 0..self.n_estimators {
             let grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
             let hess: Vec<f64> = (0..ns).map(|i| { let p = sigmoid(fv[i]); p * (1.0-p).max(1e-15) }).collect();
-            let tree = build_oblivious_tree(&encoded, &grads, &hess, &indices,
+            let tree = build_oblivious_tree(&bins, &grads, &hess, &indices,
                 self.depth, nf, self.lambda);
             for i in 0..ns { fv[i] += self.learning_rate * tree.predict_one(encoded.row(i)); }
             trees.push(tree);
@@ -482,13 +483,14 @@ impl CatBoost {
         let mut fv: Vec<Vec<f64>> = (0..ns).map(|_| initial.clone()).collect();
         let mut trees = Vec::with_capacity(self.n_estimators * nc);
         let indices: Vec<usize> = (0..ns).collect();
+        let bins = CBBins::build(&encoded, 64);
 
         for _ in 0..self.n_estimators {
             let probs: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
             for c in 0..nc {
                 let grads: Vec<f64> = (0..ns).map(|i| probs[i][c] - if target[i]==c {1.0} else {0.0}).collect();
                 let hess: Vec<f64> = (0..ns).map(|i| (probs[i][c] * (1.0-probs[i][c])).max(1e-15)).collect();
-                let tree = build_oblivious_tree(&encoded, &grads, &hess, &indices,
+                let tree = build_oblivious_tree(&bins, &grads, &hess, &indices,
                     self.depth, nf, self.lambda);
                 for i in 0..ns { fv[i][c] += self.learning_rate * tree.predict_one(encoded.row(i)); }
                 trees.push(tree);
