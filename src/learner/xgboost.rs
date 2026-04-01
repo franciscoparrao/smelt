@@ -15,7 +15,7 @@ use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
 
-const NAN_BIN: u16 = u16::MAX;
+const NAN_BIN: u8 = u8::MAX; // 255 = NaN sentinel (max 254 real bins)
 
 /// XGBoost learner (eXtreme Gradient Boosting).
 ///
@@ -79,19 +79,26 @@ impl XGBoost {
     pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
 }
 
-// ── Histogram binning (NaN-aware) ───────────────────────────────────
+// ── Histogram binning (NaN-aware, column-major, u8 packed) ──────────
+//
+// Column-major storage: bins[feature][sample] instead of [sample][feature].
+// This gives sequential memory access when building histograms per feature,
+// dramatically improving cache locality (the #1 bottleneck).
+// u8 packing: 254 real bins fit in 1 byte (255 = NaN), halving memory vs u16.
 
 struct FeatureBins {
     boundaries: Vec<Vec<f64>>,
-    bin_indices: Vec<Vec<u16>>,
+    /// Column-major: bins_col[feature][sample] -> bin index (u8, 255 = NaN)
+    bins_col: Vec<Vec<u8>>,
 }
 
 impl FeatureBins {
     fn build(features: &Array2<f64>, n_bins: usize) -> Self {
+        let n_bins = n_bins.min(254); // max 254 real bins (255 = NaN)
         let n_samples = features.nrows();
         let n_features = features.ncols();
         let mut boundaries = Vec::with_capacity(n_features);
-        let mut bin_indices = vec![vec![0u16; n_features]; n_samples];
+        let mut bins_col = Vec::with_capacity(n_features);
 
         for j in 0..n_features {
             let mut vals: Vec<f64> = features.column(j).iter()
@@ -102,7 +109,7 @@ impl FeatureBins {
             let n_unique = vals.len();
             if n_unique == 0 {
                 boundaries.push(vec![f64::INFINITY]);
-                for i in 0..n_samples { bin_indices[i][j] = NAN_BIN; }
+                bins_col.push(vec![NAN_BIN; n_samples]);
                 continue;
             }
 
@@ -117,23 +124,27 @@ impl FeatureBins {
                 bounds.push(f64::INFINITY);
             }
 
+            // Column-major: sequential write per feature
+            let mut col_bins = Vec::with_capacity(n_samples);
             for i in 0..n_samples {
                 let val = features[[i, j]];
                 if val.is_nan() {
-                    bin_indices[i][j] = NAN_BIN;
+                    col_bins.push(NAN_BIN);
                 } else {
-                    bin_indices[i][j] = bounds.iter()
+                    col_bins.push(bounds.iter()
                         .position(|&b| val < b)
-                        .unwrap_or(bounds.len() - 1) as u16;
+                        .unwrap_or(bounds.len() - 1) as u8);
                 }
             }
+            bins_col.push(col_bins);
             boundaries.push(bounds);
         }
-        Self { boundaries, bin_indices }
+        Self { boundaries, bins_col }
     }
 
     #[inline] fn n_bins(&self, feature: usize) -> usize { self.boundaries[feature].len() }
     #[inline] fn bin_threshold(&self, feature: usize, bin: usize) -> f64 { self.boundaries[feature][bin] }
+    #[inline] fn get_bin(&self, feature: usize, sample: usize) -> u8 { self.bins_col[feature][sample] }
 }
 
 // ── XGBoost tree node ───────────────────────────────────────────────
@@ -248,7 +259,7 @@ impl<'a> XGBTreeBuilder<'a> {
             let bin_thr = best.split_bin;
             let nan_left = best.nan_goes_left;
             while i < end {
-                let b = self.bins.bin_indices[indices[i]][feat];
+                let b = self.bins.get_bin(feat, indices[i]);
                 let goes_left = if b == NAN_BIN { nan_left } else { (b as usize) <= bin_thr };
                 if goes_left { indices.swap(left_end, i); left_end += 1; }
                 i += 1;
@@ -277,7 +288,7 @@ impl<'a> XGBTreeBuilder<'a> {
             let mut nan_h = 0.0;
 
             for &idx in node_indices {
-                let b = self.bins.bin_indices[idx][feat];
+                let b = self.bins.get_bin(feat, idx);
                 if b == NAN_BIN { nan_g += self.grads[idx]; nan_h += self.hess[idx]; }
                 else { bin_g[b as usize] += self.grads[idx]; bin_h[b as usize] += self.hess[idx]; }
             }
