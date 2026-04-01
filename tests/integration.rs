@@ -4102,3 +4102,316 @@ fn des_basic_classif() {
     let acc = Accuracy.score(&pred).unwrap();
     assert!(acc >= 0.5, "DES should classify, got {acc}");
 }
+
+// ════════════════════════════════════════════════════════════════════
+// CONSOLIDATION TESTS: Edge Cases + Benchmark Coverage
+// ════════════════════════════════════════════════════════════════════
+
+// ── Edge Cases: Single sample ──────────────────────────────────────
+
+#[test]
+fn edge_single_sample_classif() {
+    // Single sample should not panic — creates a trivial model
+    let features = array![[1.0, 2.0]];
+    let target = vec![0];
+    let task = ClassificationTask::new("single", features, target).unwrap();
+    let mut dt = DecisionTree::default();
+    let model = dt.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    assert_eq!(pred.n_samples(), 1);
+}
+
+#[test]
+fn edge_single_sample_regress() {
+    let features = array![[1.0]];
+    let target = vec![5.0];
+    let task = RegressionTask::new("single_r", features, target).unwrap();
+    let mut dt = DecisionTree::default();
+    let model = dt.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    assert_eq!(pred.n_samples(), 1);
+}
+
+// ── Edge Cases: All same class/target ──────────────────────────────
+
+#[test]
+fn edge_all_same_class() {
+    let features = array![[0.0], [1.0], [2.0], [3.0]];
+    let target = vec![0, 0, 0, 0]; // all same class
+    let task = ClassificationTask::new("same", features, target).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    if let Prediction::Classification { predicted, .. } = &pred {
+        assert!(predicted.iter().all(|&p| p == 0), "all predictions should be class 0");
+    }
+}
+
+#[test]
+fn edge_all_same_target_regress() {
+    let features = array![[0.0], [1.0], [2.0], [3.0]];
+    let target = vec![5.0, 5.0, 5.0, 5.0];
+    let task = RegressionTask::new("same_r", features, target).unwrap();
+
+    let mut rf = RandomForest::new().with_n_estimators(10).with_seed(42);
+    let model = rf.train_regress(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_regress(task.target().to_vec());
+    let rmse = Rmse.score(&pred).unwrap();
+    assert!(rmse < 1.0, "all same target should give near-zero RMSE");
+}
+
+// ── Edge Cases: Extreme values ─────────────────────────────────────
+
+#[test]
+fn edge_large_values() {
+    let features = array![[1e10, 1e10], [1e10 + 1.0, 1e10 + 1.0], [0.0, 0.0], [1.0, 1.0]];
+    let target = vec![1, 1, 0, 0];
+    let task = ClassificationTask::new("large", features, target).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    assert_eq!(pred.n_samples(), 4);
+}
+
+#[test]
+fn edge_small_values() {
+    let features = array![[1e-10], [2e-10], [1e-5], [2e-5]];
+    let target = vec![0, 0, 1, 1];
+    let task = ClassificationTask::new("small", features, target).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    assert_eq!(pred.n_samples(), 4);
+}
+
+// ── Edge Cases: Imbalanced dataset ─────────────────────────────────
+
+#[test]
+fn edge_imbalanced_99_1() {
+    // 99 samples class 0, 1 sample class 1
+    let mut feat_data = vec![vec![0.0; 2]; 100];
+    let mut target = vec![0usize; 100];
+    for i in 0..99 { feat_data[i] = vec![i as f64 * 0.01, 0.0]; }
+    feat_data[99] = vec![5.0, 5.0];
+    target[99] = 1;
+
+    let mut features = Array2::zeros((100, 2));
+    for (i, row) in feat_data.iter().enumerate() {
+        for (j, &v) in row.iter().enumerate() { features[[i, j]] = v; }
+    }
+
+    let task = ClassificationTask::new("imb", features, target).unwrap();
+    let mut rf = RandomForest::new().with_n_estimators(20).with_seed(42);
+    let model = rf.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    assert_eq!(pred.n_samples(), 100);
+}
+
+// ── Benchmark CV: all learners ─────────────────────────────────────
+
+#[test]
+fn benchmark_all_learners_cv() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("all", features, target).unwrap();
+    let cv = CrossValidation::new(2).with_seed(42);
+
+    // Test each learner that wasn't in previous benchmark tests
+    let learners: Vec<(&str, Box<dyn Learner>)> = vec![
+        ("extra_trees", Box::new(ExtraTrees::new().with_n_estimators(10).with_seed(42))),
+        ("gaussian_nb", Box::new(GaussianNB::new())),
+        ("ridge_classif_skip", Box::new(DecisionTree::default())), // placeholder
+        ("adaboost", Box::new(AdaBoost::new().with_n_estimators(10))),
+        ("linear_svm", Box::new(LinearSVM::new().with_max_iter(500).with_c(10.0).with_learning_rate(0.1))),
+        ("ebm", Box::new(EBM::new().with_n_rounds(20).with_learning_rate(0.05))),
+        ("hoeffding", Box::new(HoeffdingTree::new().with_grace_period(3))),
+    ];
+
+    for (name, mut learner) in learners {
+        let r = benchmark::resample_classif(&mut *learner, &task, &cv, &[&Accuracy]);
+        assert!(r.is_ok(), "learner {name} failed in benchmark CV: {:?}", r.err());
+    }
+}
+
+#[test]
+fn benchmark_all_regressors_cv() {
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0]
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let task = RegressionTask::new("all_r", features, target).unwrap();
+    let ho = Holdout::new(0.8).with_seed(42);
+
+    let learners: Vec<(&str, Box<dyn Learner>)> = vec![
+        ("ridge", Box::new(Ridge::new(0.1))),
+        ("lasso", Box::new(Lasso::new(0.01))),
+        ("elastic_net", Box::new(ElasticNet::new(0.01, 0.5))),
+        ("quantile_gb", Box::new(QuantileGB::new(0.5).with_n_estimators(20))),
+        ("quantile_forest", Box::new(QuantileForest::new().with_n_estimators(10).with_seed(42))),
+    ];
+
+    for (name, mut learner) in learners {
+        let r = benchmark::resample_regress(&mut *learner, &task, &ho, &[&Rmse]);
+        assert!(r.is_ok(), "learner {name} failed in benchmark: {:?}", r.err());
+    }
+}
+
+// ── DynamicEnsemble additional tests ───────────────────────────────
+
+#[test]
+fn des_different_base_learners() {
+    use smelt_ml::learner::DynamicEnsemble;
+
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("des2", features, target).unwrap();
+
+    let mut des = DynamicEnsemble::new(vec![
+        Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>),
+        Box::new(|| Box::new(RandomForest::new().with_n_estimators(5).with_seed(42)) as Box<dyn Learner>),
+    ]).with_k_neighbors(3);
+
+    let model = des.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    assert_eq!(pred.n_samples(), 8);
+}
+
+// ── Hyperband additional tests ─────────────────────────────────────
+
+#[test]
+fn hyperband_regress() {
+    use smelt_ml::tuning::{Hyperband, ParamSpace, ParamDistribution};
+
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [6.0], [7.0], [8.0], [9.0], [10.0]
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+    let task = RegressionTask::new("hb_r", features, target).unwrap();
+
+    let mut space = ParamSpace::new();
+    space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 6.0));
+
+    let hb = Hyperband::new(
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
+        space,
+    ).with_max_folds(3).with_seed(42);
+
+    let result = hb.tune_regress(&task, &Rmse).unwrap();
+    assert!(!result.all_results.is_empty());
+    assert!(!result.maximize);
+}
+
+// ── RFE additional tests ───────────────────────────────────────────
+
+#[test]
+fn rfe_in_pipeline() {
+    let features = array![
+        [0.0, 42.0, 99.0], [0.1, 13.0, 55.0], [0.2, 99.0, 42.0], [0.0, 55.0, 13.0],
+        [1.0, 42.0, 99.0], [1.1, 13.0, 55.0], [1.2, 99.0, 42.0], [1.0, 55.0, 13.0],
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("rfe_pipe", features, target).unwrap();
+
+    let rfe = RFE::classif(|| Box::new(DecisionTree::default()), 2);
+    let mut pipe = Pipeline::new(
+        vec![Box::new(rfe)],
+        Box::new(DecisionTree::default()),
+    );
+    let model = pipe.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    assert_eq!(pred.n_samples(), 8);
+}
+
+// ── Conformal: different confidence levels ─────────────────────────
+
+#[test]
+fn conformal_different_alphas() {
+    use smelt_ml::conformal::ConformalRegressor;
+
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+    let task = RegressionTask::new("cf_alpha", features.clone(), target.clone()).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_regress(&task).unwrap();
+
+    let cal = array![[6.0], [7.0], [8.0]];
+    let cal_t = vec![12.0, 14.0, 16.0];
+
+    // Wider interval at 95% vs 80%
+    let cf_95 = ConformalRegressor::calibrate(&*model, &cal, &cal_t, 0.05).unwrap();
+    let cf_80 = ConformalRegressor::calibrate(&*model, &cal, &cal_t, 0.20).unwrap();
+
+    assert!(cf_95.interval_width() >= cf_80.interval_width(),
+        "95% CI should be >= 80% CI: {:.2} vs {:.2}",
+        cf_95.interval_width(), cf_80.interval_width());
+}
+
+// ── Survival: censoring scenarios ──────────────────────────────────
+
+#[test]
+fn rsf_heavy_censoring() {
+    use smelt_ml::survival::{RandomSurvivalForest, SurvivalEvent};
+
+    let features = array![
+        [1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0],
+    ];
+    // Heavy censoring: only 2 of 8 are events
+    let events = vec![
+        SurvivalEvent { time: 10.0, event: false },
+        SurvivalEvent { time: 15.0, event: true },
+        SurvivalEvent { time: 8.0, event: false },
+        SurvivalEvent { time: 20.0, event: false },
+        SurvivalEvent { time: 5.0, event: false },
+        SurvivalEvent { time: 12.0, event: true },
+        SurvivalEvent { time: 3.0, event: false },
+        SurvivalEvent { time: 7.0, event: false },
+    ];
+
+    let rsf = RandomSurvivalForest::new().with_n_estimators(20).with_seed(42);
+    let preds = rsf.fit_predict(&features, &events).unwrap();
+    assert_eq!(preds.len(), 8);
+    // With heavy censoring, survival probabilities should still be valid
+    for p in &preds {
+        for &s in &p.survival { assert!(s >= 0.0 && s <= 1.0 + 1e-10); }
+    }
+}
+
+// ── CSV: edge cases ────────────────────────────────────────────────
+
+#[test]
+fn csv_with_nan_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nan.csv");
+    std::fs::write(&path, "x1,x2,y\n1.0,,0\n2.0,3.0,1\n,4.0,0\n5.0,6.0,1\n").unwrap();
+
+    // CSV with empty values should produce NaN
+    let result = CsvLoader::from_path(&path).target("y").load_classif();
+    // May succeed with NaN or fail gracefully
+    // The important thing is no panic
+    let _ = result;
+}
+
+// ── Serialization: prediction roundtrip for regression ─────────────
+
+#[test]
+fn serialize_regression_roundtrip() {
+    let pred = Prediction::regression_with_truth(vec![1.0, 2.0, 3.0], vec![1.1, 2.1, 3.1]);
+    let json = serde_json::to_string(&pred).unwrap();
+    let restored: Prediction = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.n_samples(), 3);
+}
