@@ -19,7 +19,7 @@ use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
 
-const NAN_BIN: u16 = u16::MAX;
+const NAN_BIN: u8 = u8::MAX;
 
 /// LightGBM learner.
 ///
@@ -85,18 +85,20 @@ impl LightGBM {
     pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
 }
 
-// ── Histogram binning ───────────────────────────────────────────────
+// ── Histogram binning (column-major, u8 packed) ────────────────────
 
 struct Bins {
     boundaries: Vec<Vec<f64>>,
-    indices: Vec<Vec<u16>>,
+    /// Column-major: cols[feature][sample] -> bin (u8, 255 = NaN)
+    cols: Vec<Vec<u8>>,
 }
 
 impl Bins {
     fn build(features: &Array2<f64>, n_bins: usize) -> Self {
+        let n_bins = n_bins.min(254);
         let (ns, nf) = (features.nrows(), features.ncols());
         let mut boundaries = Vec::with_capacity(nf);
-        let mut indices = vec![vec![0u16; nf]; ns];
+        let mut cols = Vec::with_capacity(nf);
 
         for j in 0..nf {
             let mut vals: Vec<f64> = features.column(j).iter().copied()
@@ -106,7 +108,7 @@ impl Bins {
 
             if vals.is_empty() {
                 boundaries.push(vec![f64::INFINITY]);
-                for i in 0..ns { indices[i][j] = NAN_BIN; }
+                cols.push(vec![NAN_BIN; ns]);
                 continue;
             }
 
@@ -121,15 +123,19 @@ impl Bins {
                 bounds.push(f64::INFINITY);
             }
 
+            let mut col = Vec::with_capacity(ns);
             for i in 0..ns {
                 let v = features[[i, j]];
-                indices[i][j] = if v.is_nan() { NAN_BIN }
-                    else { bounds.iter().position(|&b| v < b).unwrap_or(bounds.len() - 1) as u16 };
+                col.push(if v.is_nan() { NAN_BIN }
+                    else { bounds.iter().position(|&b| v < b).unwrap_or(bounds.len() - 1) as u8 });
             }
+            cols.push(col);
             boundaries.push(bounds);
         }
-        Self { boundaries, indices }
+        Self { boundaries, cols }
     }
+
+    #[inline] fn get_bin(&self, feature: usize, sample: usize) -> u8 { self.cols[feature][sample] }
 }
 
 // ── Tree node ───────────────────────────────────────────────────────
@@ -255,7 +261,7 @@ fn build_leaf_wise_tree(
                 let mut left_idx = Vec::new();
                 let mut right_idx = Vec::new();
                 for &idx in &leaf_indices {
-                    let b = bins.indices[idx][feat];
+                    let b = bins.get_bin(feat, idx);
                     let goes_left = if b == NAN_BIN { nan_left } else { (b as usize) <= bin_thr };
                     if goes_left { left_idx.push(idx); } else { right_idx.push(idx); }
                 }
@@ -308,7 +314,7 @@ fn build_recursive(
             let mut left_idx = Vec::new();
             let mut right_idx = Vec::new();
             for &idx in indices {
-                let b = bins.indices[idx][split.feature];
+                let b = bins.get_bin(split.feature, idx);
                 let goes_left = if b == NAN_BIN { split.nan_left }
                     else { (b as usize) <= split.split_bin };
                 if goes_left { left_idx.push(idx); } else { right_idx.push(idx); }
@@ -347,7 +353,7 @@ fn find_best_split_hist(
         let mut nan_h = 0.0;
 
         for &idx in indices {
-            let b = bins.indices[idx][feat];
+            let b = bins.get_bin(feat, idx);
             let w = weights[idx];
             if b == NAN_BIN { nan_g += grads[idx] * w; nan_h += hess[idx] * w; }
             else { bin_g[b as usize] += grads[idx] * w; bin_h[b as usize] += hess[idx] * w; }
