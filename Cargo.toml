@@ -1,6 +1,6 @@
 [package]
 name = "smelt-ml"
-version = "1.0.2"
+version = "1.1.0"
 edition = "2024"
 authors = ["Francisco Parra <francisco.parra.o@usach.cl>"]
 description = "A machine learning framework for Rust, inspired by mlr3"
