@@ -146,6 +146,50 @@ impl ObliviousTree {
     }
 }
 
+/// Column-major bins for CatBoost oblivious tree building.
+struct CBBins {
+    boundaries: Vec<Vec<f64>>,
+    cols: Vec<Vec<u8>>,
+}
+
+impl CBBins {
+    fn build(features: &Array2<f64>, n_bins: usize) -> Self {
+        let n_bins = n_bins.min(254);
+        let (ns, nf) = (features.nrows(), features.ncols());
+        let mut boundaries = Vec::with_capacity(nf);
+        let mut cols = Vec::with_capacity(nf);
+
+        for j in 0..nf {
+            let mut vals: Vec<f64> = features.column(j).iter().copied()
+                .filter(|v| !v.is_nan()).collect();
+            vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            vals.dedup();
+
+            let step = (vals.len() as f64 / n_bins as f64).max(1.0);
+            let mut bounds = Vec::new();
+            let mut idx = step;
+            while (idx as usize) < vals.len() {
+                bounds.push(vals[idx as usize]);
+                idx += step;
+            }
+            if bounds.is_empty() {
+                bounds.push(f64::INFINITY);
+            } else if *bounds.last().unwrap() < *vals.last().unwrap_or(&0.0) {
+                bounds.push(f64::INFINITY);
+            }
+
+            let mut col = Vec::with_capacity(ns);
+            for i in 0..ns {
+                let v = features[[i, j]];
+                col.push(bounds.iter().position(|&b| v < b).unwrap_or(bounds.len() - 1) as u8);
+            }
+            cols.push(col);
+            boundaries.push(bounds);
+        }
+        Self { boundaries, cols }
+    }
+}
+
 fn build_oblivious_tree(
     features: &Array2<f64>,
     grads: &[f64],
@@ -156,88 +200,85 @@ fn build_oblivious_tree(
     lambda: f64,
 ) -> ObliviousTree {
     let n_leaves = 1 << depth;
+    let bins = CBBins::build(features, 64); // fewer bins for oblivious trees
     let mut splits = Vec::with_capacity(depth);
-
-    // Current partition: start with all samples in one group
     let mut partitions: Vec<Vec<usize>> = vec![indices.to_vec()];
 
     for _level in 0..depth {
-        // Find the best split across ALL current partitions at this level
-        // (same split applied to every node at this depth — oblivious property)
         let mut best_gain = f64::NEG_INFINITY;
         let mut best_feat = 0;
-        let mut best_threshold = 0.0;
+        let mut best_bin = 0;
 
-        // Collect all unique thresholds per feature
-        let all_indices: Vec<usize> = partitions.iter().flatten().copied().collect();
-
-        let results: Vec<(usize, f64, f64)> = (0..n_features)
+        // Histogram-based: build histograms ONCE per partition, then scan O(bins)
+        let results: Vec<(usize, usize, f64)> = (0..n_features)
             .into_par_iter()
             .map(|feat| {
-                let mut sorted: Vec<(f64, usize)> = all_indices.iter()
-                    .map(|&i| (features[[i, feat]], i))
-                    .collect();
-                sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-
+                let nb = bins.boundaries[feat].len();
                 let mut best_local_gain = f64::NEG_INFINITY;
-                let mut best_local_thr = 0.0;
+                let mut best_local_bin = 0;
 
-                // Try a subset of thresholds (quantiles for efficiency)
-                let n_try = sorted.len().min(32);
-                let step = (sorted.len() as f64 / n_try as f64).max(1.0);
-
-                let mut try_idx = 0.0;
-                while (try_idx as usize) < sorted.len().saturating_sub(1) {
-                    let s = try_idx as usize;
-                    if s + 1 >= sorted.len() { break; }
-                    let threshold = (sorted[s].0 + sorted[s + 1].0) / 2.0;
-
-                    // Compute total gain if we split ALL partitions at this threshold
-                    let mut total_gain = 0.0;
-                    for partition in &partitions {
-                        let mut gl = 0.0; let mut hl = 0.0;
-                        let mut gr = 0.0; let mut hr = 0.0;
+                // Pre-build histograms for all partitions
+                let part_hists: Vec<(Vec<f64>, Vec<f64>)> = partitions.iter()
+                    .map(|partition| {
+                        let mut bg = vec![0.0; nb];
+                        let mut bh = vec![0.0; nb];
                         for &idx in partition {
-                            if features[[idx, feat]] <= threshold {
-                                gl += grads[idx]; hl += hess[idx];
-                            } else {
-                                gr += grads[idx]; hr += hess[idx];
-                            }
+                            let b = bins.cols[feat][idx] as usize;
+                            bg[b] += grads[idx];
+                            bh[b] += hess[idx];
                         }
+                        (bg, bh)
+                    })
+                    .collect();
+
+                // Prefix sums + single scan O(n_partitions * n_bins)
+                // Pre-compute prefix sums and totals per partition
+                let prefix: Vec<(Vec<f64>, Vec<f64>, f64, f64)> = part_hists.iter()
+                    .map(|(bg, bh)| {
+                        let mut pg = vec![0.0; nb + 1];
+                        let mut ph = vec![0.0; nb + 1];
+                        for b in 0..nb { pg[b+1] = pg[b] + bg[b]; ph[b+1] = ph[b] + bh[b]; }
+                        let tg = pg[nb]; let th = ph[nb];
+                        (pg, ph, tg, th)
+                    })
+                    .collect();
+
+                for bin in 0..nb.saturating_sub(1) {
+                    let mut total_gain = 0.0;
+                    for (pg, ph, tg, th) in &prefix {
+                        let gl = pg[bin + 1]; let hl = ph[bin + 1];
+                        let gr = tg - gl; let hr = th - hl;
                         if hl > 0.0 && hr > 0.0 {
-                            let gp = gl + gr; let hp = hl + hr;
-                            total_gain += gl*gl/(hl+lambda) + gr*gr/(hr+lambda) - gp*gp/(hp+lambda);
+                            total_gain += gl*gl/(hl+lambda) + gr*gr/(hr+lambda) - tg*tg/(th+lambda);
                         }
                     }
-
                     if total_gain > best_local_gain {
                         best_local_gain = total_gain;
-                        best_local_thr = threshold;
+                        best_local_bin = bin;
                     }
-                    try_idx += step;
                 }
-
-                (feat, best_local_thr, best_local_gain)
+                (feat, best_local_bin, best_local_gain)
             })
             .collect();
 
-        for (feat, thr, gain) in results {
+        for (feat, bin, gain) in results {
             if gain > best_gain {
                 best_gain = gain;
                 best_feat = feat;
-                best_threshold = thr;
+                best_bin = bin;
             }
         }
 
-        splits.push((best_feat, best_threshold));
+        let threshold = bins.boundaries[best_feat][best_bin];
+        splits.push((best_feat, threshold));
 
-        // Split all partitions at this level
+        // Split all partitions
         let mut new_partitions = Vec::with_capacity(partitions.len() * 2);
         for partition in &partitions {
             let mut left = Vec::new();
             let mut right = Vec::new();
             for &idx in partition {
-                if features[[idx, best_feat]] <= best_threshold {
+                if (bins.cols[best_feat][idx] as usize) <= best_bin {
                     left.push(idx);
                 } else {
                     right.push(idx);
@@ -249,7 +290,6 @@ fn build_oblivious_tree(
         partitions = new_partitions;
     }
 
-    // Compute leaf weights
     let mut leaf_weights = vec![0.0; n_leaves];
     for (leaf_idx, partition) in partitions.iter().enumerate() {
         let g: f64 = partition.iter().map(|&i| grads[i]).sum();
