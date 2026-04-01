@@ -1,0 +1,117 @@
+\begin{thebibliography}{15}
+\newcommand{\enquote}[1]{``#1''}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\providecommand{\urlprefix}{URL }
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi:\discretionary{}{}{}#1}\else
+  \providecommand{\doi}{doi:\discretionary{}{}{}\begingroup
+  \urlstyle{rm}\Url}\fi
+\providecommand{\eprint}[2][]{\url{#2}}
+
+\bibitem[{Athey and Imbens(2016)}]{Athey+Imbens:2016}
+Athey S, Imbens G (2016).
+\newblock \enquote{Recursive Partitioning for Heterogeneous Causal Effects.}
+\newblock \emph{Proceedings of the National Academy of Sciences},
+  \textbf{113}(27), 7353--7360.
+\newblock \doi{10.1073/pnas.1510489113}.
+
+\bibitem[{Chen and Guestrin(2016)}]{Chen+Guestrin:2016}
+Chen T, Guestrin C (2016).
+\newblock \enquote{\pkg{XGBoost}: A Scalable Tree Boosting System.}
+\newblock In \emph{Proceedings of the 22nd ACM SIGKDD International Conference
+  on Knowledge Discovery and Data Mining}, pp. 785--794.
+\newblock \doi{10.1145/2939672.2939785}.
+
+\bibitem[{Grekousis(2025)}]{Grekousis:2025}
+Grekousis G (2025).
+\newblock \enquote{Geographical-\pkg{XGBoost}: A New Ensemble Model for
+  Spatially Local Regression Based on Gradient-Boosted Trees.}
+\newblock \emph{Journal of Geographical Systems}, \textbf{27}(2), 169--195.
+\newblock \doi{10.1007/s10109-025-00465-4}.
+
+\bibitem[{Grinsztajn \emph{et~al.}(2022)Grinsztajn, Oyallon, and
+  Varoquaux}]{Grinsztajn+Oyallon+Varoquaux:2022}
+Grinsztajn L, Oyallon E, Varoquaux G (2022).
+\newblock \enquote{Why Do Tree-Based Models Still Outperform Deep Learning on
+  Typical Tabular Data?}
+\newblock In \emph{Advances in Neural Information Processing Systems 35}.
+
+\bibitem[{Ishwaran \emph{et~al.}(2008)Ishwaran, Kogalur, Blackstone, and
+  Lauer}]{Ishwaran+Kogalur+Blackstone:2008}
+Ishwaran H, Kogalur UB, Blackstone EH, Lauer MS (2008).
+\newblock \enquote{Random Survival Forests.}
+\newblock \emph{Annals of Applied Statistics}, \textbf{2}(3), 841--860.
+\newblock \doi{10.1214/08-AOAS169}.
+
+\bibitem[{Ke \emph{et~al.}(2017)Ke, Meng, Finley, Wang, Chen, Ma, Ye, and
+  Liu}]{Ke+Meng+Finley:2017}
+Ke G, Meng Q, Finley T, Wang T, Chen W, Ma W, Ye Q, Liu TY (2017).
+\newblock \enquote{\pkg{LightGBM}: A Highly Efficient Gradient Boosting
+  Decision Tree.}
+\newblock In \emph{Advances in Neural Information Processing Systems 30}.
+
+\bibitem[{Lang \emph{et~al.}(2019)Lang, Binder, Richter, Schratz, Pfisterer,
+  Coors, Au, Casalicchio, Kotthoff, and Bischl}]{Lang+Binder+Richter:2019}
+Lang M, Binder M, Richter J, Schratz P, Pfisterer F, Coors S, Au Q, Casalicchio
+  G, Kotthoff L, Bischl B (2019).
+\newblock \enquote{\pkg{mlr3}: A Modern Object-Oriented Machine Learning
+  Framework in \proglang{R}.}
+\newblock \emph{Journal of Open Source Software}, \textbf{4}(44), 1903.
+\newblock \doi{10.21105/joss.01903}.
+
+\bibitem[{Matsakis and Klock(2014)}]{Matsakis+Klock:2014}
+Matsakis ND, Klock FS (2014).
+\newblock \enquote{The \proglang{Rust} Language.}
+\newblock \emph{Ada Letters}, \textbf{34}(3), 103--104.
+\newblock \doi{10.1145/2692956.2663188}.
+
+\bibitem[{Pedregosa \emph{et~al.}(2011)Pedregosa, Varoquaux, Gramfort, Michel,
+  Thirion, Grisel, Blondel, Prettenhofer, Weiss, Dubourg, Vanderplas, Passos,
+  Cournapeau, Brucher, Perrot, and
+  Duchesnay}]{Pedregosa+Varoquaux+Gramfort:2011}
+Pedregosa F, Varoquaux G, Gramfort A, Michel V, Thirion B, Grisel O, Blondel M,
+  Prettenhofer P, Weiss R, Dubourg V, Vanderplas J, Passos A, Cournapeau D,
+  Brucher M, Perrot M, Duchesnay {\'E} (2011).
+\newblock \enquote{\pkg{Scikit-learn}: Machine Learning in \proglang{Python}.}
+\newblock \emph{Journal of Machine Learning Research}, \textbf{12}, 2825--2830.
+
+\bibitem[{Prokhorenkova \emph{et~al.}(2018)Prokhorenkova, Gusev, Vorobev,
+  Dorogush, and Gulin}]{Prokhorenkova+Gusev+Vorobev:2018}
+Prokhorenkova L, Gusev G, Vorobev A, Dorogush AV, Gulin A (2018).
+\newblock \enquote{\pkg{CatBoost}: Unbiased Boosting with Categorical
+  Features.}
+\newblock In \emph{Advances in Neural Information Processing Systems 31}.
+
+\bibitem[{Romano \emph{et~al.}(2019)Romano, Patterson, and
+  Cand{\`e}s}]{Romano+Patterson+Candes:2019}
+Romano Y, Patterson E, Cand{\`e}s E (2019).
+\newblock \enquote{Conformalized Quantile Regression.}
+\newblock In \emph{Advances in Neural Information Processing Systems 32}.
+
+\bibitem[{{rust-ml}(2024)}]{linfa:2024}
+{rust-ml} (2024).
+\newblock \emph{\pkg{linfa}: A \proglang{Rust} Machine Learning Framework}.
+\newblock Version 0.7, \urlprefix\url{https://github.com/rust-ml/linfa}.
+
+\bibitem[{{\proglang{Rust} Team}(2024)}]{Rust:2024}
+{\proglang{Rust} Team} (2024).
+\newblock \emph{The \proglang{Rust} Programming Language}.
+\newblock Version 1.89, \urlprefix\url{https://www.rust-lang.org/}.
+
+\bibitem[{Tomita \emph{et~al.}(2020)Tomita, Browne, Shen, Chung, Patsolic,
+  Falk, Priebe, Yim, Burns, Maggioni, and Vogelstein}]{Tomita+Browne+Shen:2020}
+Tomita TM, Browne J, Shen C, Chung J, Patsolic JL, Falk B, Priebe CE, Yim J,
+  Burns R, Maggioni M, Vogelstein JT (2020).
+\newblock \enquote{Sparse Projection Oblique Randomer Forests.}
+\newblock \emph{Journal of Machine Learning Research}, \textbf{21}(104), 1--39.
+
+\bibitem[{Wager and Athey(2018)}]{Wager+Athey:2018}
+Wager S, Athey S (2018).
+\newblock \enquote{Estimation and Inference of Heterogeneous Treatment Effects
+  Using Random Forests.}
+\newblock \emph{Journal of the American Statistical Association},
+  \textbf{113}(523), 1228--1242.
+\newblock \doi{10.1080/01621459.2017.1319839}.
+
+\end{thebibliography}

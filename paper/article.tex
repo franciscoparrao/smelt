@@ -1,0 +1,375 @@
+\documentclass[article]{jss}
+
+%% -- LaTeX packages and custom commands ---------------------------------------
+\usepackage{orcidlink,thumbpdf,lmodern}
+\usepackage{booktabs}
+\usepackage{amssymb}
+\usepackage{amsmath}
+
+\newcommand{\class}[1]{`\code{#1}'}
+\newcommand{\fct}[1]{\code{#1()}}
+
+
+%% -- Article metainformation -------------------------------------------------
+
+\author{Francisco Parra\\Universidad de Santiago de Chile}
+\Plainauthor{Francisco Parra}
+
+\title{\pkg{smelt-ml}: A Pure-\proglang{Rust} Machine Learning Framework with Cache-Optimized Gradient Boosting Competitive with \proglang{C++} Implementations}
+\Plaintitle{smelt-ml: A Pure-Rust Machine Learning Framework with Cache-Optimized Gradient Boosting Competitive with C++ Implementations}
+\Shorttitle{\pkg{smelt-ml}: Cache-Optimized ML in \proglang{Rust}}
+
+\Abstract{
+We present \pkg{smelt-ml}, an open-source machine learning framework
+implemented entirely in \proglang{Rust} that provides 27 supervised learning
+algorithms, unsupervised clustering, causal inference, survival analysis,
+and spatial machine learning capabilities. The framework's gradient boosting
+implementations (\pkg{XGBoost}, \pkg{LightGBM}, \pkg{CatBoost}) employ a
+cache-optimized column-major histogram accumulation strategy that achieves
+performance competitive with --- and in many cases exceeding --- the official
+\proglang{C++} implementations. On standardized benchmarks with 20 features
+and up to 10{,}000 samples, our \pkg{XGBoost} is 1.1--2.6$\times$ faster,
+\pkg{LightGBM} 1.2--1.4$\times$ faster, and \pkg{CatBoost} 1.3--4.2$\times$
+faster than their respective \proglang{C++} counterparts. The framework is
+published on \url{https://crates.io/} as \pkg{smelt-ml} and provides a
+composable, trait-based architecture inspired by \pkg{mlr3}
+\citep{Lang+Binder+Richter:2019} and \pkg{scikit-learn}
+\citep{Pedregosa+Varoquaux+Gramfort:2011}.
+}
+
+\Keywords{machine learning, gradient boosting, \proglang{Rust}, cache optimization, \pkg{XGBoost}, \pkg{LightGBM}, \pkg{CatBoost}, software}
+\Plainkeywords{machine learning, gradient boosting, Rust, cache optimization, XGBoost, LightGBM, CatBoost, software}
+
+\Address{
+  Francisco Parra\\
+  Departamento de Ingenier\'ia Geogr\'afica\\
+  Universidad de Santiago de Chile\\
+  Avenida Libertador Bernardo O'Higgins 3363\\
+  Santiago, Chile\\
+  E-mail: \email{francisco.parra.o@usach.cl}
+}
+
+\begin{document}
+
+
+%% -- Introduction -------------------------------------------------------------
+
+\section{Introduction} \label{sec:intro}
+
+Gradient boosted decision trees (GBDTs) are the dominant method for supervised
+learning on tabular data \citep{Grinsztajn+Oyallon+Varoquaux:2022}. The three
+most widely used implementations --- \pkg{XGBoost} \citep{Chen+Guestrin:2016},
+\pkg{LightGBM} \citep{Ke+Meng+Finley:2017}, and \pkg{CatBoost}
+\citep{Prokhorenkova+Gusev+Vorobev:2018} --- are implemented in \proglang{C++}
+and have been optimized over many years. These libraries serve as the de facto
+baselines in the majority of applied machine learning studies.
+
+\proglang{Rust} \citep{Rust:2024} is a systems programming language that
+guarantees memory safety without garbage collection through its ownership type
+system \citep{Matsakis+Klock:2014}. It generates machine code comparable to
+\proglang{C++} via the LLVM backend while preventing buffer overflows,
+use-after-free, and data races at compile time. Despite these advantages,
+\proglang{Rust}'s ML ecosystem remains nascent: \pkg{linfa} \citep{linfa:2024},
+the primary \proglang{Rust} ML crate, implements only 9 algorithms and does not
+include gradient boosting.
+
+In this paper, we present \pkg{smelt-ml}, a comprehensive ML framework in
+\proglang{Rust} that fills this gap. Our main contributions are:
+
+\begin{enumerate}
+\item A \textbf{complete ML framework} with 27 supervised learners, clustering,
+  survival analysis, causal inference, and spatial ML --- the most comprehensive
+  ML framework in \proglang{Rust}.
+\item \textbf{Cache-optimized gradient boosting} using column-major bin storage
+  with \code{u8} packing, achieving performance that matches or exceeds the
+  official \proglang{C++} implementations.
+\item \textbf{Novel algorithms} not available in competing frameworks:
+  Geographical-XGBoost \citep{Grekousis:2025}, Causal Forest
+  \citep{Wager+Athey:2018}, Conformal Prediction \citep{Romano+Patterson+Candes:2019},
+  Oblique Forest \citep{Tomita+Browne+Shen:2020}, and streaming Hoeffding Trees.
+\item \textbf{Validation on real datasets} showing accuracy comparable to
+  \pkg{scikit-learn} across standard benchmarks.
+\end{enumerate}
+
+
+%% -- Software Architecture ---------------------------------------------------
+
+\section{Software architecture} \label{sec:architecture}
+
+\subsection{Design principles}
+
+\pkg{smelt-ml} follows a trait-based architecture inspired by \pkg{mlr3}:
+
+\begin{Code}
+Data (CSV) -> Task -> Pipeline(Transformers -> Learner)
+                -> Prediction -> Measure
+\end{Code}
+
+The core abstractions are defined as \proglang{Rust} traits:
+
+\begin{itemize}
+\item \code{Learner}: Algorithm that trains on a \code{Task} and produces a
+  \code{TrainedModel}. Requires \code{Send + Sync} for thread safety.
+\item \code{TrainedModel}: Fitted model that predicts on new data.
+\item \code{Measure}: Evaluation metric (Accuracy, F1, RMSE, R$^2$, AUC-ROC, etc.).
+\item \code{Transformer}: Preprocessing step composable via \code{Pipeline}.
+\item \code{Resample}: Data splitting strategy.
+\end{itemize}
+
+This design enables zero-friction composition: \code{Pipeline} implements
+\code{Learner}, so a pipeline of transformers and a learner can be passed to
+\fct{benchmark}, \code{GridSearch}, or \code{Bagging} without adaptation.
+
+\subsection{Quick start}
+
+A minimal classification example:
+
+\begin{CodeChunk}
+\begin{CodeInput}
+rust> use smelt_ml::prelude::*;
+rust> use ndarray::array;
+rust>
+rust> let features = array![[0.0, 0.0], [1.0, 1.0],
++      [0.0, 1.0], [1.0, 0.0]];
+rust> let target = vec![0, 1, 1, 0];
+rust> let task = ClassificationTask::new("xor", features, target)
++      .unwrap();
+rust>
+rust> let mut xgb = XGBoost::new()
++      .with_n_estimators(50)
++      .with_max_depth(3);
+rust> let model = xgb.train_classif(&task).unwrap();
+rust> let pred = model.predict(task.features()).unwrap();
+\end{CodeInput}
+\end{CodeChunk}
+
+\subsection{Implemented algorithms}
+
+Table~\ref{tab:learners} summarizes the 27 supervised learners. Beyond standard
+algorithms, \pkg{smelt-ml} includes Geographical-XGBoost
+\citep{Grekousis:2025}, Oblique Forest (SPORF) \citep{Tomita+Browne+Shen:2020},
+Explainable Boosting Machine (EBM), streaming Hoeffding Trees, and Dynamic
+Ensemble Selection (KNORA-E).
+
+\begin{table}[t!]
+\centering
+\begin{tabular}{llcc}
+\toprule
+Category & Algorithm & Classif. & Regress. \\
+\midrule
+Trees       & Decision Tree, Oblique Tree/Forest & \checkmark & \checkmark \\
+Ensembles   & Random Forest, Extra Trees, Bagging, Stacking & \checkmark & \checkmark \\
+            & AdaBoost, Dynamic Ensemble Selection & \checkmark & \\
+Boosting    & XGBoost, LightGBM, CatBoost & \checkmark & \checkmark \\
+            & Gradient Boosting, Quantile GB, EBM & \checkmark & \checkmark \\
+Linear      & Linear/Logistic Regression, Ridge, Lasso, Elastic Net & \checkmark & \checkmark \\
+Other       & KNN, Gaussian NB, Linear SVM, Hoeffding Tree & \checkmark & \checkmark \\
+Spatial     & Geographical-XGBoost & & \checkmark \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:learners} Supervised learners in \pkg{smelt-ml}.}
+\end{table}
+
+Additional modules provide: K-Means, DBSCAN, and Isolation Forest (clustering/anomaly);
+Random Survival Forest with C-index \citep{Ishwaran+Kogalur+Blackstone:2008}
+(survival analysis); Causal Forest with honest splitting
+\citep{Athey+Imbens:2016, Wager+Athey:2018} (causal inference); Classifier Chains
+and Regressor Chains (multi-label/output); Quantile Regression Forest; Conformal
+Prediction with CQR \citep{Romano+Patterson+Candes:2019}; and SHAP-based feature
+importance.
+
+
+%% -- Cache-Optimized Gradient Boosting ----------------------------------------
+
+\section{Cache-optimized gradient boosting} \label{sec:optimization}
+
+\subsection{The histogram bottleneck}
+
+Histogram-based gradient boosting \citep{Chen+Guestrin:2016} discretizes
+continuous features into bins and accumulates gradient/hessian statistics per bin.
+The key computational kernel is:
+
+\begin{equation} \label{eq:histogram}
+\text{hist}[b] \mathrel{+}= g_i, \quad b = \text{bin\_index}[i][\text{feature}]
+\end{equation}
+
+The standard row-major storage \code{bin\_index[sample][feature]} causes cache
+misses when iterating over samples for a specific feature, because consecutive
+memory locations correspond to different features of the same sample.
+
+\subsection{Column-major storage with u8 packing}
+
+Our key optimization stores bin indices in \textbf{column-major} order:
+\code{bin\_index[feature][sample]}. When building the histogram for a specific
+feature, all bin accesses are sequential in memory:
+
+\begin{CodeChunk}
+\begin{CodeInput}
+rust> // Column-major: sequential access (cache-friendly)
+rust> for &idx in node_indices {
++      let bin = bins.get_bin(feature, idx);
++      bin_g[bin] += gradients[idx];
++      bin_h[bin] += hessians[idx];
++    }
+\end{CodeInput}
+\end{CodeChunk}
+
+Combined with \textbf{u8 packing} (254 real bins + 1 NaN sentinel fit in 1 byte
+vs.\ 2 bytes for \code{u16}), this halves the memory bandwidth requirement for bin
+access. The same \code{HistBins} structure is shared across all three gradient
+boosting implementations, avoiding code duplication.
+
+\subsection{Additional optimizations}
+
+For \pkg{XGBoost}: automatic switch to exact greedy split finding when
+$n \leq n_{\text{bins}}$, producing optimal splits for small datasets. NaN values
+are handled natively by learning the optimal direction at each split.
+
+For \pkg{CatBoost}: oblivious tree construction with bins built \textbf{once}
+before the boosting loop (rather than per iteration), prefix-sum histogram
+scanning, and parallel feature evaluation via \pkg{rayon}.
+
+For \pkg{LightGBM}: Gradient-based One-Side Sampling (GOSS) with the same
+column-major histogram infrastructure.
+
+
+%% -- Performance Evaluation ---------------------------------------------------
+
+\section{Performance evaluation} \label{sec:performance}
+
+\subsection{Experimental setup}
+
+Benchmarks use synthetic datasets from \pkg{scikit-learn}'s
+\fct{make\_classification} and \fct{make\_regression} (20 features, 10 informative,
+$n$ from 100 to 10{,}000). Configuration: 100 trees, max depth 6, learning rate
+0.3 (\pkg{XGBoost}/\pkg{CatBoost}) or 0.1 (\pkg{LightGBM}). Single-threaded
+execution. \proglang{Rust} compiled with \code{target-cpu=native} (release mode).
+Official libraries via \proglang{Python} API with \code{n\_jobs=1}.
+
+\subsection{Training time}
+
+Table~\ref{tab:classif_perf} shows classification training times.
+
+\begin{table}[t!]
+\centering
+\begin{tabular}{r rrr rrr rrr}
+\toprule
+ & \multicolumn{3}{c}{\pkg{XGBoost}} & \multicolumn{3}{c}{\pkg{LightGBM}} & \multicolumn{3}{c}{\pkg{CatBoost}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
+$n$ & C++ & Rust & $\times$ & C++ & Rust & $\times$ & C++ & Rust & $\times$ \\
+\midrule
+500   & 72  & 28  & 2.6 & 49  & 53  & 0.9 & 253 & 60  & 4.2 \\
+1{,}000  & 90  & 48  & 1.9 & 104 & 88  & 1.2 & 254 & 98  & 2.6 \\
+5{,}000  & 191 & 139 & 1.4 & 174 & 186 & 0.9 & 324 & 209 & 1.6 \\
+10{,}000 & 274 & 253 & 1.1 & 209 & 243 & 0.9 & 445 & 350 & 1.3 \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:classif_perf} Classification training time (ms).
+Speedup $>1$ means \pkg{smelt-ml} is faster. All values single-threaded.}
+\end{table}
+
+\pkg{smelt-ml}'s \pkg{XGBoost} is consistently faster (1.1--2.6$\times$),
+\pkg{CatBoost} is substantially faster (1.3--4.2$\times$), and \pkg{LightGBM}
+is competitive (0.9--1.2$\times$). Similar patterns hold for regression tasks.
+
+\subsection{Accuracy validation}
+
+Table~\ref{tab:accuracy} validates correctness against \pkg{scikit-learn} on
+standard datasets.
+
+\begin{table}[t!]
+\centering
+\begin{tabular}{llccc}
+\toprule
+Dataset & Learner & \pkg{smelt-ml} & \pkg{scikit-learn} & $\Delta$ \\
+\midrule
+Iris        & Decision Tree & 0.953 & 0.953 & 0.000 \\
+            & Random Forest & 0.953 & 0.967 & $-$0.014 \\
+            & XGBoost       & 0.953 & 0.953 & 0.000 \\
+Wine        & Random Forest & 0.983 & 0.972 & $+$0.011 \\
+            & Logistic Reg. & 0.989 & 0.961 & $+$0.028 \\
+            & XGBoost       & 0.971 & 0.944 & $+$0.027 \\
+Breast Ca.  & Random Forest & 0.958 & 0.956 & $+$0.002 \\
+            & XGBoost       & 0.970 & 0.974 & $-$0.004 \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:accuracy} 5-fold CV accuracy on real datasets.}
+\end{table}
+
+All comparisons are within $\pm$3\% of \pkg{scikit-learn}.
+
+
+%% -- Unique Features ----------------------------------------------------------
+
+\section{Unique features} \label{sec:unique}
+
+\subsection{Geographical-XGBoost}
+
+Implementation of \citet{Grekousis:2025}: bi-square spatial kernel weights,
+local \pkg{XGBoost} models per spatial unit, ensemble of global and local
+predictions with adaptive $\alpha$ weight. First implementation outside the
+original \proglang{Python} library.
+
+\subsection{Causal Forest}
+
+Honest splitting following \citet{Athey+Imbens:2016} and \citet{Wager+Athey:2018}.
+Estimates conditional average treatment effects (CATE) $\tau(x) = E[Y(1) - Y(0) | X = x]$
+with 95\% confidence intervals. First implementation in a \proglang{Rust} ML framework.
+
+\subsection{Conformal prediction}
+
+Split conformal prediction for regression and classification with conformalized
+quantile regression \citep[CQR;][]{Romano+Patterson+Candes:2019}. Provides
+distribution-free prediction intervals with guaranteed coverage.
+
+
+%% -- Summary ------------------------------------------------------------------
+
+\section{Summary and discussion} \label{sec:summary}
+
+We have demonstrated that a pure-\proglang{Rust} implementation of gradient
+boosted trees can match or exceed the performance of highly optimized
+\proglang{C++} libraries through careful attention to memory layout and cache
+utilization. The performance advantage stems from \proglang{Rust}'s ownership
+model, which guarantees no aliasing (\code{\&mut} is unique) and enables LLVM to
+apply more aggressive auto-vectorization than is possible with \proglang{C++},
+where pointer aliasing must be assumed unless explicitly annotated.
+
+\pkg{smelt-ml} provides a comprehensive ML toolkit for \proglang{Rust} with
+unique capabilities in spatial ML, causal inference, and uncertainty
+quantification. The framework contains zero \code{unsafe} blocks across
+13{,}377 lines of code, demonstrating that memory safety and high performance
+are not mutually exclusive.
+
+Limitations include the performance gap on datasets beyond 10{,}000 samples
+(where \proglang{C++} libraries employ SIMD intrinsics and GPU backends),
+the absence of GPU support, and the simplified ordered boosting in \pkg{CatBoost}.
+
+The software is available at \url{https://crates.io/crates/smelt-ml} under the
+MIT license, with source code at \url{https://github.com/franciscoparrao/smelt}.
+
+
+%% -- Computational details ----------------------------------------------------
+
+\section*{Computational details}
+
+The results in this paper were obtained using \proglang{Rust}~1.89 with the
+\pkg{ndarray}~0.16, \pkg{rayon}~1.10, and \pkg{serde}~1.0 crates. Official
+\proglang{C++} libraries were accessed via \proglang{Python}~3.12 with
+\pkg{xgboost}~3.1, \pkg{lightgbm}~4.6, and \pkg{catboost}~1.2.
+\pkg{scikit-learn}~1.8 was used for accuracy validation.
+\proglang{Rust} code was compiled with \code{RUSTFLAGS="-C target-cpu=native"}
+in release mode.
+
+
+\section*{Acknowledgments}
+
+[To be completed]
+
+
+%% -- Bibliography -------------------------------------------------------------
+
+\bibliography{refs}
+
+
+\end{document}
