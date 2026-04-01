@@ -22,6 +22,7 @@ pub struct CsvLoader {
     path: String,
     target_col: Option<String>,
     delimiter: u8,
+    max_rows: Option<usize>,
 }
 
 impl CsvLoader {
@@ -30,6 +31,7 @@ impl CsvLoader {
             path: path.as_ref().to_string_lossy().to_string(),
             target_col: None,
             delimiter: b',',
+            max_rows: None,
         }
     }
 
@@ -40,6 +42,12 @@ impl CsvLoader {
 
     pub fn delimiter(mut self, d: u8) -> Self {
         self.delimiter = d;
+        self
+    }
+
+    /// Limit the number of rows to read (prevents OOM on large files).
+    pub fn max_rows(mut self, n: usize) -> Self {
+        self.max_rows = Some(n);
         self
     }
 
@@ -57,6 +65,9 @@ impl CsvLoader {
 
         let mut rows = Vec::new();
         for result in rdr.records() {
+            if let Some(max) = self.max_rows {
+                if rows.len() >= max { break; }
+            }
             let record = result.map_err(|e| SmeltError::Csv(e.to_string()))?;
             let row: Vec<String> = record.iter().map(|f| f.to_string()).collect();
             rows.push(row);

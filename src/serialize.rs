@@ -89,7 +89,12 @@ pub fn save_json(model: &SerializableModel, path: impl AsRef<Path>) -> Result<()
 }
 
 /// Load a model from a JSON file.
+/// Rejects files larger than 100MB to prevent OOM.
 pub fn load_json(path: impl AsRef<Path>) -> Result<SerializableModel> {
+    let metadata = fs::metadata(&path)?;
+    if metadata.len() > 100_000_000 {
+        return Err(SmeltError::Other("Model file too large (>100MB)".into()));
+    }
     let json = fs::read_to_string(path)?;
     SerializableModel::from_json(&json)
 }
