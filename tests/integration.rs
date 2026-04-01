@@ -4009,3 +4009,96 @@ fn shap_global_importance_order() {
     assert!(signal_imp >= noise_imp,
         "signal ({signal_imp:.4}) should be >= noise ({noise_imp:.4})");
 }
+
+// ── Hoeffding Tree tests ───────────────────────────────────────────
+
+#[test]
+fn hoeffding_tree_classif() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1],
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("ht", features, target).unwrap();
+
+    let mut ht = HoeffdingTree::new().with_grace_period(5).with_delta(1e-3);
+    let model = ht.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.5, "HoeffdingTree should do better than random, got {acc}");
+}
+
+#[test]
+fn hoeffding_tree_online() {
+    // Test incremental learning
+    let mut ht = HoeffdingTree::new().with_grace_period(5).with_delta(1e-3);
+
+    // Feed samples one at a time
+    for _ in 0..20 {
+        ht.partial_fit(&[0.0, 0.0], 0, 2);
+        ht.partial_fit(&[1.0, 1.0], 1, 2);
+    }
+
+    // Should have learned the pattern
+    let test = array![[0.1, 0.1], [0.9, 0.9]];
+    let task = ClassificationTask::new("ht_online", test.clone(), vec![0, 1]).unwrap();
+    let mut ht2 = HoeffdingTree::new().with_grace_period(5);
+
+    // Feed all training data
+    for _ in 0..20 {
+        ht2.partial_fit(&[0.0, 0.0], 0, 2);
+        ht2.partial_fit(&[1.0, 1.0], 1, 2);
+    }
+
+    let model = ht2.train_classif(&task).unwrap();
+    let pred = model.predict(&test).unwrap();
+    assert_eq!(pred.n_samples(), 2);
+}
+
+#[test]
+fn hoeffding_tree_in_benchmark() {
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1],
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("ht_b", features, target).unwrap();
+
+    let cv = CrossValidation::new(4).with_seed(42);
+    let mut ht = HoeffdingTree::new().with_grace_period(3);
+    let r = benchmark::resample_classif(&mut ht, &task, &cv, &[&Accuracy]).unwrap();
+    assert_eq!(r.learner_id, "hoeffding_tree");
+}
+
+// ── Dynamic Ensemble Selection tests ───────────────────────────────
+
+#[test]
+fn des_basic_classif() {
+    use smelt_ml::learner::DynamicEnsemble;
+
+    let features = array![
+        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
+        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
+        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("des", features, target).unwrap();
+
+    let mut des = DynamicEnsemble::new(vec![
+        Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>),
+        Box::new(|| Box::new(KNearestNeighbors::new(3)) as Box<dyn Learner>),
+        Box::new(|| Box::new(GaussianNB::new()) as Box<dyn Learner>),
+    ]).with_k_neighbors(3);
+
+    let model = des.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(acc >= 0.5, "DES should classify, got {acc}");
+}

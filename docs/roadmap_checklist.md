@@ -31,8 +31,8 @@
 - [x] **Multi-label Classification (Classifier Chains)** — Train C_j on X + previous labels. 2,000+ papers. ✅ v0.6.1
 - [x] **Multi-output / Multi-target Regression** — Regressor Chains. 1,000+ papers. ✅ v0.7.0
 - [x] **Quantile Regression Forest** — QRF con weighted quantiles de las hojas. 602 papers. ✅ v0.7.0
-- [ ] **Hoeffding Trees (Streaming)** — VFDT + HAT adaptivo. Split con Hoeffding bound. Ni sklearn ni mlr3 lo tienen. ~300 líneas.
-- [ ] **Dynamic Ensemble Selection (META-DES)** — Selección dinámica por instancia. Superior a stacking estático. 339 papers. ~250 líneas.
+- [x] **Hoeffding Trees (Streaming)** — VFDT + Hoeffding bound. Online partial_fit(). ✅ v0.9.2
+- [x] **Dynamic Ensemble Selection (KNORA-E)** — Selección dinámica por instancia. ✅ v0.9.2
 
 ## Prioridad 3: MEDIO (mejoras y extensiones)
 
