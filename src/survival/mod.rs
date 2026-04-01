@@ -114,7 +114,7 @@ fn nelson_aalen(events: &[SurvivalEvent], indices: &[usize]) -> Vec<(f64, f64)> 
         .filter(|&&i| events[i].event)
         .map(|&i| events[i].time)
         .collect();
-    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     times.dedup();
 
     if times.is_empty() { return vec![(0.0, 0.0)]; }
@@ -143,7 +143,7 @@ fn log_rank_score(
 ) -> f64 {
     let all: Vec<usize> = left.iter().chain(right.iter()).copied().collect();
     let mut times: Vec<f64> = all.iter().map(|&i| events[i].time).collect();
-    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     times.dedup();
 
     let mut obs_left = 0.0;
@@ -310,7 +310,7 @@ impl RandomSurvivalForest {
 
         // Collect all unique event times
         let mut all_times: Vec<f64> = events.iter().filter(|e| e.event).map(|e| e.time).collect();
-        all_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        all_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         all_times.dedup();
 
         for i in 0..n {

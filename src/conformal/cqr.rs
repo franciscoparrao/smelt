@@ -74,7 +74,7 @@ impl<'a> CQR<'a> {
                 (lo - y).max(y - hi)
             })
             .collect();
-        scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Quantile of conformity scores
         let n = scores.len();

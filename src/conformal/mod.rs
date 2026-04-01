@@ -84,7 +84,7 @@ impl<'a> ConformalRegressor<'a> {
             .zip(cal_targets)
             .map(|(p, t)| (p - t).abs())
             .collect();
-        residuals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        residuals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Quantile: ceil((n+1)(1-alpha)) / n
         let n = residuals.len();
@@ -164,7 +164,7 @@ impl<'a> ConformalClassifier<'a> {
             .zip(cal_targets)
             .map(|(probs, &t)| 1.0 - probs[t])
             .collect();
-        scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let n = scores.len();
         let q_idx = ((n as f64 + 1.0) * (1.0 - alpha)).ceil() as usize;

@@ -3,6 +3,7 @@
 //! Each learner implements the `Learner` trait.
 
 pub mod tree;
+pub mod histogram;
 pub mod knn;
 pub mod linear_regression;
 pub mod logistic_regression;

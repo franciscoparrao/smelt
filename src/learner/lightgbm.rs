@@ -19,7 +19,7 @@ use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
 
-const NAN_BIN: u8 = u8::MAX;
+use super::histogram::{HistBins, NAN_BIN};
 
 /// LightGBM learner.
 ///
@@ -85,58 +85,7 @@ impl LightGBM {
     pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
 }
 
-// ── Histogram binning (column-major, u8 packed) ────────────────────
-
-struct Bins {
-    boundaries: Vec<Vec<f64>>,
-    /// Column-major: cols[feature][sample] -> bin (u8, 255 = NaN)
-    cols: Vec<Vec<u8>>,
-}
-
-impl Bins {
-    fn build(features: &Array2<f64>, n_bins: usize) -> Self {
-        let n_bins = n_bins.min(254);
-        let (ns, nf) = (features.nrows(), features.ncols());
-        let mut boundaries = Vec::with_capacity(nf);
-        let mut cols = Vec::with_capacity(nf);
-
-        for j in 0..nf {
-            let mut vals: Vec<f64> = features.column(j).iter().copied()
-                .filter(|v| !v.is_nan()).collect();
-            vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            vals.dedup();
-
-            if vals.is_empty() {
-                boundaries.push(vec![f64::INFINITY]);
-                cols.push(vec![NAN_BIN; ns]);
-                continue;
-            }
-
-            let step = (vals.len() as f64 / n_bins as f64).max(1.0);
-            let mut bounds = Vec::new();
-            let mut idx = step;
-            while (idx as usize) < vals.len() {
-                bounds.push(vals[idx as usize]);
-                idx += step;
-            }
-            if bounds.is_empty() || *bounds.last().unwrap() < vals[vals.len() - 1] {
-                bounds.push(f64::INFINITY);
-            }
-
-            let mut col = Vec::with_capacity(ns);
-            for i in 0..ns {
-                let v = features[[i, j]];
-                col.push(if v.is_nan() { NAN_BIN }
-                    else { bounds.iter().position(|&b| v < b).unwrap_or(bounds.len() - 1) as u8 });
-            }
-            cols.push(col);
-            boundaries.push(bounds);
-        }
-        Self { boundaries, cols }
-    }
-
-    #[inline] fn get_bin(&self, feature: usize, sample: usize) -> u8 { self.cols[feature][sample] }
-}
+type Bins = HistBins;
 
 // ── Tree node ───────────────────────────────────────────────────────
 
@@ -493,7 +442,7 @@ impl Learner for LightGBM {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
-        let bins = Bins::build(features, self.n_bins);
+        let bins = HistBins::build(features, self.n_bins);
         let initial = target.iter().sum::<f64>() / ns as f64;
         let mut preds = vec![initial; ns];
         let mut trees = Vec::with_capacity(self.n_estimators);
@@ -534,7 +483,7 @@ impl LightGBM {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
-        let bins = Bins::build(features, self.n_bins);
+        let bins = HistBins::build(features, self.n_bins);
         let p_pos = target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64;
         let initial = (p_pos / (1.0 - p_pos).max(1e-15)).ln();
         let mut fv = vec![initial; ns];
@@ -565,7 +514,7 @@ impl LightGBM {
         let features = task.features();
         let target = task.target();
         let (ns, nf, nc) = (task.n_samples(), task.n_features(), task.n_classes());
-        let bins = Bins::build(features, self.n_bins);
+        let bins = HistBins::build(features, self.n_bins);
         let mut cc = vec![0usize; nc];
         for &t in target { cc[t] += 1; }
         let initial: Vec<f64> = cc.iter().map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln()).collect();

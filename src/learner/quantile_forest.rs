@@ -180,7 +180,7 @@ impl TrainedQuantileForest {
                 for tree in &self.trees {
                     all_values.extend_from_slice(tree.find_leaf(&row_vec));
                 }
-                all_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                all_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 let idx = ((all_values.len() as f64 * quantile).ceil() as usize)
                     .min(all_values.len()).max(1) - 1;
                 all_values[idx]

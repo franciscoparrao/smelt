@@ -15,7 +15,7 @@ use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
 
-const NAN_BIN: u8 = u8::MAX; // 255 = NaN sentinel (max 254 real bins)
+use super::histogram::{HistBins, NAN_BIN};
 
 /// XGBoost learner (eXtreme Gradient Boosting).
 ///
@@ -81,71 +81,7 @@ impl XGBoost {
 
 // ── Histogram binning (NaN-aware, column-major, u8 packed) ──────────
 //
-// Column-major storage: bins[feature][sample] instead of [sample][feature].
-// This gives sequential memory access when building histograms per feature,
-// dramatically improving cache locality (the #1 bottleneck).
-// u8 packing: 254 real bins fit in 1 byte (255 = NaN), halving memory vs u16.
-
-struct FeatureBins {
-    boundaries: Vec<Vec<f64>>,
-    /// Column-major: bins_col[feature][sample] -> bin index (u8, 255 = NaN)
-    bins_col: Vec<Vec<u8>>,
-}
-
-impl FeatureBins {
-    fn build(features: &Array2<f64>, n_bins: usize) -> Self {
-        let n_bins = n_bins.min(254); // max 254 real bins (255 = NaN)
-        let n_samples = features.nrows();
-        let n_features = features.ncols();
-        let mut boundaries = Vec::with_capacity(n_features);
-        let mut bins_col = Vec::with_capacity(n_features);
-
-        for j in 0..n_features {
-            let mut vals: Vec<f64> = features.column(j).iter()
-                .copied().filter(|v| !v.is_nan()).collect();
-            vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            vals.dedup();
-
-            let n_unique = vals.len();
-            if n_unique == 0 {
-                boundaries.push(vec![f64::INFINITY]);
-                bins_col.push(vec![NAN_BIN; n_samples]);
-                continue;
-            }
-
-            let step = (n_unique as f64 / n_bins as f64).max(1.0);
-            let mut bounds = Vec::new();
-            let mut idx = step;
-            while (idx as usize) < n_unique {
-                bounds.push(vals[idx as usize]);
-                idx += step;
-            }
-            if bounds.is_empty() || *bounds.last().unwrap() < vals[n_unique - 1] {
-                bounds.push(f64::INFINITY);
-            }
-
-            // Column-major: sequential write per feature
-            let mut col_bins = Vec::with_capacity(n_samples);
-            for i in 0..n_samples {
-                let val = features[[i, j]];
-                if val.is_nan() {
-                    col_bins.push(NAN_BIN);
-                } else {
-                    col_bins.push(bounds.iter()
-                        .position(|&b| val < b)
-                        .unwrap_or(bounds.len() - 1) as u8);
-                }
-            }
-            bins_col.push(col_bins);
-            boundaries.push(bounds);
-        }
-        Self { boundaries, bins_col }
-    }
-
-    #[inline] fn n_bins(&self, feature: usize) -> usize { self.boundaries[feature].len() }
-    #[inline] fn bin_threshold(&self, feature: usize, bin: usize) -> f64 { self.boundaries[feature][bin] }
-    #[inline] fn get_bin(&self, feature: usize, sample: usize) -> u8 { self.bins_col[feature][sample] }
-}
+type FeatureBins = HistBins;
 
 // ── XGBoost tree node ───────────────────────────────────────────────
 
@@ -506,7 +442,7 @@ impl Learner for XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
-        let bins = FeatureBins::build(features, self.n_bins);
+        let bins = HistBins::build(features, self.n_bins);
         let initial = target.iter().sum::<f64>() / ns as f64;
         let mut preds = vec![initial; ns];
         let mut trees = Vec::with_capacity(self.n_estimators);
@@ -543,7 +479,7 @@ impl XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
-        let bins = FeatureBins::build(features, self.n_bins);
+        let bins = HistBins::build(features, self.n_bins);
         let p_pos = target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64;
         let initial = (p_pos / (1.0 - p_pos).max(1e-15)).ln();
         let mut fv = vec![initial; ns];
@@ -580,7 +516,7 @@ impl XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf, nc) = (task.n_samples(), task.n_features(), task.n_classes());
-        let bins = FeatureBins::build(features, self.n_bins);
+        let bins = HistBins::build(features, self.n_bins);
         let mut cc = vec![0usize; nc];
         for &t in target { cc[t] += 1; }
         let initial: Vec<f64> = cc.iter().map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln()).collect();

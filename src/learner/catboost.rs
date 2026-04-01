@@ -15,6 +15,7 @@ use rand::SeedableRng;
 use rayon::prelude::*;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
+use super::histogram::HistBins;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
@@ -146,49 +147,7 @@ impl ObliviousTree {
     }
 }
 
-/// Column-major bins for CatBoost oblivious tree building.
-struct CBBins {
-    boundaries: Vec<Vec<f64>>,
-    cols: Vec<Vec<u8>>,
-}
-
-impl CBBins {
-    fn build(features: &Array2<f64>, n_bins: usize) -> Self {
-        let n_bins = n_bins.min(254);
-        let (ns, nf) = (features.nrows(), features.ncols());
-        let mut boundaries = Vec::with_capacity(nf);
-        let mut cols = Vec::with_capacity(nf);
-
-        for j in 0..nf {
-            let mut vals: Vec<f64> = features.column(j).iter().copied()
-                .filter(|v| !v.is_nan()).collect();
-            vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            vals.dedup();
-
-            let step = (vals.len() as f64 / n_bins as f64).max(1.0);
-            let mut bounds = Vec::new();
-            let mut idx = step;
-            while (idx as usize) < vals.len() {
-                bounds.push(vals[idx as usize]);
-                idx += step;
-            }
-            if bounds.is_empty() {
-                bounds.push(f64::INFINITY);
-            } else if *bounds.last().unwrap() < *vals.last().unwrap_or(&0.0) {
-                bounds.push(f64::INFINITY);
-            }
-
-            let mut col = Vec::with_capacity(ns);
-            for i in 0..ns {
-                let v = features[[i, j]];
-                col.push(bounds.iter().position(|&b| v < b).unwrap_or(bounds.len() - 1) as u8);
-            }
-            cols.push(col);
-            boundaries.push(bounds);
-        }
-        Self { boundaries, cols }
-    }
-}
+type CBBins = HistBins;
 
 fn build_oblivious_tree(
     bins: &CBBins,
@@ -222,7 +181,7 @@ fn build_oblivious_tree(
                         let mut bg = vec![0.0; nb];
                         let mut bh = vec![0.0; nb];
                         for &idx in partition {
-                            let b = bins.cols[feat][idx] as usize;
+                            let b = bins.get_bin(feat, idx) as usize;
                             bg[b] += grads[idx];
                             bh[b] += hess[idx];
                         }
@@ -277,7 +236,7 @@ fn build_oblivious_tree(
             let mut left = Vec::new();
             let mut right = Vec::new();
             for &idx in partition {
-                if (bins.cols[best_feat][idx] as usize) <= best_bin {
+                if (bins.get_bin(best_feat, idx) as usize) <= best_bin {
                     left.push(idx);
                 } else {
                     right.push(idx);
@@ -400,7 +359,7 @@ impl Learner for CatBoost {
         let mut preds = vec![initial; ns];
         let mut trees = Vec::with_capacity(self.n_estimators);
         let indices: Vec<usize> = (0..ns).collect();
-        let bins = CBBins::build(&encoded, 64);
+        let bins = HistBins::build(&encoded, 64);
 
         for _ in 0..self.n_estimators {
             let grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
@@ -445,7 +404,7 @@ impl CatBoost {
         let mut fv = vec![initial; ns];
         let mut trees = Vec::with_capacity(self.n_estimators);
         let indices: Vec<usize> = (0..ns).collect();
-        let bins = CBBins::build(&encoded, 64);
+        let bins = HistBins::build(&encoded, 64);
 
         for _ in 0..self.n_estimators {
             let grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
@@ -483,7 +442,7 @@ impl CatBoost {
         let mut fv: Vec<Vec<f64>> = (0..ns).map(|_| initial.clone()).collect();
         let mut trees = Vec::with_capacity(self.n_estimators * nc);
         let indices: Vec<usize> = (0..ns).collect();
-        let bins = CBBins::build(&encoded, 64);
+        let bins = HistBins::build(&encoded, 64);
 
         for _ in 0..self.n_estimators {
             let probs: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
