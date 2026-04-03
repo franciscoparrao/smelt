@@ -1,9 +1,14 @@
-//! CatBoost: Gradient boosting with native categorical feature support.
+//! CatBoost-inspired symmetric gradient boosting with ordered target statistics.
 //!
-//! Key innovations:
-//! - Ordered Target Statistics for categorical features (avoids target leakage)
-//! - Oblivious (symmetric) trees: same split at each depth level
+//! This implements two key innovations from the CatBoost paper:
+//! - **Ordered Target Statistics** for categorical features (avoids target leakage
+//!   via permutation-based encoding with Bayesian prior)
+//! - **Oblivious (symmetric) trees**: same split at each depth level
 //! - Newton boosting with L2 regularization
+//!
+//! **Not implemented**: full O(n²) ordered boosting (per-sample model approximations),
+//! GPU training, distributed computation, interaction/monotone constraints.
+//! This is a CatBoost-inspired symmetric GBM, not a feature-complete reimplementation.
 //!
 //! Reference: Prokhorenkova, L. et al. (2018). CatBoost: unbiased boosting
 //! with categorical features. NeurIPS.
@@ -21,7 +26,11 @@ use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
 
-/// CatBoost learner with native categorical feature support.
+/// CatBoost-inspired symmetric GBM with ordered target statistics.
+///
+/// Implements oblivious trees and permutation-based target encoding from
+/// Prokhorenkova et al. (2018). Does not include full ordered boosting
+/// (O(n²) per-sample models), GPU support, or distributed training.
 ///
 /// # Examples
 ///
