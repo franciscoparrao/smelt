@@ -1,12 +1,17 @@
-//! LightGBM: Light Gradient Boosting Machine.
+//! LightGBM-inspired leaf-wise gradient boosting with GOSS.
 //!
-//! Key innovations over standard gradient boosting:
-//! - Gradient-based One-Side Sampling (GOSS): keeps top gradients, samples rest
-//! - Leaf-wise (best-first) tree growth: always splits the leaf with highest gain
+//! This implements two key ideas from the LightGBM paper:
+//! - **Gradient-based One-Side Sampling (GOSS)**: keeps top gradients, samples rest
+//! - **Leaf-wise (best-first) tree growth**: always splits the leaf with highest gain
 //! - Histogram-based splits with NaN handling
 //!
+//! **Not implemented**: Exclusive Feature Bundling (EFB), weighted GOSS histogram
+//! pass, GPU training, distributed computation. This implementation does not match
+//! the official library's performance; it is included for API completeness and the
+//! leaf-wise growth strategy.
+//!
 //! Reference: Ke, G. et al. (2017). LightGBM: A Highly Efficient Gradient Boosting
-//! Decision Tree. NeurIPS. (32,467 citations)
+//! Decision Tree. NeurIPS.
 
 use ndarray::{Array2, ArrayView1};
 use rand::seq::SliceRandom;
@@ -21,7 +26,11 @@ use crate::Result;
 
 use super::histogram::{HistBins, NAN_BIN};
 
-/// LightGBM learner.
+/// LightGBM-inspired leaf-wise GBM with GOSS sampling.
+///
+/// Implements leaf-wise growth and gradient-based one-side sampling from
+/// Ke et al. (2017). Does not include Exclusive Feature Bundling (EFB)
+/// or weighted GOSS histograms.
 ///
 /// # Examples
 ///

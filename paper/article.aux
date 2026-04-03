@@ -14,8 +14,8 @@
 \citation{Matsakis+Klock:2014}
 \citation{linfa:2024}
 \citation{Grekousis:2025}
-\citation{Wager+Athey:2018}
 \citation{Romano+Patterson+Candes:2019}
+\citation{Wager+Athey:2018}
 \citation{Tomita+Browne+Shen:2020}
 \newlabel{sec:architecture}{{2}{2}{}{section.2}{}}
 \citation{Grekousis:2025}
@@ -26,35 +26,36 @@
 \citation{linfa:2024}
 \citation{Pedregosa+Varoquaux+Gramfort:2011}
 \citation{Lang+Binder+Richter:2019}
+\citation{Chen+Guestrin:2016}
 \@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces  Supervised learners in {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml}. $^\dagger $CatBoost-inspired symmetric GBM with ordered target statistics; see Section~\ref {sec:catboost_scope} for scope.}}{4}{table.1}\protected@file@percent }
 \newlabel{tab:learners}{{1}{4}{Supervised learners in \pkg {smelt-ml}. $^\dagger $CatBoost-inspired symmetric GBM with ordered target statistics; see Section~\ref {sec:catboost_scope} for scope}{table.1}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces  Feature comparison across ML frameworks. $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM). $^c$Via extension packages. $^d$Available in \textsf  {R} via {\fontseries  {m}\fontseries  {b}\selectfont  grf}. $^e$Via {\fontseries  {m}\fontseries  {b}\selectfont  imbalanced-learn}. $^f$Via {\fontseries  {m}\fontseries  {b}\selectfont  scikit-optimize} or {\fontseries  {m}\fontseries  {b}\selectfont  Optuna}.}}{4}{table.2}\protected@file@percent }
-\newlabel{tab:frameworks}{{2}{4}{Feature comparison across ML frameworks. $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM). $^c$Via extension packages. $^d$Available in \proglang {R} via \pkg {grf}. $^e$Via \pkg {imbalanced-learn}. $^f$Via \pkg {scikit-optimize} or \pkg {Optuna}}{table.2}{}}
-\citation{Chen+Guestrin:2016}
+\newlabel{sec:optimization}{{3}{4}{}{section.3}{}}
+\newlabel{eq:histogram}{{1}{4}{}{equation.3.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces  Feature comparison across ML frameworks. $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM). $^c$Via extension packages. $^d$Available in \textsf  {R} via {\fontseries  {m}\fontseries  {b}\selectfont  grf}. $^e$Via {\fontseries  {m}\fontseries  {b}\selectfont  imbalanced-learn}. $^f$Via {\fontseries  {m}\fontseries  {b}\selectfont  scikit-optimize} or {\fontseries  {m}\fontseries  {b}\selectfont  Optuna}.}}{5}{table.2}\protected@file@percent }
+\newlabel{tab:frameworks}{{2}{5}{Feature comparison across ML frameworks. $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM). $^c$Via extension packages. $^d$Available in \proglang {R} via \pkg {grf}. $^e$Via \pkg {imbalanced-learn}. $^f$Via \pkg {scikit-optimize} or \pkg {Optuna}}{table.2}{}}
 \citation{Prokhorenkova+Gusev+Vorobev:2018}
-\newlabel{sec:optimization}{{3}{5}{}{section.3}{}}
-\newlabel{eq:histogram}{{1}{5}{}{equation.3.1}{}}
-\newlabel{sec:catboost_scope}{{3.4}{5}{}{subsection.3.4}{}}
-\newlabel{sec:feature_compare}{{3.5}{6}{}{subsection.3.5}{}}
+\newlabel{sec:catboost_scope}{{3.4}{6}{}{subsection.3.4}{}}
+\newlabel{sec:lightgbm_scope}{{3.5}{6}{}{subsection.3.5}{}}
+\newlabel{sec:feature_compare}{{3.6}{6}{}{subsection.3.6}{}}
 \newlabel{sec:performance}{{4}{6}{}{section.4}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces  Implemented features in {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml}'s gradient boosting engines. \text  {$\mathsurround \z@ \mathchar "458$}\ = implemented, --- = not implemented. $^*$CatBoost's $O(n^2)$ per-sample model approximation.}}{7}{table.3}\protected@file@percent }
 \newlabel{tab:features}{{3}{7}{Implemented features in \pkg {smelt-ml}'s gradient boosting engines. \checkmark \ = implemented, --- = not implemented. $^*$CatBoost's $O(n^2)$ per-sample model approximation}{table.3}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces  Classification training time (ms, mean $\pm $ std, 10 runs). Speedup $>1$ means {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} is faster. All values single-threaded.}}{7}{table.4}\protected@file@percent }
-\newlabel{tab:classif_perf}{{4}{7}{Classification training time (ms, mean $\pm $ std, 10 runs). Speedup $>1$ means \pkg {smelt-ml} is faster. All values single-threaded}{table.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces  Classification training time (ms, mean $\pm $ std, 10 runs). Speedup $>1$ means {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} is faster. All values single-threaded.}}{8}{table.4}\protected@file@percent }
+\newlabel{tab:classif_perf}{{4}{8}{Classification training time (ms, mean $\pm $ std, 10 runs). Speedup $>1$ means \pkg {smelt-ml} is faster. All values single-threaded}{table.4}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces  Regression training time (ms, mean $\pm $ std, 10 runs).}}{8}{table.5}\protected@file@percent }
 \newlabel{tab:regress_perf}{{5}{8}{Regression training time (ms, mean $\pm $ std, 10 runs)}{table.5}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces  Training time scaling comparison (log-log) between {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} (blue) and official \textsf  {C++} libraries (red) across six dataset sizes. Error bars show $\pm $1 standard deviation over 10 runs. {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} is faster at small scales; \textsf  {C++} is faster at $n \geq 50{,}000$.}}{8}{figure.1}\protected@file@percent }
-\newlabel{fig:scaling}{{1}{8}{Training time scaling comparison (log-log) between \pkg {smelt-ml} (blue) and official \proglang {C++} libraries (red) across six dataset sizes. Error bars show $\pm $1 standard deviation over 10 runs. \pkg {smelt-ml} is faster at small scales; \proglang {C++} is faster at $n \geq 50{,}000$}{figure.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces  Training time scaling comparison (log-log) between {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} (blue) and official \textsf  {C++} libraries (red) across six dataset sizes. Error bars show $\pm $1 standard deviation over 10 runs. {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} is faster at small scales; \textsf  {C++} is faster at $n \geq 50{,}000$.}}{9}{figure.1}\protected@file@percent }
+\newlabel{fig:scaling}{{1}{9}{Training time scaling comparison (log-log) between \pkg {smelt-ml} (blue) and official \proglang {C++} libraries (red) across six dataset sizes. Error bars show $\pm $1 standard deviation over 10 runs. \pkg {smelt-ml} is faster at small scales; \proglang {C++} is faster at $n \geq 50{,}000$}{figure.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces  5-fold CV accuracy on real datasets. Both frameworks use stratified 5-fold CV with seed 42 for reproducibility.}}{9}{table.6}\protected@file@percent }
+\newlabel{tab:accuracy}{{6}{9}{5-fold CV accuracy on real datasets. Both frameworks use stratified 5-fold CV with seed 42 for reproducibility}{table.6}{}}
 \citation{Grekousis:2025}
 \citation{geoxgboost:2024}
 \citation{Athey+Imbens:2016}
 \citation{Wager+Athey:2018}
 \citation{Romano+Patterson+Candes:2019}
-\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces  5-fold CV accuracy on real datasets. Both frameworks use stratified 5-fold CV with seed 42 for reproducibility.}}{9}{table.6}\protected@file@percent }
-\newlabel{tab:accuracy}{{6}{9}{5-fold CV accuracy on real datasets. Both frameworks use stratified 5-fold CV with seed 42 for reproducibility}{table.6}{}}
-\newlabel{sec:unique}{{5}{9}{}{section.5}{}}
-\bibdata{refs}
+\newlabel{sec:unique}{{5}{10}{}{section.5}{}}
 \newlabel{sec:summary}{{6}{10}{}{section.6}{}}
+\bibdata{refs}
 \bibcite{Athey+Imbens:2016}{{1}{2016}{{Athey and Imbens}}{{}}}
 \bibcite{Chen+Guestrin:2016}{{2}{2016}{{Chen and Guestrin}}{{}}}
 \bibcite{geoxgboost:2024}{{3}{2024}{{Grekousis}}{{}}}

@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.3.9)  3 APR 2026 01:05
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.3.9)  3 APR 2026 17:33
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -687,7 +687,7 @@ LaTeX Info: Redefining \Relbar on input line 971.
 LaTeX Info: Redefining \[ on input line 2953.
 LaTeX Info: Redefining \] on input line 2954.
 )
-LaTeX Font Info:    Trying to load font information for T1+lmr on input line 57
+LaTeX Font Info:    Trying to load font information for T1+lmr on input line 56
 .
 
 (/usr/share/texmf/tex/latex/lm/t1lmr.fd
@@ -701,24 +701,24 @@ File: l3backend-pdftex.def 2024-01-04 L3 backend support: PDF output (pdfTeX)
 (./article.aux)
 \openout1 = `article.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 57.
-LaTeX Font Info:    ... okay on input line 57.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 57.
-LaTeX Font Info:    ... okay on input line 57.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 57.
-LaTeX Font Info:    ... okay on input line 57.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 57.
-LaTeX Font Info:    ... okay on input line 57.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 57.
-LaTeX Font Info:    ... okay on input line 57.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 57.
-LaTeX Font Info:    ... okay on input line 57.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 57.
-LaTeX Font Info:    ... okay on input line 57.
-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 57.
-LaTeX Font Info:    ... okay on input line 57.
-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 57.
-LaTeX Font Info:    ... okay on input line 57.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 56.
+LaTeX Font Info:    ... okay on input line 56.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 56.
+LaTeX Font Info:    ... okay on input line 56.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 56.
+LaTeX Font Info:    ... okay on input line 56.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 56.
+LaTeX Font Info:    ... okay on input line 56.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 56.
+LaTeX Font Info:    ... okay on input line 56.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 56.
+LaTeX Font Info:    ... okay on input line 56.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 56.
+LaTeX Font Info:    ... okay on input line 56.
+LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 56.
+LaTeX Font Info:    ... okay on input line 56.
+LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 56.
+LaTeX Font Info:    ... okay on input line 56.
 
 (/usr/share/texlive/texmf-dist/tex/context/base/mkii/supp-pdf.mkii
 [Loading MPS to PDF converter (version 2006.09.02).]
@@ -750,85 +750,86 @@ G,.JBIG2,.JB2,.eps]
 File: epstopdf-sys.cfg 2010/07/13 v1.3 Configuration of (r)epstopdf for TeX Liv
 e
 ))
-Package hyperref Info: Link coloring ON on input line 57.
+Package hyperref Info: Link coloring ON on input line 56.
 
 (./article.out) (./article.out)
 \@outlinefile=\write5
 \openout5 = `article.out'.
 
-<jsslogo.jpg, id=95, 540.0175pt x 393.47pt>
+<jsslogo.jpg, id=99, 540.0175pt x 393.47pt>
 File: jsslogo.jpg Graphic file (type jpg)
 <use jsslogo.jpg>
-Package pdftex.def Info: jsslogo.jpg  used on input line 57.
+Package pdftex.def Info: jsslogo.jpg  used on input line 56.
 (pdftex.def)             Requested size: 89.80768pt x 65.43607pt.
-LaTeX Font Info:    Trying to load font information for T1+pzc on input line 57
+LaTeX Font Info:    Trying to load font information for T1+pzc on input line 56
 .
 
 (/usr/share/texlive/texmf-dist/tex/latex/psnfss/t1pzc.fd
 File: t1pzc.fd 2020/03/25 font definitions for T1/pzc.
 )
 LaTeX Font Info:    Font shape `T1/pzc/m/n' in size <28> not available
-(Font)              Font shape `T1/pzc/m/it' tried instead on input line 57.
+(Font)              Font shape `T1/pzc/m/it' tried instead on input line 56.
 LaTeX Font Info:    Trying to load font information for T1+lmss on input line 5
-7.
+6.
 
 (/usr/share/texmf/tex/latex/lm/t1lmss.fd
 File: t1lmss.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
 LaTeX Font Info:    Trying to load font information for OT1+lmr on input line 5
-7.
+6.
 
 (/usr/share/texmf/tex/latex/lm/ot1lmr.fd
 File: ot1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
 LaTeX Font Info:    Trying to load font information for OML+lmm on input line 5
-7.
+6.
 
 (/usr/share/texmf/tex/latex/lm/omllmm.fd
 File: omllmm.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
 LaTeX Font Info:    Trying to load font information for OMS+lmsy on input line 
-57.
+56.
 
 (/usr/share/texmf/tex/latex/lm/omslmsy.fd
 File: omslmsy.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
 LaTeX Font Info:    Trying to load font information for OMX+lmex on input line 
-57.
+56.
 
 (/usr/share/texmf/tex/latex/lm/omxlmex.fd
 File: omxlmex.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <10.95> on input line 57.
+(Font)              <10.95> on input line 56.
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <8> on input line 57.
+(Font)              <8> on input line 56.
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <6> on input line 57.
-LaTeX Font Info:    Trying to load font information for U+msa on input line 57.
+(Font)              <6> on input line 56.
+LaTeX Font Info:    Trying to load font information for U+msa on input line 56.
 
 
 (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 )
-LaTeX Font Info:    Trying to load font information for U+msb on input line 57.
+LaTeX Font Info:    Trying to load font information for U+msb on input line 56.
 
 
 (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 )
-LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <10> on input line 57.
-LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <7> on input line 57.
-LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <5> on input line 57.
 LaTeX Font Info:    Trying to load font information for T1+lmtt on input line 5
-7.
+6.
 
 (/usr/share/texmf/tex/latex/lm/t1lmtt.fd
 File: t1lmtt.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
+LaTeX Font Info:    External font `lmex10' loaded for size
+(Font)              <10> on input line 56.
+LaTeX Font Info:    External font `lmex10' loaded for size
+(Font)              <7> on input line 56.
+LaTeX Font Info:    External font `lmex10' loaded for size
+(Font)              <5> on input line 56.
+
 Underfull \vbox (badness 5622) has occurred while \output is active []
 
  [1
@@ -839,7 +840,7 @@ dvips/lm/lm-ec.enc}{/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc}{
 vips/lm/lm-mathsy.enc}{/usr/share/texmf/fonts/enc/dvips/lm/lm-rm.enc} <./jsslog
 o.jpg>]
 LaTeX Font Info:    Trying to load font information for TS1+lmr on input line 1
-17.
+27.
 
 (/usr/share/texmf/tex/latex/lm/ts1lmr.fd
 File: ts1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
@@ -848,13 +849,17 @@ Overfull \hbox (5.47499pt too wide) has occurred while \output is active
 \T1/lmr/m/n/10.95 2 []
  []
 
-[2{/usr/share/texmf/fonts/enc/dvips/lm/lm-ts1.enc}]
+[2]
 Overfull \hbox (5.47499pt too wide) has occurred while \output is active
 [] \T1/lmr/m/n/10.95 3
  []
 
-[3]
-Underfull \vbox (badness 7012) has occurred while \output is active []
+[3{/usr/share/texmf/fonts/enc/dvips/lm/lm-ts1.enc}]
+Overfull \hbox (17.46855pt too wide) in paragraph at lines 277--280
+[]\T1/lmr/m/n/10.95 Our key op-ti-miza-tion stores bin in-dices in \T1/lmr/bx/n
+/10.95 column-major \T1/lmr/m/n/10.95 or-der: \T1/lmtt/m/n/10.95 bin_index[feat
+ure][sample]\T1/lmr/m/n/10.95 .
+ []
 
 
 Overfull \hbox (5.47499pt too wide) has occurred while \output is active
@@ -862,89 +867,91 @@ Overfull \hbox (5.47499pt too wide) has occurred while \output is active
  []
 
 [4]
-Overfull \hbox (17.46855pt too wide) in paragraph at lines 267--270
-[]\T1/lmr/m/n/10.95 Our key op-ti-miza-tion stores bin in-dices in \T1/lmr/bx/n
-/10.95 column-major \T1/lmr/m/n/10.95 or-der: \T1/lmtt/m/n/10.95 bin_index[feat
-ure][sample]\T1/lmr/m/n/10.95 .
+Overfull \hbox (5.47499pt too wide) has occurred while \output is active
+[] \T1/lmr/m/n/10.95 5
  []
 
-
-Overfull \hbox (1.06343pt too wide) in paragraph at lines 302--307
+[5]
+Overfull \hbox (1.06343pt too wide) in paragraph at lines 312--317
 []\T1/lmr/m/n/10.95 Our \T1/lmtt/m/n/10.95 CatBoost \T1/lmr/m/n/10.95 learner i
 m-ple-ments the two defin-ing al-go-rith-mic con-tri-bu-tions of [][]Prokhorenk
 ova
  []
 
 
-Overfull \hbox (5.47499pt too wide) has occurred while \output is active
-[] \T1/lmr/m/n/10.95 5
+Overfull \hbox (20.20352pt too wide) in paragraph at lines 339--347
+[]\T1/lmr/m/n/10.95 Our \T1/lmtt/m/n/10.95 LightGBM \T1/lmr/m/n/10.95 learner i
+m-ple-ments \T1/lmr/bx/n/10.95 leaf-wise (best-first) tree growth \T1/lmr/m/n/1
+0.95 con-trolled by \T1/lmtt/m/n/10.95 num_leaves\T1/lmr/m/n/10.95 ,
  []
 
-[5]
-Overfull \hbox (22.23787pt too wide) in paragraph at lines 386--395
+
+Overfull \hbox (22.23787pt too wide) in paragraph at lines 415--424
 \T1/lmr/m/n/10.95 iso-late al-go-rith-mic ef-fi-ciency from par-al-leliza-tion 
 strat-egy. \T1/lmss/m/n/10.95 Rust \T1/lmr/m/n/10.95 com-piled with \T1/lmtt/m/
 n/10.95 target-cpu=native
  []
 
 
-Overfull \hbox (22.45679pt too wide) in paragraph at lines 410--425
- [][] 
- []
-
-
-Overfull \hbox (22.45679pt too wide) in paragraph at lines 431--445
- [][] 
- []
-
-<scaling.pdf, id=243, 859.35336pt x 495.52489pt>
-File: scaling.pdf Graphic file (type pdf)
-<use scaling.pdf>
-Package pdftex.def Info: scaling.pdf  used on input line 457.
-(pdftex.def)             Requested size: 442.65375pt x 255.2473pt.
-
 Overfull \hbox (5.47499pt too wide) has occurred while \output is active
 \T1/lmr/m/n/10.95 6 []
  []
 
 [6]
+Overfull \hbox (22.45679pt too wide) in paragraph at lines 439--454
+ [][] 
+ []
+
+
+Overfull \hbox (22.45679pt too wide) in paragraph at lines 460--474
+ [][] 
+ []
+
+
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+
 Overfull \hbox (5.47499pt too wide) has occurred while \output is active
 [] \T1/lmr/m/n/10.95 7
  []
 
 [7]
+<scaling.pdf, id=265, 859.35336pt x 495.52489pt>
+File: scaling.pdf Graphic file (type pdf)
+<use scaling.pdf>
+Package pdftex.def Info: scaling.pdf  used on input line 486.
+(pdftex.def)             Requested size: 442.65375pt x 255.2473pt.
+
 Overfull \hbox (5.47499pt too wide) has occurred while \output is active
 \T1/lmr/m/n/10.95 8 []
  []
 
-[8 <./scaling.pdf>]
+[8]
 Overfull \hbox (5.47499pt too wide) has occurred while \output is active
 [] \T1/lmr/m/n/10.95 9
  []
 
-[9] (./article.bbl
-Underfull \vbox (badness 10000) has occurred while \output is active []
-
-
+[9 <./scaling.pdf>]
 Overfull \hbox (10.94998pt too wide) has occurred while \output is active
 \T1/lmr/m/n/10.95 10 []
  []
 
-[10]
+[10] (./article.bbl
 
 LaTeX Font Warning: Font shape `T1/lmr/b/it' in size <10.95> not available
 (Font)              Font shape `T1/lmr/b/sl' tried instead on input line 28.
 
-LaTeX Font Info:    Font shape `T1/lmss/m/it' in size <10.95> not available
-(Font)              Font shape `T1/lmss/m/sl' tried instead on input line 100.
 
 Overfull \hbox (10.94998pt too wide) has occurred while \output is active
 [] \T1/lmr/m/n/10.95 11
  []
 
-[11])
+[11]
+LaTeX Font Info:    Font shape `T1/lmss/m/it' in size <10.95> not available
+(Font)              Font shape `T1/lmss/m/sl' tried instead on input line 100.
+)
 LaTeX Font Info:    Font shape `T1/pzc/m/n' in size <13> not available
-(Font)              Font shape `T1/pzc/m/it' tried instead on input line 625.
+(Font)              Font shape `T1/pzc/m/it' tried instead on input line 657.
 
 Overfull \hbox (10.94998pt too wide) has occurred while \output is active
 \T1/lmr/m/n/10.95 12 []
@@ -956,16 +963,16 @@ LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
 Package rerunfilecheck Info: File `article.out' has not changed.
-(rerunfilecheck)             Checksum: 1B87025585DB9B2E725A45AB50269255;4727.
+(rerunfilecheck)             Checksum: B8EDEE84C7618380A825FC5F7CE7F29B;5052.
  ) 
 Here is how much of TeX's memory you used:
- 22260 strings out of 476047
- 412067 string characters out of 5792076
- 1953975 words of memory out of 5000000
- 43757 multiletter control sequences out of 15000+600000
+ 22264 strings out of 476047
+ 412221 string characters out of 5792076
+ 1950975 words of memory out of 5000000
+ 43759 multiletter control sequences out of 15000+600000
  658116 words of font info for 100 fonts, out of 8000000 for 9000
  85 hyphenation exceptions out of 8191
- 99i,10n,101p,587b,571s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 99i,10n,101p,587b,630s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texmf/fonts/type1/public/lm/lmb10.pfb></usr/share/texmf/fonts/typ
 e1/public/lm/lmbo10.pfb></usr/share/texmf/fonts/type1/public/lm/lmbx10.pfb></us
 r/share/texmf/fonts/type1/public/lm/lmbx12.pfb></usr/share/texmf/fonts/type1/pu
@@ -981,10 +988,10 @@ pe1/public/lm/lmsy7.pfb></usr/share/texmf/fonts/type1/public/lm/lmsy8.pfb></usr
 lic/lm/lmtto10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/s
 ymbols/msam10.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/zapfchan/uzcmi
 8a.pfb>
-Output written on article.pdf (12 pages, 495181 bytes).
+Output written on article.pdf (12 pages, 497141 bytes).
 PDF statistics:
- 500 PDF objects out of 1000 (max. 8388607)
- 385 compressed objects within 4 object streams
- 85 named destinations out of 1000 (max. 500000)
- 199 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 506 PDF objects out of 1000 (max. 8388607)
+ 391 compressed objects within 4 object streams
+ 87 named destinations out of 1000 (max. 500000)
+ 207 words of extra memory for PDF output out of 10000 (max. 10000000)
 

@@ -16,34 +16,33 @@
 \author{Francisco Parra\\Universidad de Santiago de Chile}
 \Plainauthor{Francisco Parra}
 
-\title{\pkg{smelt-ml}: A Pure-\proglang{Rust} Machine Learning Framework with Cache-Optimized Gradient Boosting Competitive with \proglang{C++} Implementations}
-\Plaintitle{smelt-ml: A Pure-Rust Machine Learning Framework with Cache-Optimized Gradient Boosting Competitive with C++ Implementations}
-\Shorttitle{\pkg{smelt-ml}: Cache-Optimized ML in \proglang{Rust}}
+\title{\pkg{smelt-ml}: A Pure-\proglang{Rust} Machine Learning Framework Combining Spatial Modeling, Conformal Prediction, and Cache-Optimized Gradient Boosting}
+\Plaintitle{smelt-ml: A Pure-Rust Machine Learning Framework Combining Spatial Modeling, Conformal Prediction, and Cache-Optimized Gradient Boosting}
+\Shorttitle{\pkg{smelt-ml}: Spatial ML with Uncertainty in \proglang{Rust}}
 
 \Abstract{
 We present \pkg{smelt-ml}, an open-source machine learning framework
-implemented entirely in \proglang{Rust} that provides 27 supervised learning
-algorithms, unsupervised clustering, causal inference, survival analysis,
-and spatial machine learning capabilities. The framework's gradient boosting
-implementations (\pkg{XGBoost}, \pkg{LightGBM}, and a \pkg{CatBoost}-inspired
-symmetric gradient boosting machine) employ a
-cache-optimized column-major histogram accumulation strategy. On benchmarks
-with 20 features and $n$ from 500 to 100{,}000 (10 runs each, mean $\pm$ std),
-\pkg{smelt-ml}'s \pkg{CatBoost}-inspired implementation is 1.4--8.3$\times$ faster
-than the official \proglang{C++} library at $n \leq 10{,}000$, and \pkg{XGBoost}
-is 1.3--2.9$\times$ faster at $n \leq 5{,}000$. At larger scales
-($n \geq 50{,}000$), the \proglang{C++} libraries are faster due to SIMD
-intrinsics and hardware-specific optimizations. Memory consumption is
-an order of magnitude lower than the \proglang{C++} libraries across all
-scales. The framework is
-published on \url{https://crates.io/} as \pkg{smelt-ml} and provides a
-composable, trait-based architecture inspired by \pkg{mlr3}
-\citep{Lang+Binder+Richter:2019} and \pkg{scikit-learn}
-\citep{Pedregosa+Varoquaux+Gramfort:2011}.
+implemented entirely in \proglang{Rust} that uniquely integrates spatial
+modeling, distribution-free uncertainty quantification, and gradient boosting
+in a single, memory-safe package. The framework provides 27 supervised
+learners, clustering, causal inference, survival analysis, and the only
+\proglang{Rust} implementations of Geographical-\pkg{XGBoost}, spatial
+cross-validation, and conformal prediction --- enabling end-to-end spatially-aware
+predictive workflows with guaranteed prediction interval coverage without
+\proglang{Python} or \proglang{R} dependencies. The gradient boosting
+implementations employ cache-optimized column-major histogram accumulation
+with \code{u8} packing. On single-threaded benchmarks ($n$ from 500 to
+100{,}000, 10 runs, mean $\pm$ std), \pkg{smelt-ml} is 1.4--8.3$\times$
+faster than official \proglang{C++} libraries at research-typical scales
+($n \leq 10{,}000$) and consumes an order of magnitude less memory, while
+\proglang{C++} is faster at $n \geq 50{,}000$. The composable, trait-based
+architecture is inspired by \pkg{mlr3} \citep{Lang+Binder+Richter:2019} and
+\pkg{scikit-learn} \citep{Pedregosa+Varoquaux+Gramfort:2011}, with zero
+\code{unsafe} blocks across 13{,}000+ lines of code.
 }
 
-\Keywords{machine learning, gradient boosting, \proglang{Rust}, cache optimization, \pkg{XGBoost}, \pkg{LightGBM}, \pkg{CatBoost}, software}
-\Plainkeywords{machine learning, gradient boosting, Rust, cache optimization, XGBoost, LightGBM, CatBoost, software}
+\Keywords{machine learning, gradient boosting, \proglang{Rust}, spatial modeling, conformal prediction, uncertainty quantification, software}
+\Plainkeywords{machine learning, gradient boosting, Rust, spatial modeling, conformal prediction, uncertainty quantification, software}
 
 \Address{
   Francisco Parra\\
@@ -78,23 +77,34 @@ use-after-free, and data races at compile time. Despite these advantages,
 the primary \proglang{Rust} ML crate, implements only 9 algorithms and does not
 include gradient boosting.
 
+Beyond the language gap, a practical gap exists in the spatial ML workflow:
+practitioners who need spatially-aware prediction with uncertainty
+quantification must currently combine multiple \proglang{Python} or
+\proglang{R} packages with incompatible APIs (e.g., \pkg{scikit-learn} for
+modeling, \pkg{geoxgboost} for spatial regression, \pkg{MAPIE} for conformal
+intervals, and custom spatial resampling code). No existing framework in any
+language integrates all of these in a single composable pipeline.
+
 In this paper, we present \pkg{smelt-ml}, a comprehensive ML framework in
-\proglang{Rust} that fills this gap. Our main contributions are:
+\proglang{Rust} that addresses both gaps. Our main contributions are:
 
 \begin{enumerate}
-\item A \textbf{complete ML framework} with 27 supervised learners, clustering,
-  survival analysis, causal inference, and spatial ML --- the most comprehensive
-  ML framework in \proglang{Rust}.
+\item An \textbf{integrated spatial ML pipeline} that uniquely combines
+  Geographical-\pkg{XGBoost} \citep{Grekousis:2025}, spatial cross-validation,
+  and conformal prediction \citep{Romano+Patterson+Candes:2019} in a single
+  composable framework --- enabling spatially-aware modeling with
+  distribution-free uncertainty quantification without external dependencies.
 \item \textbf{Cache-optimized gradient boosting} using column-major bin storage
-  with \code{u8} packing, achieving performance competitive with the official
-  \proglang{C++} implementations at small-to-medium scales ($n \leq 10{,}000$)
+  with \code{u8} packing, achieving performance competitive with official
+  \proglang{C++} libraries at research-typical scales ($n \leq 10{,}000$)
   and an order-of-magnitude reduction in memory consumption.
-\item \textbf{Novel algorithms} not available in competing frameworks:
-  Geographical-XGBoost \citep{Grekousis:2025}, Causal Forest
-  \citep{Wager+Athey:2018}, Conformal Prediction \citep{Romano+Patterson+Candes:2019},
-  Oblique Forest \citep{Tomita+Browne+Shen:2020}, and streaming Hoeffding Trees.
-\item \textbf{Validation on real datasets} showing accuracy comparable to
-  \pkg{scikit-learn} across standard benchmarks.
+\item A \textbf{comprehensive ML framework} with 27 supervised learners,
+  clustering, survival analysis, Causal Forest \citep{Wager+Athey:2018},
+  Oblique Forest \citep{Tomita+Browne+Shen:2020}, and streaming Hoeffding
+  Trees --- the most complete ML framework in \proglang{Rust}.
+\item \textbf{Validation} showing accuracy comparable to \pkg{scikit-learn}
+  across standard benchmarks, with zero \code{unsafe} blocks across the
+  entire codebase.
 \end{enumerate}
 
 
@@ -323,6 +333,25 @@ On a synthetic dataset with 100 categorical levels ($n = 2{,}000$, 10\% label
 noise), our implementation achieves 89.7\% accuracy vs.\ 89.8\% for the official
 \pkg{CatBoost}, confirming that the ordered target statistics produce comparable
 results even without full ordered boosting.
+
+\subsection{Scope of the LightGBM implementation} \label{sec:lightgbm_scope}
+
+Our \code{LightGBM} learner implements \textbf{leaf-wise (best-first) tree
+growth} controlled by \code{num\_leaves}, and \textbf{Gradient-based One-Side
+Sampling} (GOSS) for training efficiency. However, two key optimizations from
+the official library are not included: \textbf{Exclusive Feature Bundling} (EFB),
+which reduces the effective number of features by bundling mutually exclusive
+sparse features, and the \textbf{weighted GOSS histogram pass}, where
+non-selected samples contribute with adjusted weights rather than being
+fully discarded.
+
+As shown in Tables~\ref{tab:classif_perf}--\ref{tab:regress_perf}, our
+implementation does not match the official \pkg{LightGBM}'s performance at
+any scale tested. We include this learner for API completeness and for the
+leaf-wise growth strategy (which is not available in our \pkg{XGBoost} or
+\pkg{CatBoost} implementations), not as a performance competitor to the
+official library. Users requiring maximum \pkg{LightGBM} throughput should
+use the official \proglang{C++} library.
 
 \subsection{Feature comparison with official libraries} \label{sec:feature_compare}
 
@@ -553,11 +582,14 @@ distribution-free prediction intervals with guaranteed coverage.
 
 \section{Summary and discussion} \label{sec:summary}
 
-We have demonstrated that a pure-\proglang{Rust} implementation of gradient
-boosted trees can achieve competitive performance with highly optimized
-\proglang{C++} libraries at small-to-medium scales ($n \leq 10{,}000$)
-through careful attention to memory layout and cache utilization, while
-consuming an order of magnitude less memory. The performance advantage stems from \proglang{Rust}'s ownership
+We have presented \pkg{smelt-ml}, a \proglang{Rust} framework that uniquely
+integrates spatial modeling (Geographical-\pkg{XGBoost}), spatial
+cross-validation, and conformal prediction in a single composable pipeline
+--- a combination not available in any other ML framework. On the performance
+side, our gradient boosting implementations achieve competitive speed with
+the official \proglang{C++} libraries at research-typical scales
+($n \leq 10{,}000$) while consuming an order of magnitude less memory.
+The performance advantage at small scales stems from \proglang{Rust}'s ownership
 model, which guarantees no aliasing (\code{\&mut} is unique) and enables LLVM to
 apply more aggressive auto-vectorization than is possible with \proglang{C++},
 where pointer aliasing must be assumed unless explicitly annotated.
@@ -580,8 +612,8 @@ Limitations include the performance gap on datasets beyond 10{,}000 samples
 (where \proglang{C++} libraries increasingly outperform \pkg{smelt-ml} due to
 SIMD intrinsics, hardware-specific memory management, and GPU backends;
 see Section~\ref{sec:performance}), the absence of GPU support, and the
-simplified scope of the \pkg{CatBoost} implementation
-(see Section~\ref{sec:catboost_scope}).
+simplified scope of the \pkg{CatBoost} and \pkg{LightGBM} implementations
+(see Sections~\ref{sec:catboost_scope}--\ref{sec:lightgbm_scope}).
 
 Categorical features are handled via three mechanisms: \code{OneHotEncoder} and
 \code{LabelEncoder} as preprocessing transformers (applicable to any learner),
