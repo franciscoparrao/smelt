@@ -25,11 +25,10 @@ pub trait Filter: Send + Sync {
 /// # Examples
 ///
 /// ```
-/// use smelt_ml::prelude::*;
-/// use smelt_ml::preprocess::filter::{FilterSelector, VarianceFilter};
+/// use smelt_ml::preprocess::filter::FilterSelector;
 ///
 /// // Select top 2 features by variance
-/// let selector = FilterSelector::new(Box::new(VarianceFilter), 2);
+/// let selector = FilterSelector::variance(2);
 /// ```
 #[derive(Clone)]
 pub struct FilterSelector {
