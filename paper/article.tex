@@ -5,6 +5,7 @@
 \usepackage{booktabs}
 \usepackage{amssymb}
 \usepackage{amsmath}
+\usepackage{graphicx}
 
 \newcommand{\class}[1]{`\code{#1}'}
 \newcommand{\fct}[1]{\code{#1()}}
@@ -32,7 +33,9 @@ with 20 features and $n$ from 500 to 100{,}000 (10 runs each, mean $\pm$ std),
 than the official \proglang{C++} library at $n \leq 10{,}000$, and \pkg{XGBoost}
 is 1.3--2.9$\times$ faster at $n \leq 5{,}000$. At larger scales
 ($n \geq 50{,}000$), the \proglang{C++} libraries are faster due to SIMD
-intrinsics and hardware-specific optimizations. The framework is
+intrinsics and hardware-specific optimizations. Memory consumption is
+an order of magnitude lower than the \proglang{C++} libraries across all
+scales. The framework is
 published on \url{https://crates.io/} as \pkg{smelt-ml} and provides a
 composable, trait-based architecture inspired by \pkg{mlr3}
 \citep{Lang+Binder+Richter:2019} and \pkg{scikit-learn}
@@ -83,8 +86,9 @@ In this paper, we present \pkg{smelt-ml}, a comprehensive ML framework in
   survival analysis, causal inference, and spatial ML --- the most comprehensive
   ML framework in \proglang{Rust}.
 \item \textbf{Cache-optimized gradient boosting} using column-major bin storage
-  with \code{u8} packing, achieving performance that matches or exceeds the
-  official \proglang{C++} implementations.
+  with \code{u8} packing, achieving performance competitive with the official
+  \proglang{C++} implementations at small-to-medium scales ($n \leq 10{,}000$)
+  and an order-of-magnitude reduction in memory consumption.
 \item \textbf{Novel algorithms} not available in competing frameworks:
   Geographical-XGBoost \citep{Grekousis:2025}, Causal Forest
   \citep{Wager+Athey:2018}, Conformal Prediction \citep{Romano+Patterson+Candes:2019},
@@ -443,6 +447,21 @@ $n$ & C++ & Rust &  & C++ & Rust &  & C++ & Rust &  \\
 
 \subsection{Scaling analysis}
 
+Figure~\ref{fig:scaling} visualizes the scaling behavior across all dataset
+sizes. The crossover point --- where \proglang{C++} becomes faster --- is
+clearly visible around $n = 5{,}000$ for \pkg{XGBoost} and $n = 10{,}000$
+for \pkg{CatBoost}.
+
+\begin{figure}[t!]
+\centering
+\includegraphics[width=\textwidth]{scaling.pdf}
+\caption{\label{fig:scaling} Training time scaling comparison (log-log) between
+\pkg{smelt-ml} (blue) and official \proglang{C++} libraries (red) across
+six dataset sizes. Error bars show $\pm$1 standard deviation over 10 runs.
+\pkg{smelt-ml} is faster at small scales; \proglang{C++} is faster at
+$n \geq 50{,}000$.}
+\end{figure}
+
 \pkg{smelt-ml}'s \pkg{CatBoost}-inspired implementation is consistently faster
 than the official library at all sizes up to $n = 10{,}000$ (1.4--8.3$\times$),
 and remains competitive at $n = 50{,}000$ (0.7--0.9$\times$).
@@ -535,9 +554,10 @@ distribution-free prediction intervals with guaranteed coverage.
 \section{Summary and discussion} \label{sec:summary}
 
 We have demonstrated that a pure-\proglang{Rust} implementation of gradient
-boosted trees can match or exceed the performance of highly optimized
-\proglang{C++} libraries through careful attention to memory layout and cache
-utilization. The performance advantage stems from \proglang{Rust}'s ownership
+boosted trees can achieve competitive performance with highly optimized
+\proglang{C++} libraries at small-to-medium scales ($n \leq 10{,}000$)
+through careful attention to memory layout and cache utilization, while
+consuming an order of magnitude less memory. The performance advantage stems from \proglang{Rust}'s ownership
 model, which guarantees no aliasing (\code{\&mut} is unique) and enables LLVM to
 apply more aggressive auto-vectorization than is possible with \proglang{C++},
 where pointer aliasing must be assumed unless explicitly annotated.
@@ -570,6 +590,8 @@ categoricals during training without a separate preprocessing step).
 
 \proglang{Python} bindings via \pkg{PyO3} are planned as a separate crate
 (\code{smelt-py}) to broaden adoption beyond the \proglang{Rust} ecosystem.
+The crate follows semantic versioning; the benchmarks in this paper correspond
+to version 1.2.1.
 
 The software is available at \url{https://crates.io/crates/smelt-ml} under the
 MIT license, with source code at \url{https://github.com/franciscoparrao/smelt}.
@@ -585,12 +607,14 @@ The results in this paper were obtained using \proglang{Rust}~1.89 with the
 \pkg{xgboost}~3.1, \pkg{lightgbm}~4.6, and \pkg{catboost}~1.2.
 \pkg{scikit-learn}~1.8 was used for accuracy validation.
 \proglang{Rust} code was compiled with \code{RUSTFLAGS="-C target-cpu=native"}
-in release mode.
+in release mode. A complete replication package is provided in
+\code{paper/replication/} with a single script (\code{replicate.sh}) that
+reproduces all benchmark tables and figures.
 
 
 \section*{Acknowledgments}
 
-[To be completed]
+The author thanks the anonymous reviewers for their constructive feedback.
 
 
 %% -- Bibliography -------------------------------------------------------------
