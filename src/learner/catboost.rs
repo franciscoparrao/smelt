@@ -200,12 +200,33 @@ fn build_oblivious_tree(
     let mut splits = Vec::with_capacity(depth);
     let mut partitions: Vec<Vec<usize>> = vec![indices.to_vec()];
 
+    // Histogram cache: per partition, per feature → (bin_g, bin_h)
+    // cache[partition_idx][feature_idx] = (Vec<f64>, Vec<f64>)
+    type PartHist = Vec<Vec<(Vec<f64>, Vec<f64>)>>;
+
+    // Build initial cache: scan root partition for all features
+    let initial_cache: Vec<(Vec<f64>, Vec<f64>)> = (0..n_features)
+        .into_par_iter()
+        .map(|feat| {
+            let nb = bins.boundaries[feat].len();
+            let mut bg = vec![0.0; nb];
+            let mut bh = vec![0.0; nb];
+            for &idx in indices {
+                let b = bins.get_bin(feat, idx) as usize;
+                bg[b] += grads[idx];
+                bh[b] += hess[idx];
+            }
+            (bg, bh)
+        })
+        .collect();
+    let mut cache: PartHist = vec![initial_cache];
+
     for _level in 0..depth {
         let mut best_gain = f64::NEG_INFINITY;
         let mut best_feat = 0;
         let mut best_bin = 0;
 
-        // Histogram-based: build histograms ONCE per partition, then scan O(bins)
+        // Find best split from CACHED histograms (no scanning!)
         let results: Vec<(usize, usize, f64)> = (0..n_features)
             .into_par_iter()
             .map(|feat| {
@@ -213,26 +234,11 @@ fn build_oblivious_tree(
                 let mut best_local_gain = f64::NEG_INFINITY;
                 let mut best_local_bin = 0;
 
-                // Pre-build histograms for all partitions
-                let part_hists: Vec<(Vec<f64>, Vec<f64>)> = partitions
+                // Prefix sums from cached histograms
+                let prefix: Vec<(Vec<f64>, Vec<f64>, f64, f64)> = cache
                     .iter()
-                    .map(|partition| {
-                        let mut bg = vec![0.0; nb];
-                        let mut bh = vec![0.0; nb];
-                        for &idx in partition {
-                            let b = bins.get_bin(feat, idx) as usize;
-                            bg[b] += grads[idx];
-                            bh[b] += hess[idx];
-                        }
-                        (bg, bh)
-                    })
-                    .collect();
-
-                // Prefix sums + single scan O(n_partitions * n_bins)
-                // Pre-compute prefix sums and totals per partition
-                let prefix: Vec<(Vec<f64>, Vec<f64>, f64, f64)> = part_hists
-                    .iter()
-                    .map(|(bg, bh)| {
+                    .map(|part_cache| {
+                        let (bg, bh) = &part_cache[feat];
                         let mut pg = vec![0.0; nb + 1];
                         let mut ph = vec![0.0; nb + 1];
                         for b in 0..nb {
@@ -277,9 +283,11 @@ fn build_oblivious_tree(
         let threshold = bins.boundaries[best_feat][best_bin];
         splits.push((best_feat, threshold));
 
-        // Split all partitions
+        // Split all partitions + update histogram cache via subtraction
         let mut new_partitions = Vec::with_capacity(partitions.len() * 2);
-        for partition in &partitions {
+        let mut new_cache: PartHist = Vec::with_capacity(partitions.len() * 2);
+
+        for (pi, partition) in partitions.iter().enumerate() {
             let mut left = Vec::new();
             let mut right = Vec::new();
             for &idx in partition {
@@ -289,10 +297,55 @@ fn build_oblivious_tree(
                     right.push(idx);
                 }
             }
+
+            // Histogram subtraction: scan smaller child, subtract for larger
+            let parent_hists = &cache[pi];
+            let (smaller, larger_is_right) = if left.len() <= right.len() {
+                (&left, true)
+            } else {
+                (&right, false)
+            };
+
+            // Scan smaller child for all features (parallel)
+            let smaller_hists: Vec<(Vec<f64>, Vec<f64>)> = (0..n_features)
+                .into_par_iter()
+                .map(|feat| {
+                    let nb = bins.boundaries[feat].len();
+                    let mut bg = vec![0.0; nb];
+                    let mut bh = vec![0.0; nb];
+                    for &idx in smaller.iter() {
+                        let b = bins.get_bin(feat, idx) as usize;
+                        bg[b] += grads[idx];
+                        bh[b] += hess[idx];
+                    }
+                    (bg, bh)
+                })
+                .collect();
+
+            // Subtract for larger child: parent - smaller
+            let larger_hists: Vec<(Vec<f64>, Vec<f64>)> = (0..n_features)
+                .map(|feat| {
+                    let (pg, ph) = &parent_hists[feat];
+                    let (sg, sh) = &smaller_hists[feat];
+                    let bg: Vec<f64> = pg.iter().zip(sg).map(|(p, s)| p - s).collect();
+                    let bh: Vec<f64> = ph.iter().zip(sh).map(|(p, s)| p - s).collect();
+                    (bg, bh)
+                })
+                .collect();
+
+            if larger_is_right {
+                new_cache.push(smaller_hists); // left = smaller
+                new_cache.push(larger_hists); // right = larger (subtracted)
+            } else {
+                new_cache.push(larger_hists); // left = larger (subtracted)
+                new_cache.push(smaller_hists); // right = smaller
+            }
+
             new_partitions.push(left);
             new_partitions.push(right);
         }
         partitions = new_partitions;
+        cache = new_cache;
     }
 
     let mut leaf_weights = vec![0.0; n_leaves];
