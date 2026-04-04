@@ -3,11 +3,11 @@
 //! Iteratively removes the least important feature based on a learner's
 //! feature importance until the desired number of features is reached.
 
-use ndarray::Array2;
-use crate::task::{ClassificationTask, RegressionTask};
-use crate::learner::Learner;
-use crate::{SmeltError, Result};
 use super::Transformer;
+use crate::learner::Learner;
+use crate::task::{ClassificationTask, RegressionTask};
+use crate::{Result, SmeltError};
+use ndarray::Array2;
 
 /// Recursive Feature Elimination.
 ///
@@ -89,12 +89,15 @@ impl Clone for RFE {
 }
 
 impl Transformer for RFE {
-    fn id(&self) -> &str { "rfe" }
+    fn id(&self) -> &str {
+        "rfe"
+    }
 
     fn fit(&mut self, features: &Array2<f64>) -> Result<()> {
         // Without target, just select first n features
         self.n_features_in = Some(features.ncols());
-        self.selected_indices = Some((0..self.n_features_to_select.min(features.ncols())).collect());
+        self.selected_indices =
+            Some((0..self.n_features_to_select.min(features.ncols())).collect());
         Ok(())
     }
 
@@ -126,9 +129,16 @@ impl Transformer for RFE {
             // Remove least important feature
             match importance {
                 Some(imp) => {
-                    let least_idx = imp.iter().enumerate()
-                        .min_by(|a, b| a.1.1.partial_cmp(&b.1.1).unwrap_or(std::cmp::Ordering::Equal))
-                        .unwrap().0;
+                    let least_idx = imp
+                        .iter()
+                        .enumerate()
+                        .min_by(|a, b| {
+                            a.1.1
+                                .partial_cmp(&b.1.1)
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        })
+                        .unwrap()
+                        .0;
                     remaining.remove(least_idx);
                 }
                 None => {
@@ -144,14 +154,22 @@ impl Transformer for RFE {
     }
 
     fn transform(&self, features: &Array2<f64>) -> Result<Array2<f64>> {
-        let indices = self.selected_indices.as_ref().ok_or(SmeltError::NotTrained)?;
+        let indices = self
+            .selected_indices
+            .as_ref()
+            .ok_or(SmeltError::NotTrained)?;
         Ok(features.select(ndarray::Axis(1), indices))
     }
 
     fn transform_names(&self, names: &[String]) -> Result<Vec<String>> {
-        let indices = self.selected_indices.as_ref().ok_or(SmeltError::NotTrained)?;
+        let indices = self
+            .selected_indices
+            .as_ref()
+            .ok_or(SmeltError::NotTrained)?;
         Ok(indices.iter().map(|&i| names[i].clone()).collect())
     }
 
-    fn clone_box(&self) -> Box<dyn Transformer> { Box::new(self.clone()) }
+    fn clone_box(&self) -> Box<dyn Transformer> {
+        Box::new(self.clone())
+    }
 }

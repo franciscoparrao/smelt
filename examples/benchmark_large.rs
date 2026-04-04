@@ -9,9 +9,9 @@
 //! Output: paper/replication/benchmark_rust_results.json
 
 use ndarray::Array2;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
 use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use smelt_ml::prelude::*;
 use std::time::Instant;
 
@@ -242,7 +242,10 @@ fn bench_catboost_regress(task: &RegressionTask, n_runs: usize) -> BenchResult {
 fn main() {
     println!("{}", "=".repeat(70));
     println!("Benchmark: smelt-ml Gradient Boosting");
-    println!("Configuration: {} trees, max_depth={}, {} runs each", N_TREES, MAX_DEPTH, N_RUNS);
+    println!(
+        "Configuration: {} trees, max_depth={}, {} runs each",
+        N_TREES, MAX_DEPTH, N_RUNS
+    );
     println!("Features: {} ({} informative)", N_FEATURES, N_INFORMATIVE);
     println!("{}", "=".repeat(70));
 
@@ -274,11 +277,14 @@ fn main() {
         let cb_c = bench_catboost_classif(&task_c, N_RUNS);
         println!("{:.1} +/- {:.1} ms", cb_c.mean_ms, cb_c.std_ms);
 
-        classification.insert(n.to_string(), SizeResults {
-            xgboost: xgb_c,
-            lightgbm: lgb_c,
-            catboost: cb_c,
-        });
+        classification.insert(
+            n.to_string(),
+            SizeResults {
+                xgboost: xgb_c,
+                lightgbm: lgb_c,
+                catboost: cb_c,
+            },
+        );
 
         // Regression
         print!("  xgboost regress... ");
@@ -293,11 +299,14 @@ fn main() {
         let cb_r = bench_catboost_regress(&task_r, N_RUNS);
         println!("{:.1} +/- {:.1} ms", cb_r.mean_ms, cb_r.std_ms);
 
-        regression.insert(n.to_string(), SizeResults {
-            xgboost: xgb_r,
-            lightgbm: lgb_r,
-            catboost: cb_r,
-        });
+        regression.insert(
+            n.to_string(),
+            SizeResults {
+                xgboost: xgb_r,
+                lightgbm: lgb_r,
+                catboost: cb_r,
+            },
+        );
     }
 
     let results = AllResults {

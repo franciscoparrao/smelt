@@ -1,18 +1,18 @@
 //! Model serialization: save and load trained models as JSON.
 
-use std::path::Path;
-use std::fs;
-use ndarray::Array2;
-use serde::{Serialize, Deserialize};
 use crate::learner::TrainedModel;
-use crate::learner::tree::decision_tree::TrainedDecisionTree;
-use crate::learner::tree::random_forest::TrainedRandomForest;
-use crate::learner::tree::gradient_boosting::TrainedGradientBoosting;
 use crate::learner::knn::{TrainedKnnClassifier, TrainedKnnRegressor};
 use crate::learner::linear_regression::TrainedLinearRegression;
 use crate::learner::logistic_regression::TrainedLogisticRegression;
+use crate::learner::tree::decision_tree::TrainedDecisionTree;
+use crate::learner::tree::gradient_boosting::TrainedGradientBoosting;
+use crate::learner::tree::random_forest::TrainedRandomForest;
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::{Result, SmeltError};
+use ndarray::Array2;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 
 /// A serializable wrapper for all built-in trained model types.
 ///
@@ -70,14 +70,12 @@ impl SerializableModel {
 
     /// Serialize to JSON string.
     pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string_pretty(self)
-            .map_err(|e| SmeltError::Json(e.to_string()))
+        serde_json::to_string_pretty(self).map_err(|e| SmeltError::Json(e.to_string()))
     }
 
     /// Deserialize from JSON string.
     pub fn from_json(json: &str) -> Result<Self> {
-        serde_json::from_str(json)
-            .map_err(|e| SmeltError::Json(e.to_string()))
+        serde_json::from_str(json).map_err(|e| SmeltError::Json(e.to_string()))
     }
 }
 

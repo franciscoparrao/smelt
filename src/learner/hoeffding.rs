@@ -9,12 +9,12 @@
 //! Reference: Domingos, P. & Hulten, G. (2000). Mining high-speed data streams.
 //! KDD, 71-80.
 
-use ndarray::Array2;
-use std::collections::HashMap;
-use crate::task::{ClassificationTask, RegressionTask, Task};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::{Result, SmeltError};
+use ndarray::Array2;
+use std::collections::HashMap;
 
 /// Hoeffding Tree for online/streaming classification.
 ///
@@ -60,17 +60,32 @@ pub struct HoeffdingTree {
 impl Default for HoeffdingTree {
     fn default() -> Self {
         Self {
-            delta: 1e-7, grace_period: 200, max_depth: None,
-            root: None, n_classes: 0, n_features: 0,
+            delta: 1e-7,
+            grace_period: 200,
+            max_depth: None,
+            root: None,
+            n_classes: 0,
+            n_features: 0,
         }
     }
 }
 
 impl HoeffdingTree {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_delta(mut self, d: f64) -> Self { self.delta = d; self }
-    pub fn with_grace_period(mut self, g: usize) -> Self { self.grace_period = g; self }
-    pub fn with_max_depth(mut self, d: usize) -> Self { self.max_depth = Some(d); self }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_delta(mut self, d: f64) -> Self {
+        self.delta = d;
+        self
+    }
+    pub fn with_grace_period(mut self, g: usize) -> Self {
+        self.grace_period = g;
+        self
+    }
+    pub fn with_max_depth(mut self, d: usize) -> Self {
+        self.max_depth = Some(d);
+        self
+    }
 
     /// Online update: train on a single sample.
     pub fn partial_fit(&mut self, features: &[f64], label: usize, n_classes: usize) {
@@ -87,29 +102,53 @@ impl HoeffdingTree {
         let n_classes_local = self.n_classes;
 
         if let Some(root) = &mut self.root {
-            Self::update_node(root, features, label, delta, grace, max_depth, n_classes_local);
+            Self::update_node(
+                root,
+                features,
+                label,
+                delta,
+                grace,
+                max_depth,
+                n_classes_local,
+            );
         }
     }
 
     fn update_node(
-        node: &mut HNode, features: &[f64], label: usize,
-        delta: f64, grace: usize, max_depth: Option<usize>, n_classes: usize,
+        node: &mut HNode,
+        features: &[f64],
+        label: usize,
+        delta: f64,
+        grace: usize,
+        max_depth: Option<usize>,
+        n_classes: usize,
     ) {
         match node {
-            HNode::Leaf { counts, n_seen, depth, feature_stats } => {
+            HNode::Leaf {
+                counts,
+                n_seen,
+                depth,
+                feature_stats,
+            } => {
                 // Update class counts
-                if label < counts.len() { counts[label] += 1; }
+                if label < counts.len() {
+                    counts[label] += 1;
+                }
                 *n_seen += 1;
 
                 // Update per-feature statistics
                 for (j, &val) in features.iter().enumerate() {
-                    let stats = feature_stats.entry(j).or_insert_with(|| FeatureStats::new(n_classes));
+                    let stats = feature_stats
+                        .entry(j)
+                        .or_insert_with(|| FeatureStats::new(n_classes));
                     stats.update(val, label);
                 }
 
                 // Check if we should split
                 if *n_seen >= grace && *n_seen % grace == 0 {
-                    if max_depth.is_some_and(|d| *depth >= d) { return; }
+                    if max_depth.is_some_and(|d| *depth >= d) {
+                        return;
+                    }
 
                     let (best_feat, best_gain, second_gain) =
                         find_best_split(feature_stats, counts, *n_seen, n_classes);
@@ -120,7 +159,8 @@ impl HoeffdingTree {
 
                     if best_gain - second_gain > epsilon || epsilon < 0.01 {
                         // Split!
-                        let threshold = feature_stats.get(&best_feat)
+                        let threshold = feature_stats
+                            .get(&best_feat)
                             .map(|s| s.best_threshold(n_classes))
                             .unwrap_or(0.0);
 
@@ -135,11 +175,18 @@ impl HoeffdingTree {
                         };
 
                         // Route current sample
-                        Self::update_node(node, features, label, delta, grace, max_depth, n_classes);
+                        Self::update_node(
+                            node, features, label, delta, grace, max_depth, n_classes,
+                        );
                     }
                 }
             }
-            HNode::Split { feature, threshold, left, right } => {
+            HNode::Split {
+                feature,
+                threshold,
+                left,
+                right,
+            } => {
                 if features[*feature] <= *threshold {
                     Self::update_node(left, features, label, delta, grace, max_depth, n_classes);
                 } else {
@@ -154,7 +201,7 @@ impl HoeffdingTree {
 
 enum HNode {
     Leaf {
-        counts: Vec<usize>,     // class counts
+        counts: Vec<usize>, // class counts
         n_seen: usize,
         depth: usize,
         feature_stats: HashMap<usize, FeatureStats>,
@@ -186,11 +233,20 @@ impl HNode {
                 } else {
                     vec![1.0 / counts.len() as f64; counts.len()]
                 };
-                let pred = counts.iter().enumerate()
-                    .max_by_key(|&(_, &c)| c).map(|(i, _)| i).unwrap_or(0);
+                let pred = counts
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|&(_, &c)| c)
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
                 (pred, probs)
             }
-            HNode::Split { feature, threshold, left, right } => {
+            HNode::Split {
+                feature,
+                threshold,
+                left,
+                right,
+            } => {
                 if features[*feature] <= *threshold {
                     left.predict_class(features)
                 } else {
@@ -238,17 +294,26 @@ impl FeatureStats {
             total_sum += sum;
             total_count += count;
         }
-        if total_count > 0 { total_sum / total_count as f64 }
-        else { (self.min_val + self.max_val) / 2.0 }
+        if total_count > 0 {
+            total_sum / total_count as f64
+        } else {
+            (self.min_val + self.max_val) / 2.0
+        }
     }
 }
 
 fn entropy(counts: &[usize], total: usize) -> f64 {
-    if total == 0 { return 0.0; }
+    if total == 0 {
+        return 0.0;
+    }
     let t = total as f64;
-    counts.iter()
+    counts
+        .iter()
         .filter(|&&c| c > 0)
-        .map(|&c| { let p = c as f64 / t; -p * p.ln() })
+        .map(|&c| {
+            let p = c as f64 / t;
+            -p * p.ln()
+        })
         .sum()
 }
 
@@ -269,7 +334,9 @@ fn find_best_split(
         let mut right_counts = vec![0usize; n_classes];
 
         for (c, &(sum, _, count)) in stats.class_stats.iter().enumerate() {
-            if count == 0 { continue; }
+            if count == 0 {
+                continue;
+            }
             let mean = sum / count as f64;
             if mean <= threshold {
                 left_counts[c] = count;
@@ -281,7 +348,9 @@ fn find_best_split(
         let n_left: usize = left_counts.iter().sum();
         let n_right: usize = right_counts.iter().sum();
 
-        if n_left == 0 || n_right == 0 { continue; }
+        if n_left == 0 || n_right == 0 {
+            continue;
+        }
 
         let left_ent = entropy(&left_counts, n_left);
         let right_ent = entropy(&right_counts, n_right);
@@ -305,7 +374,9 @@ fn find_best_split(
 // ── Learner implementation ──────────────────────────────────────────
 
 impl Learner for HoeffdingTree {
-    fn id(&self) -> &str { "hoeffding_tree" }
+    fn id(&self) -> &str {
+        "hoeffding_tree"
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
@@ -324,7 +395,10 @@ impl Learner for HoeffdingTree {
         }
 
         // Extract trained tree for prediction
-        let root = self.root.take().unwrap_or_else(|| HNode::new_leaf(n_classes, 0));
+        let root = self
+            .root
+            .take()
+            .unwrap_or_else(|| HNode::new_leaf(n_classes, 0));
 
         Ok(Box::new(TrainedHoeffdingTree {
             root,
@@ -334,7 +408,9 @@ impl Learner for HoeffdingTree {
     }
 
     fn train_regress(&mut self, _task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other("HoeffdingTree currently supports classification only".into()))
+        Err(SmeltError::Other(
+            "HoeffdingTree currently supports classification only".into(),
+        ))
     }
 }
 
@@ -360,7 +436,9 @@ impl TrainedModel for TrainedHoeffdingTree {
         }
 
         Ok(Prediction::Classification {
-            predicted, truth: None, probabilities: Some(probabilities),
+            predicted,
+            truth: None,
+            probabilities: Some(probabilities),
         })
     }
 }

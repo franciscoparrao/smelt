@@ -4,16 +4,16 @@
 //! Models the distribution of good vs bad hyperparameter configurations
 //! and samples promising candidates via density ratio l(x)/g(x).
 
-use rand::Rng;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use crate::task::{ClassificationTask, RegressionTask};
+use super::{ParamDistribution, ParamSet, ParamSpace, TuneResult};
+use crate::Result;
+use crate::benchmark;
 use crate::learner::Learner;
 use crate::measure::Measure;
 use crate::resample::Resample;
-use crate::benchmark;
-use crate::Result;
-use super::{ParamSet, ParamSpace, ParamDistribution, TuneResult};
+use crate::task::{ClassificationTask, RegressionTask};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Bayesian Optimization using Tree-structured Parzen Estimator (TPE).
 ///
@@ -75,11 +75,26 @@ impl BayesianOptimizer {
         }
     }
 
-    pub fn with_n_iter(mut self, n: usize) -> Self { self.n_iter = n; self }
-    pub fn with_n_initial(mut self, n: usize) -> Self { self.n_initial = n; self }
-    pub fn with_gamma(mut self, g: f64) -> Self { self.gamma = g; self }
-    pub fn with_n_candidates(mut self, n: usize) -> Self { self.n_candidates = n; self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn with_n_iter(mut self, n: usize) -> Self {
+        self.n_iter = n;
+        self
+    }
+    pub fn with_n_initial(mut self, n: usize) -> Self {
+        self.n_initial = n;
+        self
+    }
+    pub fn with_gamma(mut self, g: f64) -> Self {
+        self.gamma = g;
+        self
+    }
+    pub fn with_n_candidates(mut self, n: usize) -> Self {
+        self.n_candidates = n;
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 
     /// Tune for classification.
     pub fn tune_classif(
@@ -105,7 +120,11 @@ impl BayesianOptimizer {
             history.push((params, score));
         }
 
-        Ok(TuneResult::select_best(history, measure.id().to_string(), maximize))
+        Ok(TuneResult::select_best(
+            history,
+            measure.id().to_string(),
+            maximize,
+        ))
     }
 
     /// Tune for regression.
@@ -132,7 +151,11 @@ impl BayesianOptimizer {
             history.push((params, score));
         }
 
-        Ok(TuneResult::select_best(history, measure.id().to_string(), maximize))
+        Ok(TuneResult::select_best(
+            history,
+            measure.id().to_string(),
+            maximize,
+        ))
     }
 
     /// Sample a random parameter set from the space.
@@ -152,7 +175,9 @@ impl BayesianOptimizer {
         rng: &mut StdRng,
     ) -> ParamSet {
         // Sort observations by score
-        let mut sorted: Vec<(usize, f64)> = history.iter().enumerate()
+        let mut sorted: Vec<(usize, f64)> = history
+            .iter()
+            .enumerate()
             .map(|(i, (_, s))| (i, *s))
             .collect();
         if maximize {
@@ -203,9 +228,7 @@ impl BayesianOptimizer {
         let mut params = ParamSet::new();
         for name in param_names {
             let dist = &self.param_space[name];
-            let good_vals: Vec<f64> = good_indices.iter()
-                .map(|&i| history[i].0[name])
-                .collect();
+            let good_vals: Vec<f64> = good_indices.iter().map(|&i| history[i].0[name]).collect();
 
             let value = match dist {
                 ParamDistribution::Uniform(lo, hi) => {
@@ -224,7 +247,9 @@ impl BayesianOptimizer {
                     // Sample proportional to frequency in good set, with smoothing
                     let mut counts = vec![1.0; choices.len()]; // Laplace smoothing
                     for &v in &good_vals {
-                        if let Some(pos) = choices.iter().position(|&c| (c - v).abs() < f64::EPSILON) {
+                        if let Some(pos) =
+                            choices.iter().position(|&c| (c - v).abs() < f64::EPSILON)
+                        {
                             counts[pos] += 1.0;
                         }
                     }
@@ -233,7 +258,10 @@ impl BayesianOptimizer {
                     let mut selected = choices[0];
                     for (i, &c) in counts.iter().enumerate() {
                         r -= c;
-                        if r <= 0.0 { selected = choices[i]; break; }
+                        if r <= 0.0 {
+                            selected = choices[i];
+                            break;
+                        }
                     }
                     selected
                 }
@@ -251,7 +279,9 @@ impl BayesianOptimizer {
         candidate: &ParamSet,
         param_names: &[String],
     ) -> f64 {
-        if indices.is_empty() { return f64::NEG_INFINITY; }
+        if indices.is_empty() {
+            return f64::NEG_INFINITY;
+        }
 
         let mut total_log_density = 0.0;
 
@@ -265,9 +295,11 @@ impl BayesianOptimizer {
                     let bw = bandwidth(&vals).max((*hi - *lo) * 0.01);
                     // Gaussian KDE
                     let n = vals.len() as f64;
-                    let density: f64 = vals.iter()
+                    let density: f64 = vals
+                        .iter()
                         .map(|&v| gaussian_kernel((x - v) / bw))
-                        .sum::<f64>() / (n * bw);
+                        .sum::<f64>()
+                        / (n * bw);
                     (density.max(1e-300)).ln()
                 }
                 ParamDistribution::LogUniform(lo, hi) => {
@@ -275,21 +307,28 @@ impl BayesianOptimizer {
                     let log_x = x.ln();
                     let bw = bandwidth(&log_vals).max((hi.ln() - lo.ln()) * 0.01);
                     let n = log_vals.len() as f64;
-                    let density: f64 = log_vals.iter()
+                    let density: f64 = log_vals
+                        .iter()
                         .map(|&v| gaussian_kernel((log_x - v) / bw))
-                        .sum::<f64>() / (n * bw);
+                        .sum::<f64>()
+                        / (n * bw);
                     (density.max(1e-300)).ln()
                 }
                 ParamDistribution::Choice(choices) => {
                     // Categorical: count frequency with smoothing
                     let mut counts = vec![1.0; choices.len()];
                     for &v in &vals {
-                        if let Some(pos) = choices.iter().position(|&c| (c - v).abs() < f64::EPSILON) {
+                        if let Some(pos) =
+                            choices.iter().position(|&c| (c - v).abs() < f64::EPSILON)
+                        {
                             counts[pos] += 1.0;
                         }
                     }
                     let total: f64 = counts.iter().sum();
-                    let pos = choices.iter().position(|&c| (c - x).abs() < f64::EPSILON).unwrap_or(0);
+                    let pos = choices
+                        .iter()
+                        .position(|&c| (c - x).abs() < f64::EPSILON)
+                        .unwrap_or(0);
                     (counts[pos] / total).ln()
                 }
             };
@@ -324,7 +363,9 @@ fn gaussian_kernel(x: f64) -> f64 {
 /// Scott's rule bandwidth: h = σ * n^(-1/5).
 fn bandwidth(values: &[f64]) -> f64 {
     let n = values.len() as f64;
-    if n <= 1.0 { return 1.0; }
+    if n <= 1.0 {
+        return 1.0;
+    }
     let mean = values.iter().sum::<f64>() / n;
     let var = values.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n;
     let std = var.sqrt().max(1e-10);

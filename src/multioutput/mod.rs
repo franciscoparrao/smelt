@@ -3,11 +3,11 @@
 //! Implements Regressor Chains — trains a sequence of regressors where
 //! each uses previous predictions as additional features.
 
-use ndarray::Array2;
-use crate::task::RegressionTask;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::task::RegressionTask;
+use crate::{Result, SmeltError};
+use ndarray::Array2;
 
 /// Multi-output prediction result.
 #[derive(Debug, Clone)]
@@ -48,7 +48,9 @@ pub struct RegressorChain {
 
 impl RegressorChain {
     pub fn new(factory: impl Fn() -> Box<dyn Learner> + Send + Sync + 'static) -> Self {
-        Self { factory: Box::new(factory) }
+        Self {
+            factory: Box::new(factory),
+        }
     }
 
     pub fn fit(
@@ -62,7 +64,8 @@ impl RegressorChain {
 
         if targets.len() != n_samples {
             return Err(SmeltError::DimensionMismatch {
-                expected: n_samples, got: targets.len(),
+                expected: n_samples,
+                got: targets.len(),
             });
         }
 
@@ -82,14 +85,18 @@ impl RegressorChain {
             }
 
             let target: Vec<f64> = targets.iter().map(|t| t[j]).collect();
-            let task = RegressionTask::new(&format!("target_{j}"), aug_features, target)?;
+            let task = RegressionTask::new(format!("target_{j}"), aug_features, target)?;
 
             let mut learner = (self.factory)();
             let model = learner.train_regress(&task)?;
             models.push(model);
         }
 
-        Ok(TrainedRegressorChain { models, n_features, n_targets })
+        Ok(TrainedRegressorChain {
+            models,
+            n_features,
+            n_targets,
+        })
     }
 }
 
@@ -127,7 +134,9 @@ impl TrainedRegressorChain {
         }
 
         Ok(MultiOutputPrediction {
-            values: all_preds, n_samples, n_targets: self.n_targets,
+            values: all_preds,
+            n_samples,
+            n_targets: self.n_targets,
         })
     }
 
@@ -136,9 +145,13 @@ impl TrainedRegressorChain {
         let n = predictions.n_samples as f64;
         let mut total_rmse = 0.0;
         for j in 0..predictions.n_targets {
-            let mse: f64 = predictions.values.iter().zip(truth)
+            let mse: f64 = predictions
+                .values
+                .iter()
+                .zip(truth)
                 .map(|(pred, true_vals)| (pred[j] - true_vals[j]).powi(2))
-                .sum::<f64>() / n;
+                .sum::<f64>()
+                / n;
             total_rmse += mse.sqrt();
         }
         total_rmse / predictions.n_targets as f64

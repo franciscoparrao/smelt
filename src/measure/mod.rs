@@ -4,7 +4,7 @@
 //! Regression: Rmse, Mae, RSquared, Mape.
 
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::{Result, SmeltError};
 
 /// Trait for evaluation metrics.
 pub trait Measure {
@@ -20,16 +20,26 @@ pub trait Measure {
 pub struct Accuracy;
 
 impl Measure for Accuracy {
-    fn id(&self) -> &str { "classif.accuracy" }
-    fn maximize(&self) -> bool { true }
+    fn id(&self) -> &str {
+        "classif.accuracy"
+    }
+    fn maximize(&self) -> bool {
+        true
+    }
 
     fn score(&self, prediction: &Prediction) -> Result<f64> {
         match prediction {
-            Prediction::Classification { predicted, truth: Some(truth), .. } => {
+            Prediction::Classification {
+                predicted,
+                truth: Some(truth),
+                ..
+            } => {
                 let correct = predicted.iter().zip(truth).filter(|(p, t)| p == t).count();
                 Ok(correct as f64 / predicted.len() as f64)
             }
-            _ => Err(SmeltError::Other("Accuracy requires classification prediction with truth".into())),
+            _ => Err(SmeltError::Other(
+                "Accuracy requires classification prediction with truth".into(),
+            )),
         }
     }
 }
@@ -38,18 +48,30 @@ impl Measure for Accuracy {
 pub struct Rmse;
 
 impl Measure for Rmse {
-    fn id(&self) -> &str { "regr.rmse" }
-    fn maximize(&self) -> bool { false }
+    fn id(&self) -> &str {
+        "regr.rmse"
+    }
+    fn maximize(&self) -> bool {
+        false
+    }
 
     fn score(&self, prediction: &Prediction) -> Result<f64> {
         match prediction {
-            Prediction::Regression { predicted, truth: Some(truth) } => {
-                let mse: f64 = predicted.iter().zip(truth)
+            Prediction::Regression {
+                predicted,
+                truth: Some(truth),
+            } => {
+                let mse: f64 = predicted
+                    .iter()
+                    .zip(truth)
                     .map(|(p, t)| (p - t).powi(2))
-                    .sum::<f64>() / predicted.len() as f64;
+                    .sum::<f64>()
+                    / predicted.len() as f64;
                 Ok(mse.sqrt())
             }
-            _ => Err(SmeltError::Other("RMSE requires regression prediction with truth".into())),
+            _ => Err(SmeltError::Other(
+                "RMSE requires regression prediction with truth".into(),
+            )),
         }
     }
 }
@@ -58,18 +80,30 @@ impl Measure for Rmse {
 pub struct Mae;
 
 impl Measure for Mae {
-    fn id(&self) -> &str { "regr.mae" }
-    fn maximize(&self) -> bool { false }
+    fn id(&self) -> &str {
+        "regr.mae"
+    }
+    fn maximize(&self) -> bool {
+        false
+    }
 
     fn score(&self, prediction: &Prediction) -> Result<f64> {
         match prediction {
-            Prediction::Regression { predicted, truth: Some(truth) } => {
-                let mae: f64 = predicted.iter().zip(truth)
+            Prediction::Regression {
+                predicted,
+                truth: Some(truth),
+            } => {
+                let mae: f64 = predicted
+                    .iter()
+                    .zip(truth)
                     .map(|(p, t)| (p - t).abs())
-                    .sum::<f64>() / predicted.len() as f64;
+                    .sum::<f64>()
+                    / predicted.len() as f64;
                 Ok(mae)
             }
-            _ => Err(SmeltError::Other("MAE requires regression prediction with truth".into())),
+            _ => Err(SmeltError::Other(
+                "MAE requires regression prediction with truth".into(),
+            )),
         }
     }
 }
@@ -83,7 +117,11 @@ fn n_classes(predicted: &[usize], truth: &[usize]) -> usize {
 }
 
 /// Per-class true positives, false positives, false negatives.
-fn class_counts(predicted: &[usize], truth: &[usize], n_classes: usize) -> Vec<(usize, usize, usize)> {
+fn class_counts(
+    predicted: &[usize],
+    truth: &[usize],
+    n_classes: usize,
+) -> Vec<(usize, usize, usize)> {
     let mut counts = vec![(0usize, 0usize, 0usize); n_classes]; // (tp, fp, fn)
     for (&p, &t) in predicted.iter().zip(truth) {
         if p == t {
@@ -102,12 +140,20 @@ fn class_counts(predicted: &[usize], truth: &[usize], n_classes: usize) -> Vec<(
 pub struct Precision;
 
 impl Measure for Precision {
-    fn id(&self) -> &str { "classif.precision" }
-    fn maximize(&self) -> bool { true }
+    fn id(&self) -> &str {
+        "classif.precision"
+    }
+    fn maximize(&self) -> bool {
+        true
+    }
 
     fn score(&self, prediction: &Prediction) -> Result<f64> {
         match prediction {
-            Prediction::Classification { predicted, truth: Some(truth), .. } => {
+            Prediction::Classification {
+                predicted,
+                truth: Some(truth),
+                ..
+            } => {
                 let nc = n_classes(predicted, truth);
                 let counts = class_counts(predicted, truth, nc);
                 let mut sum = 0.0;
@@ -120,7 +166,9 @@ impl Measure for Precision {
                 }
                 Ok(if valid > 0 { sum / valid as f64 } else { 0.0 })
             }
-            _ => Err(SmeltError::Other("Precision requires classification prediction with truth".into())),
+            _ => Err(SmeltError::Other(
+                "Precision requires classification prediction with truth".into(),
+            )),
         }
     }
 }
@@ -129,12 +177,20 @@ impl Measure for Precision {
 pub struct Recall;
 
 impl Measure for Recall {
-    fn id(&self) -> &str { "classif.recall" }
-    fn maximize(&self) -> bool { true }
+    fn id(&self) -> &str {
+        "classif.recall"
+    }
+    fn maximize(&self) -> bool {
+        true
+    }
 
     fn score(&self, prediction: &Prediction) -> Result<f64> {
         match prediction {
-            Prediction::Classification { predicted, truth: Some(truth), .. } => {
+            Prediction::Classification {
+                predicted,
+                truth: Some(truth),
+                ..
+            } => {
                 let nc = n_classes(predicted, truth);
                 let counts = class_counts(predicted, truth, nc);
                 let mut sum = 0.0;
@@ -147,7 +203,9 @@ impl Measure for Recall {
                 }
                 Ok(if valid > 0 { sum / valid as f64 } else { 0.0 })
             }
-            _ => Err(SmeltError::Other("Recall requires classification prediction with truth".into())),
+            _ => Err(SmeltError::Other(
+                "Recall requires classification prediction with truth".into(),
+            )),
         }
     }
 }
@@ -156,19 +214,35 @@ impl Measure for Recall {
 pub struct F1Score;
 
 impl Measure for F1Score {
-    fn id(&self) -> &str { "classif.f1" }
-    fn maximize(&self) -> bool { true }
+    fn id(&self) -> &str {
+        "classif.f1"
+    }
+    fn maximize(&self) -> bool {
+        true
+    }
 
     fn score(&self, prediction: &Prediction) -> Result<f64> {
         match prediction {
-            Prediction::Classification { predicted, truth: Some(truth), .. } => {
+            Prediction::Classification {
+                predicted,
+                truth: Some(truth),
+                ..
+            } => {
                 let nc = n_classes(predicted, truth);
                 let counts = class_counts(predicted, truth, nc);
                 let mut sum = 0.0;
                 let mut valid = 0;
                 for &(tp, fp, fn_) in &counts {
-                    let prec = if tp + fp > 0 { tp as f64 / (tp + fp) as f64 } else { 0.0 };
-                    let rec = if tp + fn_ > 0 { tp as f64 / (tp + fn_) as f64 } else { 0.0 };
+                    let prec = if tp + fp > 0 {
+                        tp as f64 / (tp + fp) as f64
+                    } else {
+                        0.0
+                    };
+                    let rec = if tp + fn_ > 0 {
+                        tp as f64 / (tp + fn_) as f64
+                    } else {
+                        0.0
+                    };
                     if prec + rec > 0.0 {
                         sum += 2.0 * prec * rec / (prec + rec);
                         valid += 1;
@@ -176,7 +250,9 @@ impl Measure for F1Score {
                 }
                 Ok(if valid > 0 { sum / valid as f64 } else { 0.0 })
             }
-            _ => Err(SmeltError::Other("F1 requires classification prediction with truth".into())),
+            _ => Err(SmeltError::Other(
+                "F1 requires classification prediction with truth".into(),
+            )),
         }
     }
 }
@@ -185,26 +261,40 @@ impl Measure for F1Score {
 pub struct LogLoss;
 
 impl Measure for LogLoss {
-    fn id(&self) -> &str { "classif.logloss" }
-    fn maximize(&self) -> bool { false }
+    fn id(&self) -> &str {
+        "classif.logloss"
+    }
+    fn maximize(&self) -> bool {
+        false
+    }
 
     fn score(&self, prediction: &Prediction) -> Result<f64> {
         match prediction {
-            Prediction::Classification { truth: Some(truth), probabilities: Some(probs), .. } => {
+            Prediction::Classification {
+                truth: Some(truth),
+                probabilities: Some(probs),
+                ..
+            } => {
                 let eps = 1e-15;
                 let n = truth.len() as f64;
-                let loss: f64 = truth.iter().zip(probs)
+                let loss: f64 = truth
+                    .iter()
+                    .zip(probs)
                     .map(|(&t, p)| {
                         let prob = p[t].max(eps).min(1.0 - eps);
                         -prob.ln()
                     })
-                    .sum::<f64>() / n;
+                    .sum::<f64>()
+                    / n;
                 Ok(loss)
             }
-            Prediction::Classification { probabilities: None, .. } => {
-                Err(SmeltError::Other("LogLoss requires probabilities".into()))
-            }
-            _ => Err(SmeltError::Other("LogLoss requires classification prediction with truth and probabilities".into())),
+            Prediction::Classification {
+                probabilities: None,
+                ..
+            } => Err(SmeltError::Other("LogLoss requires probabilities".into())),
+            _ => Err(SmeltError::Other(
+                "LogLoss requires classification prediction with truth and probabilities".into(),
+            )),
         }
     }
 }
@@ -216,12 +306,20 @@ impl Measure for LogLoss {
 pub struct AucRoc;
 
 impl Measure for AucRoc {
-    fn id(&self) -> &str { "classif.auc" }
-    fn maximize(&self) -> bool { true }
+    fn id(&self) -> &str {
+        "classif.auc"
+    }
+    fn maximize(&self) -> bool {
+        true
+    }
 
     fn score(&self, prediction: &Prediction) -> Result<f64> {
         match prediction {
-            Prediction::Classification { truth: Some(truth), probabilities: Some(probs), .. } => {
+            Prediction::Classification {
+                truth: Some(truth),
+                probabilities: Some(probs),
+                ..
+            } => {
                 let nc = *truth.iter().max().unwrap_or(&0) + 1;
                 if nc == 2 {
                     // Binary: AUC for class 1
@@ -243,10 +341,13 @@ impl Measure for AucRoc {
                     Ok(if valid > 0 { sum / valid as f64 } else { 0.5 })
                 }
             }
-            Prediction::Classification { probabilities: None, .. } => {
-                Err(SmeltError::Other("AUC-ROC requires probabilities".into()))
-            }
-            _ => Err(SmeltError::Other("AUC-ROC requires classification prediction with truth and probabilities".into())),
+            Prediction::Classification {
+                probabilities: None,
+                ..
+            } => Err(SmeltError::Other("AUC-ROC requires probabilities".into())),
+            _ => Err(SmeltError::Other(
+                "AUC-ROC requires classification prediction with truth and probabilities".into(),
+            )),
         }
     }
 }
@@ -254,9 +355,7 @@ impl Measure for AucRoc {
 /// Compute AUC for a binary problem using the trapezoidal rule.
 fn auc_binary(scores: &[f64], labels: &[bool]) -> Result<f64> {
     let n = scores.len();
-    let mut indexed: Vec<(f64, bool)> = scores.iter().zip(labels)
-        .map(|(&s, &l)| (s, l))
-        .collect();
+    let mut indexed: Vec<(f64, bool)> = scores.iter().zip(labels).map(|(&s, &l)| (s, l)).collect();
     // Sort descending by score
     indexed.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -302,22 +401,35 @@ fn auc_binary(scores: &[f64], labels: &[bool]) -> Result<f64> {
 pub struct RSquared;
 
 impl Measure for RSquared {
-    fn id(&self) -> &str { "regr.rsq" }
-    fn maximize(&self) -> bool { true }
+    fn id(&self) -> &str {
+        "regr.rsq"
+    }
+    fn maximize(&self) -> bool {
+        true
+    }
 
     fn score(&self, prediction: &Prediction) -> Result<f64> {
         match prediction {
-            Prediction::Regression { predicted, truth: Some(truth) } => {
+            Prediction::Regression {
+                predicted,
+                truth: Some(truth),
+            } => {
                 let mean = truth.iter().sum::<f64>() / truth.len() as f64;
-                let ss_res: f64 = predicted.iter().zip(truth)
+                let ss_res: f64 = predicted
+                    .iter()
+                    .zip(truth)
                     .map(|(p, t)| (t - p).powi(2))
                     .sum();
-                let ss_tot: f64 = truth.iter()
-                    .map(|t| (t - mean).powi(2))
-                    .sum();
-                Ok(if ss_tot > 0.0 { 1.0 - ss_res / ss_tot } else { 0.0 })
+                let ss_tot: f64 = truth.iter().map(|t| (t - mean).powi(2)).sum();
+                Ok(if ss_tot > 0.0 {
+                    1.0 - ss_res / ss_tot
+                } else {
+                    0.0
+                })
             }
-            _ => Err(SmeltError::Other("R² requires regression prediction with truth".into())),
+            _ => Err(SmeltError::Other(
+                "R² requires regression prediction with truth".into(),
+            )),
         }
     }
 }
@@ -326,14 +438,23 @@ impl Measure for RSquared {
 pub struct Mape;
 
 impl Measure for Mape {
-    fn id(&self) -> &str { "regr.mape" }
-    fn maximize(&self) -> bool { false }
+    fn id(&self) -> &str {
+        "regr.mape"
+    }
+    fn maximize(&self) -> bool {
+        false
+    }
 
     fn score(&self, prediction: &Prediction) -> Result<f64> {
         match prediction {
-            Prediction::Regression { predicted, truth: Some(truth) } => {
+            Prediction::Regression {
+                predicted,
+                truth: Some(truth),
+            } => {
                 let n = truth.len() as f64;
-                let mape: f64 = predicted.iter().zip(truth)
+                let mape: f64 = predicted
+                    .iter()
+                    .zip(truth)
                     .map(|(p, t)| {
                         if t.abs() > f64::EPSILON {
                             ((p - t) / t).abs()
@@ -341,10 +462,13 @@ impl Measure for Mape {
                             0.0 // skip zero-valued actuals
                         }
                     })
-                    .sum::<f64>() / n;
+                    .sum::<f64>()
+                    / n;
                 Ok(mape)
             }
-            _ => Err(SmeltError::Other("MAPE requires regression prediction with truth".into())),
+            _ => Err(SmeltError::Other(
+                "MAPE requires regression prediction with truth".into(),
+            )),
         }
     }
 }

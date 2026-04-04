@@ -1,8 +1,8 @@
 //! Feature scaling transformers: StandardScaler and MinMaxScaler.
 
-use ndarray::Array2;
-use crate::{SmeltError, Result};
 use super::Transformer;
+use crate::{Result, SmeltError};
+use ndarray::Array2;
 
 /// Standardizes features to zero mean and unit variance.
 ///
@@ -25,15 +25,24 @@ pub struct StandardScaler {
 }
 
 impl StandardScaler {
-    pub fn new() -> Self { Self { means: None, stds: None } }
+    pub fn new() -> Self {
+        Self {
+            means: None,
+            stds: None,
+        }
+    }
 }
 
 impl Default for StandardScaler {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Transformer for StandardScaler {
-    fn id(&self) -> &str { "standard_scaler" }
+    fn id(&self) -> &str {
+        "standard_scaler"
+    }
 
     fn fit(&mut self, features: &Array2<f64>) -> Result<()> {
         let n = features.nrows() as f64;
@@ -72,7 +81,9 @@ impl Transformer for StandardScaler {
         Ok(result)
     }
 
-    fn clone_box(&self) -> Box<dyn Transformer> { Box::new(self.clone()) }
+    fn clone_box(&self) -> Box<dyn Transformer> {
+        Box::new(self.clone())
+    }
 }
 
 /// Scales features to [0, 1] range.
@@ -97,15 +108,24 @@ pub struct MinMaxScaler {
 }
 
 impl MinMaxScaler {
-    pub fn new() -> Self { Self { mins: None, ranges: None } }
+    pub fn new() -> Self {
+        Self {
+            mins: None,
+            ranges: None,
+        }
+    }
 }
 
 impl Default for MinMaxScaler {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Transformer for MinMaxScaler {
-    fn id(&self) -> &str { "min_max_scaler" }
+    fn id(&self) -> &str {
+        "min_max_scaler"
+    }
 
     fn fit(&mut self, features: &Array2<f64>) -> Result<()> {
         let ncols = features.ncols();
@@ -117,7 +137,11 @@ impl Transformer for MinMaxScaler {
             let min = col.iter().cloned().fold(f64::INFINITY, f64::min);
             let max = col.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             mins[j] = min;
-            ranges[j] = if (max - min).abs() > f64::EPSILON { max - min } else { 1.0 };
+            ranges[j] = if (max - min).abs() > f64::EPSILON {
+                max - min
+            } else {
+                1.0
+            };
         }
 
         self.mins = Some(mins);
@@ -143,5 +167,7 @@ impl Transformer for MinMaxScaler {
         Ok(result)
     }
 
-    fn clone_box(&self) -> Box<dyn Transformer> { Box::new(self.clone()) }
+    fn clone_box(&self) -> Box<dyn Transformer> {
+        Box::new(self.clone())
+    }
 }

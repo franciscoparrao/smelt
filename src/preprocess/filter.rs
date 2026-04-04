@@ -4,9 +4,9 @@
 //! Integrates with Pipeline as a Transformer — fit on training data only,
 //! preventing data leakage in cross-validation.
 
-use ndarray::Array2;
-use crate::{SmeltError, Result};
 use super::Transformer;
+use crate::{Result, SmeltError};
+use ndarray::Array2;
 
 /// Trait for feature scoring methods.
 pub trait Filter: Send + Sync {
@@ -78,23 +78,53 @@ impl FilterBox {
 impl FilterSelector {
     /// Create a selector that keeps the top `n_features` based on filter scores.
     pub fn variance(n_features: usize) -> Self {
-        Self { filter: FilterBox { inner: FilterType::Variance }, n_features, selected_indices: None }
+        Self {
+            filter: FilterBox {
+                inner: FilterType::Variance,
+            },
+            n_features,
+            selected_indices: None,
+        }
     }
 
     pub fn correlation(n_features: usize) -> Self {
-        Self { filter: FilterBox { inner: FilterType::Correlation }, n_features, selected_indices: None }
+        Self {
+            filter: FilterBox {
+                inner: FilterType::Correlation,
+            },
+            n_features,
+            selected_indices: None,
+        }
     }
 
     pub fn anova_f(n_features: usize) -> Self {
-        Self { filter: FilterBox { inner: FilterType::AnovaF }, n_features, selected_indices: None }
+        Self {
+            filter: FilterBox {
+                inner: FilterType::AnovaF,
+            },
+            n_features,
+            selected_indices: None,
+        }
     }
 
     pub fn information_gain(n_features: usize) -> Self {
-        Self { filter: FilterBox { inner: FilterType::InformationGain }, n_features, selected_indices: None }
+        Self {
+            filter: FilterBox {
+                inner: FilterType::InformationGain,
+            },
+            n_features,
+            selected_indices: None,
+        }
     }
 
     pub fn mutual_info(n_features: usize) -> Self {
-        Self { filter: FilterBox { inner: FilterType::MutualInfo }, n_features, selected_indices: None }
+        Self {
+            filter: FilterBox {
+                inner: FilterType::MutualInfo,
+            },
+            n_features,
+            selected_indices: None,
+        }
     }
 
     /// Get the selected feature indices (after fitting).
@@ -104,7 +134,9 @@ impl FilterSelector {
 }
 
 impl Transformer for FilterSelector {
-    fn id(&self) -> &str { "filter_selector" }
+    fn id(&self) -> &str {
+        "filter_selector"
+    }
 
     fn fit(&mut self, features: &Array2<f64>) -> Result<()> {
         // Unsupervised fallback: use variance filter
@@ -119,10 +151,16 @@ impl Transformer for FilterSelector {
         let mut ranked: Vec<(usize, f64)> = scores.into_iter().enumerate().collect();
         ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         self.selected_indices = Some(
-            ranked.iter().take(self.n_features.min(features.ncols())).map(|(i, _)| *i).collect()
+            ranked
+                .iter()
+                .take(self.n_features.min(features.ncols()))
+                .map(|(i, _)| *i)
+                .collect(),
         );
         // Sort indices to preserve column order
-        if let Some(ref mut idx) = self.selected_indices { idx.sort(); }
+        if let Some(ref mut idx) = self.selected_indices {
+            idx.sort();
+        }
         Ok(())
     }
 
@@ -132,23 +170,37 @@ impl Transformer for FilterSelector {
         let mut ranked: Vec<(usize, f64)> = scores.into_iter().enumerate().collect();
         ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         self.selected_indices = Some(
-            ranked.iter().take(self.n_features.min(features.ncols())).map(|(i, _)| *i).collect()
+            ranked
+                .iter()
+                .take(self.n_features.min(features.ncols()))
+                .map(|(i, _)| *i)
+                .collect(),
         );
-        if let Some(ref mut idx) = self.selected_indices { idx.sort(); }
+        if let Some(ref mut idx) = self.selected_indices {
+            idx.sort();
+        }
         Ok(())
     }
 
     fn transform(&self, features: &Array2<f64>) -> Result<Array2<f64>> {
-        let indices = self.selected_indices.as_ref().ok_or(SmeltError::NotTrained)?;
+        let indices = self
+            .selected_indices
+            .as_ref()
+            .ok_or(SmeltError::NotTrained)?;
         Ok(features.select(ndarray::Axis(1), indices))
     }
 
     fn transform_names(&self, names: &[String]) -> Result<Vec<String>> {
-        let indices = self.selected_indices.as_ref().ok_or(SmeltError::NotTrained)?;
+        let indices = self
+            .selected_indices
+            .as_ref()
+            .ok_or(SmeltError::NotTrained)?;
         Ok(indices.iter().map(|&i| names[i].clone()).collect())
     }
 
-    fn clone_box(&self) -> Box<dyn Transformer> { Box::new(self.clone()) }
+    fn clone_box(&self) -> Box<dyn Transformer> {
+        Box::new(self.clone())
+    }
 }
 
 // ── Filter implementations ─────────────────────────────────────────
@@ -157,7 +209,9 @@ impl Transformer for FilterSelector {
 pub struct VarianceFilter;
 
 impl Filter for VarianceFilter {
-    fn id(&self) -> &str { "variance" }
+    fn id(&self) -> &str {
+        "variance"
+    }
 
     fn score(&self, features: &Array2<f64>, _target: &[f64]) -> Vec<f64> {
         (0..features.ncols())
@@ -175,7 +229,9 @@ impl Filter for VarianceFilter {
 pub struct CorrelationFilter;
 
 impl Filter for CorrelationFilter {
-    fn id(&self) -> &str { "correlation" }
+    fn id(&self) -> &str {
+        "correlation"
+    }
 
     fn score(&self, features: &Array2<f64>, target: &[f64]) -> Vec<f64> {
         let n = features.nrows() as f64;
@@ -188,11 +244,16 @@ impl Filter for CorrelationFilter {
                 let f_mean = col.sum() / n;
                 let f_std = (col.iter().map(|&v| (v - f_mean).powi(2)).sum::<f64>() / n).sqrt();
 
-                if f_std < 1e-10 || t_std < 1e-10 { return 0.0; }
+                if f_std < 1e-10 || t_std < 1e-10 {
+                    return 0.0;
+                }
 
-                let cov: f64 = col.iter().zip(target)
+                let cov: f64 = col
+                    .iter()
+                    .zip(target)
                     .map(|(&f, &t)| (f - f_mean) * (t - t_mean))
-                    .sum::<f64>() / n;
+                    .sum::<f64>()
+                    / n;
 
                 (cov / (f_std * t_std)).abs()
             })
@@ -205,13 +266,17 @@ impl Filter for CorrelationFilter {
 pub struct AnovaFFilter;
 
 impl Filter for AnovaFFilter {
-    fn id(&self) -> &str { "anova_f" }
+    fn id(&self) -> &str {
+        "anova_f"
+    }
 
     fn score(&self, features: &Array2<f64>, target: &[f64]) -> Vec<f64> {
         let n = features.nrows();
         let classes: Vec<usize> = target.iter().map(|&t| t as usize).collect();
         let n_classes = classes.iter().max().map_or(0, |&m| m + 1);
-        if n_classes < 2 { return vec![0.0; features.ncols()]; }
+        if n_classes < 2 {
+            return vec![0.0; features.ncols()];
+        }
 
         (0..features.ncols())
             .map(|j| {
@@ -228,7 +293,9 @@ impl Filter for AnovaFFilter {
                 // Between-group variance
                 let mut ss_between = 0.0;
                 for c in 0..n_classes {
-                    if class_counts[c] == 0 { continue; }
+                    if class_counts[c] == 0 {
+                        continue;
+                    }
                     let class_mean = class_sums[c] / class_counts[c] as f64;
                     ss_between += class_counts[c] as f64 * (class_mean - global_mean).powi(2);
                 }
@@ -240,11 +307,15 @@ impl Filter for AnovaFFilter {
                     ss_within += (col[i] - class_mean).powi(2);
                 }
 
-                if ss_within < 1e-10 { return f64::INFINITY; }
+                if ss_within < 1e-10 {
+                    return f64::INFINITY;
+                }
 
                 let df_between = (n_classes - 1) as f64;
                 let df_within = (n - n_classes) as f64;
-                if df_within <= 0.0 { return 0.0; }
+                if df_within <= 0.0 {
+                    return 0.0;
+                }
 
                 (ss_between / df_between) / (ss_within / df_within)
             })
@@ -257,7 +328,9 @@ impl Filter for AnovaFFilter {
 pub struct InformationGainFilter;
 
 impl Filter for InformationGainFilter {
-    fn id(&self) -> &str { "information_gain" }
+    fn id(&self) -> &str {
+        "information_gain"
+    }
 
     fn score(&self, features: &Array2<f64>, target: &[f64]) -> Vec<f64> {
         let n = features.nrows() as f64;
@@ -266,7 +339,9 @@ impl Filter for InformationGainFilter {
 
         // Target entropy H(Y)
         let mut class_counts = vec![0usize; n_classes];
-        for &c in &classes { class_counts[c] += 1; }
+        for &c in &classes {
+            class_counts[c] += 1;
+        }
         let h_target = entropy(&class_counts, n);
 
         (0..features.ncols())
@@ -278,7 +353,8 @@ impl Filter for InformationGainFilter {
                 let range = (max - min).max(1e-10);
                 let n_bins = 10usize;
 
-                let bins: Vec<usize> = col.iter()
+                let bins: Vec<usize> = col
+                    .iter()
                     .map(|&v| (((v - min) / range * n_bins as f64) as usize).min(n_bins - 1))
                     .collect();
 
@@ -292,7 +368,9 @@ impl Filter for InformationGainFilter {
 
                 let h_conditional: f64 = (0..n_bins)
                     .map(|b| {
-                        if bin_counts[b] == 0 { return 0.0; }
+                        if bin_counts[b] == 0 {
+                            return 0.0;
+                        }
                         let weight = bin_counts[b] as f64 / n;
                         weight * entropy(&bin_class_counts[b], bin_counts[b] as f64)
                     })
@@ -308,7 +386,9 @@ impl Filter for InformationGainFilter {
 pub struct MutualInfoFilter;
 
 impl Filter for MutualInfoFilter {
-    fn id(&self) -> &str { "mutual_info" }
+    fn id(&self) -> &str {
+        "mutual_info"
+    }
 
     fn score(&self, features: &Array2<f64>, target: &[f64]) -> Vec<f64> {
         // For regression targets, use binned mutual information
@@ -319,7 +399,8 @@ impl Filter for MutualInfoFilter {
         let t_min = target.iter().cloned().fold(f64::INFINITY, f64::min);
         let t_max = target.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let t_range = (t_max - t_min).max(1e-10);
-        let t_bins: Vec<usize> = target.iter()
+        let t_bins: Vec<usize> = target
+            .iter()
             .map(|&v| (((v - t_min) / t_range * n_bins as f64) as usize).min(n_bins - 1))
             .collect();
 
@@ -329,7 +410,8 @@ impl Filter for MutualInfoFilter {
                 let f_min = col.iter().cloned().fold(f64::INFINITY, f64::min);
                 let f_max = col.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
                 let f_range = (f_max - f_min).max(1e-10);
-                let f_bins: Vec<usize> = col.iter()
+                let f_bins: Vec<usize> = col
+                    .iter()
                     .map(|&v| (((v - f_min) / f_range * n_bins as f64) as usize).min(n_bins - 1))
                     .collect();
 
@@ -349,7 +431,9 @@ impl Filter for MutualInfoFilter {
                 let mut mi = 0.0;
                 for fb in 0..n_bins {
                     for tb in 0..n_bins {
-                        if joint[fb][tb] == 0 { continue; }
+                        if joint[fb][tb] == 0 {
+                            continue;
+                        }
                         let p_joint = joint[fb][tb] as f64 / n_f;
                         let p_f = f_counts[fb] as f64 / n_f;
                         let p_t = t_counts[tb] as f64 / n_f;
@@ -363,8 +447,11 @@ impl Filter for MutualInfoFilter {
 }
 
 fn entropy(counts: &[usize], total: f64) -> f64 {
-    if total <= 0.0 { return 0.0; }
-    counts.iter()
+    if total <= 0.0 {
+        return 0.0;
+    }
+    counts
+        .iter()
         .filter(|&&c| c > 0)
         .map(|&c| {
             let p = c as f64 / total;

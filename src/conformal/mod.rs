@@ -5,10 +5,10 @@
 
 pub mod cqr;
 
-use ndarray::Array2;
+use crate::Result;
 use crate::learner::TrainedModel;
 use crate::prediction::Prediction;
-use crate::Result;
+use ndarray::Array2;
 
 /// Conformal prediction result for regression.
 #[derive(Debug, Clone)]
@@ -76,11 +76,16 @@ impl<'a> ConformalRegressor<'a> {
         let pred = model.predict(cal_features)?;
         let predicted = match &pred {
             Prediction::Regression { predicted, .. } => predicted,
-            _ => return Err(crate::SmeltError::Other("Expected regression prediction".into())),
+            _ => {
+                return Err(crate::SmeltError::Other(
+                    "Expected regression prediction".into(),
+                ));
+            }
         };
 
         // Compute absolute residuals
-        let mut residuals: Vec<f64> = predicted.iter()
+        let mut residuals: Vec<f64> = predicted
+            .iter()
             .zip(cal_targets)
             .map(|(p, t)| (p - t).abs())
             .collect();
@@ -92,7 +97,10 @@ impl<'a> ConformalRegressor<'a> {
         let q_idx = q_idx.min(n) - 1;
         let quantile_residual = residuals[q_idx.min(n - 1)];
 
-        Ok(Self { model, quantile_residual })
+        Ok(Self {
+            model,
+            quantile_residual,
+        })
     }
 
     /// Predict with conformal intervals.
@@ -100,18 +108,27 @@ impl<'a> ConformalRegressor<'a> {
         let pred = self.model.predict(features)?;
         let predicted = match &pred {
             Prediction::Regression { predicted, .. } => predicted,
-            _ => return Err(crate::SmeltError::Other("Expected regression prediction".into())),
+            _ => {
+                return Err(crate::SmeltError::Other(
+                    "Expected regression prediction".into(),
+                ));
+            }
         };
 
-        Ok(predicted.iter().map(|&p| ConformalInterval {
-            prediction: p,
-            lower: p - self.quantile_residual,
-            upper: p + self.quantile_residual,
-        }).collect())
+        Ok(predicted
+            .iter()
+            .map(|&p| ConformalInterval {
+                prediction: p,
+                lower: p - self.quantile_residual,
+                upper: p + self.quantile_residual,
+            })
+            .collect())
     }
 
     /// The calibrated interval width (±).
-    pub fn interval_width(&self) -> f64 { self.quantile_residual }
+    pub fn interval_width(&self) -> f64 {
+        self.quantile_residual
+    }
 }
 
 /// Calibrated conformal predictor for classification.
@@ -153,14 +170,20 @@ impl<'a> ConformalClassifier<'a> {
     ) -> Result<Self> {
         let pred = model.predict(cal_features)?;
         let probabilities = match &pred {
-            Prediction::Classification { probabilities: Some(p), .. } => p,
-            _ => return Err(crate::SmeltError::Other(
-                "Conformal classification requires model with probabilities".into()
-            )),
+            Prediction::Classification {
+                probabilities: Some(p),
+                ..
+            } => p,
+            _ => {
+                return Err(crate::SmeltError::Other(
+                    "Conformal classification requires model with probabilities".into(),
+                ));
+            }
         };
 
         // Nonconformity score: 1 - P(true class)
-        let mut scores: Vec<f64> = probabilities.iter()
+        let mut scores: Vec<f64> = probabilities
+            .iter()
             .zip(cal_targets)
             .map(|(probs, &t)| 1.0 - probs[t])
             .collect();
@@ -170,31 +193,46 @@ impl<'a> ConformalClassifier<'a> {
         let q_idx = ((n as f64 + 1.0) * (1.0 - alpha)).ceil() as usize;
         let quantile_score = scores[q_idx.min(n) - 1];
 
-        Ok(Self { model, quantile_score })
+        Ok(Self {
+            model,
+            quantile_score,
+        })
     }
 
     /// Predict with conformal prediction sets.
     pub fn predict(&self, features: &Array2<f64>) -> Result<Vec<ConformalSet>> {
         let pred = self.model.predict(features)?;
         let (predicted, probabilities) = match &pred {
-            Prediction::Classification { predicted, probabilities: Some(p), .. } => (predicted, p),
-            _ => return Err(crate::SmeltError::Other(
-                "Conformal classification requires model with probabilities".into()
-            )),
+            Prediction::Classification {
+                predicted,
+                probabilities: Some(p),
+                ..
+            } => (predicted, p),
+            _ => {
+                return Err(crate::SmeltError::Other(
+                    "Conformal classification requires model with probabilities".into(),
+                ));
+            }
         };
 
-        Ok(predicted.iter().zip(probabilities).map(|(&pred, probs)| {
-            // Include class in set if 1 - P(class) <= quantile
-            let prediction_set: Vec<usize> = probs.iter().enumerate()
-                .filter(|&(_, &p)| 1.0 - p <= self.quantile_score)
-                .map(|(c, _)| c)
-                .collect();
+        Ok(predicted
+            .iter()
+            .zip(probabilities)
+            .map(|(&pred, probs)| {
+                // Include class in set if 1 - P(class) <= quantile
+                let prediction_set: Vec<usize> = probs
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, &p)| 1.0 - p <= self.quantile_score)
+                    .map(|(c, _)| c)
+                    .collect();
 
-            ConformalSet {
-                prediction: pred,
-                prediction_set,
-                probabilities: probs.clone(),
-            }
-        }).collect())
+                ConformalSet {
+                    prediction: pred,
+                    prediction_set,
+                    probabilities: probs.clone(),
+                }
+            })
+            .collect())
     }
 }

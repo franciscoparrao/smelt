@@ -9,11 +9,11 @@
 //! Reference: Ko, A. et al. (2008). From dynamic classifier selection to
 //! dynamic ensemble selection. Pattern Recognition.
 
-use ndarray::Array2;
-use crate::task::{ClassificationTask, RegressionTask, Task};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::{Result, SmeltError};
+use ndarray::Array2;
 
 /// Dynamic Ensemble Selection (KNORA-E).
 ///
@@ -48,10 +48,16 @@ pub struct DynamicEnsemble {
 
 impl DynamicEnsemble {
     pub fn new(factories: Vec<Box<dyn Fn() -> Box<dyn Learner> + Send + Sync>>) -> Self {
-        Self { base_factories: factories, k_neighbors: 7 }
+        Self {
+            base_factories: factories,
+            k_neighbors: 7,
+        }
     }
 
-    pub fn with_k_neighbors(mut self, k: usize) -> Self { self.k_neighbors = k; self }
+    pub fn with_k_neighbors(mut self, k: usize) -> Self {
+        self.k_neighbors = k;
+        self
+    }
 }
 
 struct TrainedDES {
@@ -64,7 +70,11 @@ struct TrainedDES {
 }
 
 fn euclidean_dist(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).powi(2)).sum::<f64>().sqrt()
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).powi(2))
+        .sum::<f64>()
+        .sqrt()
 }
 
 impl TrainedModel for TrainedDES {
@@ -77,7 +87,12 @@ impl TrainedModel for TrainedDES {
 
             // Find k nearest neighbors in validation set
             let mut dists: Vec<(usize, f64)> = (0..self.val_features.nrows())
-                .map(|j| (j, euclidean_dist(&row_vec, &self.val_features.row(j).to_vec())))
+                .map(|j| {
+                    (
+                        j,
+                        euclidean_dist(&row_vec, &self.val_features.row(j).to_vec()),
+                    )
+                })
                 .collect();
             dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             let neighbors: Vec<usize> = dists.iter().take(self.k).map(|(j, _)| *j).collect();
@@ -86,7 +101,9 @@ impl TrainedModel for TrainedDES {
             let mut competent: Vec<usize> = Vec::new();
             for (m, preds) in self.val_predictions.iter().enumerate() {
                 let all_correct = neighbors.iter().all(|&n| preds[n] == self.val_targets[n]);
-                if all_correct { competent.push(m); }
+                if all_correct {
+                    competent.push(m);
+                }
             }
 
             // Fallback: if no model is fully competent, use all models
@@ -98,30 +115,48 @@ impl TrainedModel for TrainedDES {
             let mut votes = vec![0usize; self.n_classes];
             let single = Array2::from_shape_vec((1, features.ncols()), row_vec).unwrap();
             for &m in &competent {
-                if let Ok(pred) = self.models[m].predict(&single) {
-                    if let Prediction::Classification { predicted: p, .. } = &pred {
-                        if p[0] < votes.len() { votes[p[0]] += 1; }
-                    }
+                if let Ok(Prediction::Classification { predicted: p, .. }) =
+                    &self.models[m].predict(&single)
+                    && p[0] < votes.len()
+                {
+                    votes[p[0]] += 1;
                 }
             }
 
-            let pred_class = votes.iter().enumerate()
-                .max_by_key(|&(_, &v)| v).map(|(i, _)| i).unwrap_or(0);
+            let pred_class = votes
+                .iter()
+                .enumerate()
+                .max_by_key(|&(_, &v)| v)
+                .map(|(i, _)| i)
+                .unwrap_or(0);
             let total: f64 = votes.iter().sum::<usize>() as f64;
-            let probs: Vec<f64> = votes.iter()
-                .map(|&v| if total > 0.0 { v as f64 / total } else { 1.0 / self.n_classes as f64 })
+            let probs: Vec<f64> = votes
+                .iter()
+                .map(|&v| {
+                    if total > 0.0 {
+                        v as f64 / total
+                    } else {
+                        1.0 / self.n_classes as f64
+                    }
+                })
                 .collect();
 
             predicted.push(pred_class);
             probabilities.push(probs);
         }
 
-        Ok(Prediction::Classification { predicted, truth: None, probabilities: Some(probabilities) })
+        Ok(Prediction::Classification {
+            predicted,
+            truth: None,
+            probabilities: Some(probabilities),
+        })
     }
 }
 
 impl Learner for DynamicEnsemble {
-    fn id(&self) -> &str { "dynamic_ensemble" }
+    fn id(&self) -> &str {
+        "dynamic_ensemble"
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
@@ -155,6 +190,8 @@ impl Learner for DynamicEnsemble {
     }
 
     fn train_regress(&mut self, _: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other("DynamicEnsemble supports classification only".into()))
+        Err(SmeltError::Other(
+            "DynamicEnsemble supports classification only".into(),
+        ))
     }
 }

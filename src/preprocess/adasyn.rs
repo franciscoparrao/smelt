@@ -5,12 +5,12 @@
 //!
 //! Reference: He, H. et al. (2008). ADASYN. IJCNN, 1322-1328. (4,070 citations)
 
+use crate::Result;
+use crate::task::{ClassificationTask, Task};
 use ndarray::Array2;
 use rand::Rng;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
-use crate::task::{ClassificationTask, Task};
-use crate::Result;
+use rand::rngs::StdRng;
 
 /// ADASYN adaptive oversampler.
 ///
@@ -40,13 +40,26 @@ pub struct Adasyn {
 }
 
 impl Default for Adasyn {
-    fn default() -> Self { Self { k_neighbors: 5, seed: 42 } }
+    fn default() -> Self {
+        Self {
+            k_neighbors: 5,
+            seed: 42,
+        }
+    }
 }
 
 impl Adasyn {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_k_neighbors(mut self, k: usize) -> Self { self.k_neighbors = k; self }
-    pub fn with_seed(mut self, seed: u64) -> Self { self.seed = seed; self }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_k_neighbors(mut self, k: usize) -> Self {
+        self.k_neighbors = k;
+        self
+    }
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
 
     pub fn balance(&self, task: &ClassificationTask) -> Result<ClassificationTask> {
         let features = task.features();
@@ -56,25 +69,33 @@ impl Adasyn {
         let n_samples = task.n_samples();
 
         let mut class_counts = vec![0usize; n_classes];
-        for &t in target { class_counts[t] += 1; }
+        for &t in target {
+            class_counts[t] += 1;
+        }
         let max_count = *class_counts.iter().max().unwrap();
 
         let mut rng = StdRng::seed_from_u64(self.seed);
-        let mut new_features: Vec<Vec<f64>> = features.rows().into_iter()
-            .map(|r| r.to_vec()).collect();
+        let mut new_features: Vec<Vec<f64>> =
+            features.rows().into_iter().map(|r| r.to_vec()).collect();
         let mut new_target: Vec<usize> = target.to_vec();
 
         for class in 0..n_classes {
             let n_to_generate = max_count - class_counts[class];
-            if n_to_generate == 0 { continue; }
+            if n_to_generate == 0 {
+                continue;
+            }
 
-            let class_indices: Vec<usize> = target.iter().enumerate()
+            let class_indices: Vec<usize> = target
+                .iter()
+                .enumerate()
                 .filter(|&(_, &t)| t == class)
                 .map(|(i, _)| i)
                 .collect();
 
             let n_class = class_indices.len();
-            if n_class == 0 { continue; }
+            if n_class == 0 {
+                continue;
+            }
             let k = self.k_neighbors.min(n_samples - 1);
 
             // Compute density ratio r_i for each minority sample:
@@ -84,14 +105,21 @@ impl Adasyn {
                 let mut dists: Vec<(usize, f64)> = (0..n_samples)
                     .filter(|&j| j != idx)
                     .map(|j| {
-                        let d: f64 = features.row(idx).iter().zip(features.row(j).iter())
-                            .map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt();
+                        let d: f64 = features
+                            .row(idx)
+                            .iter()
+                            .zip(features.row(j).iter())
+                            .map(|(a, b)| (a - b).powi(2))
+                            .sum::<f64>()
+                            .sqrt();
                         (j, d)
                     })
                     .collect();
                 dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
-                let majority_neighbors = dists.iter().take(k)
+                let majority_neighbors = dists
+                    .iter()
+                    .take(k)
                     .filter(|(j, _)| target[*j] != class)
                     .count();
                 ratios.push(majority_neighbors as f64 / k as f64);
@@ -101,13 +129,18 @@ impl Adasyn {
             let ratio_sum: f64 = ratios.iter().sum();
             if ratio_sum < 1e-10 {
                 // All neighbors are same class: uniform distribution
-                for r in &mut ratios { *r = 1.0 / n_class as f64; }
+                for r in &mut ratios {
+                    *r = 1.0 / n_class as f64;
+                }
             } else {
-                for r in &mut ratios { *r /= ratio_sum; }
+                for r in &mut ratios {
+                    *r /= ratio_sum;
+                }
             }
 
             // Generate samples proportional to r_i
-            let samples_per_point: Vec<usize> = ratios.iter()
+            let samples_per_point: Vec<usize> = ratios
+                .iter()
                 .map(|&r| (r * n_to_generate as f64).round() as usize)
                 .collect();
 
@@ -116,20 +149,27 @@ impl Adasyn {
                 let sample = features.row(idx);
 
                 // Find same-class neighbors
-                let same_class: Vec<usize> = class_indices.iter()
+                let same_class: Vec<usize> = class_indices
+                    .iter()
                     .filter(|&&j| j != idx)
                     .copied()
                     .collect();
 
                 for _ in 0..n_gen {
                     let synthetic = if same_class.is_empty() {
-                        sample.iter().map(|&s| s + rng.random_range(-0.01..0.01)).collect()
+                        sample
+                            .iter()
+                            .map(|&s| s + rng.random_range(-0.01..0.01))
+                            .collect()
                     } else {
                         let nn = same_class[rng.random_range(0..same_class.len())];
                         let neighbor = features.row(nn);
                         let lambda: f64 = rng.random_range(0.0..1.0);
-                        sample.iter().zip(neighbor.iter())
-                            .map(|(&s, &n)| s + lambda * (n - s)).collect()
+                        sample
+                            .iter()
+                            .zip(neighbor.iter())
+                            .map(|(&s, &n)| s + lambda * (n - s))
+                            .collect()
                     };
 
                     new_features.push(synthetic);

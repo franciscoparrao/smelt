@@ -2,12 +2,12 @@
 //!
 //! Uses Gini impurity for classification and MSE for regression.
 
-use ndarray::Array2;
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use super::{LeafValue, Node, TreeBuilder};
+use crate::Result;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
-use super::{Node, LeafValue, TreeBuilder};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use ndarray::Array2;
 
 /// CART Decision Tree learner.
 ///
@@ -45,7 +45,9 @@ impl Default for DecisionTree {
 }
 
 impl DecisionTree {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn with_max_depth(mut self, depth: usize) -> Self {
         self.max_depth = Some(depth);
@@ -63,7 +65,7 @@ impl DecisionTree {
     }
 }
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct TrainedDecisionTree {
@@ -96,7 +98,9 @@ impl TrainedModel for TrainedDecisionTree {
                 probabilities: Some(probabilities),
             })
         } else {
-            let predicted: Vec<f64> = features.rows().into_iter()
+            let predicted: Vec<f64> = features
+                .rows()
+                .into_iter()
                 .map(|row| match self.root.predict_one(row) {
                     LeafValue::Value(v) => *v,
                     _ => unreachable!(),
@@ -113,7 +117,8 @@ impl TrainedModel for TrainedDecisionTree {
             return None;
         }
         Some(
-            self.feature_names.iter()
+            self.feature_names
+                .iter()
                 .zip(&self.feature_importances)
                 .map(|(name, &imp)| (name.clone(), imp / total))
                 .collect(),
@@ -122,7 +127,9 @@ impl TrainedModel for TrainedDecisionTree {
 }
 
 impl Learner for DecisionTree {
-    fn id(&self) -> &str { "decision_tree" }
+    fn id(&self) -> &str {
+        "decision_tree"
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
@@ -132,11 +139,15 @@ impl Learner for DecisionTree {
         let indices: Vec<usize> = (0..task.n_samples()).collect();
 
         let mut builder = TreeBuilder::new(
-            self.max_depth, self.min_samples_split, self.min_samples_leaf,
-            None, n_features,
+            self.max_depth,
+            self.min_samples_split,
+            self.min_samples_leaf,
+            None,
+            n_features,
         );
         let mut rng = rand::rng();
-        let root = builder.build_classifier(&features.view(), target, &indices, n_classes, 0, &mut rng);
+        let root =
+            builder.build_classifier(&features.view(), target, &indices, n_classes, 0, &mut rng);
 
         Ok(Box::new(TrainedDecisionTree {
             root,
@@ -153,8 +164,11 @@ impl Learner for DecisionTree {
         let indices: Vec<usize> = (0..task.n_samples()).collect();
 
         let mut builder = TreeBuilder::new(
-            self.max_depth, self.min_samples_split, self.min_samples_leaf,
-            None, n_features,
+            self.max_depth,
+            self.min_samples_split,
+            self.min_samples_leaf,
+            None,
+            n_features,
         );
         let mut rng = rand::rng();
         let root = builder.build_regressor(&features.view(), target, &indices, 0, &mut rng);

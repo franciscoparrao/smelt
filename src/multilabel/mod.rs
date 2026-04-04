@@ -3,11 +3,11 @@
 //! Implements Classifier Chains (Read et al. 2011) — trains a sequence
 //! of binary classifiers where each uses previous predictions as features.
 
-use ndarray::Array2;
-use crate::task::ClassificationTask;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::task::ClassificationTask;
+use crate::{Result, SmeltError};
+use ndarray::Array2;
 
 /// Multi-label prediction result.
 #[derive(Debug, Clone)]
@@ -56,7 +56,9 @@ pub struct ClassifierChain {
 
 impl ClassifierChain {
     pub fn new(factory: impl Fn() -> Box<dyn Learner> + Send + Sync + 'static) -> Self {
-        Self { factory: Box::new(factory) }
+        Self {
+            factory: Box::new(factory),
+        }
     }
 
     /// Fit the classifier chain.
@@ -74,7 +76,8 @@ impl ClassifierChain {
 
         if labels.len() != n_samples {
             return Err(SmeltError::DimensionMismatch {
-                expected: n_samples, got: labels.len(),
+                expected: n_samples,
+                got: labels.len(),
             });
         }
 
@@ -99,9 +102,7 @@ impl ClassifierChain {
             // Binary target for this label
             let target: Vec<usize> = labels.iter().map(|l| l[j]).collect();
 
-            let task = ClassificationTask::new(
-                &format!("label_{j}"), aug_features, target,
-            )?;
+            let task = ClassificationTask::new(format!("label_{j}"), aug_features, target)?;
 
             let mut learner = (self.factory)();
             let model = learner.train_classif(&task)?;
@@ -161,7 +162,10 @@ impl TrainedClassifierChain {
     /// Evaluate with subset accuracy (exact match ratio).
     pub fn subset_accuracy(&self, predictions: &MultiLabelPrediction, truth: &[Vec<usize>]) -> f64 {
         let n = predictions.n_samples;
-        let correct = predictions.labels.iter().zip(truth)
+        let correct = predictions
+            .labels
+            .iter()
+            .zip(truth)
             .filter(|(pred, true_labels)| *pred == *true_labels)
             .count();
         correct as f64 / n as f64
@@ -172,10 +176,11 @@ impl TrainedClassifierChain {
         let n = predictions.n_samples;
         let l = predictions.n_labels;
         let total = n * l;
-        let correct: usize = predictions.labels.iter().zip(truth)
-            .map(|(pred, true_labels)| {
-                pred.iter().zip(true_labels).filter(|(p, t)| p == t).count()
-            })
+        let correct: usize = predictions
+            .labels
+            .iter()
+            .zip(truth)
+            .map(|(pred, true_labels)| pred.iter().zip(true_labels).filter(|(p, t)| p == t).count())
             .sum();
         correct as f64 / total as f64
     }

@@ -3,15 +3,15 @@
 //! Predicts conditional quantiles instead of the conditional mean.
 //! Uses the pinball (quantile) loss function.
 
-use ndarray::Array2;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use crate::task::{RegressionTask, ClassificationTask, Task};
-use crate::learner::{Learner, TrainedModel};
 use crate::learner::tree::TreeBuilder;
-use crate::learner::tree::{Node, LeafValue};
+use crate::learner::tree::{LeafValue, Node};
+use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::{Result, SmeltError};
+use ndarray::Array2;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Quantile Gradient Boosting regressor.
 ///
@@ -60,10 +60,22 @@ impl QuantileGB {
         }
     }
 
-    pub fn with_n_estimators(mut self, n: usize) -> Self { self.n_estimators = n; self }
-    pub fn with_learning_rate(mut self, lr: f64) -> Self { self.learning_rate = lr; self }
-    pub fn with_max_depth(mut self, d: usize) -> Self { self.max_depth = Some(d); self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn with_n_estimators(mut self, n: usize) -> Self {
+        self.n_estimators = n;
+        self
+    }
+    pub fn with_learning_rate(mut self, lr: f64) -> Self {
+        self.learning_rate = lr;
+        self
+    }
+    pub fn with_max_depth(mut self, d: usize) -> Self {
+        self.max_depth = Some(d);
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 }
 
 struct TrainedQuantileGB {
@@ -74,7 +86,9 @@ struct TrainedQuantileGB {
 
 impl TrainedModel for TrainedQuantileGB {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
-        let predicted: Vec<f64> = features.rows().into_iter()
+        let predicted: Vec<f64> = features
+            .rows()
+            .into_iter()
             .map(|row| {
                 let mut val = self.initial;
                 for tree in &self.trees {
@@ -90,10 +104,14 @@ impl TrainedModel for TrainedQuantileGB {
 }
 
 impl Learner for QuantileGB {
-    fn id(&self) -> &str { "quantile_gb" }
+    fn id(&self) -> &str {
+        "quantile_gb"
+    }
 
     fn train_classif(&mut self, _: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other("QuantileGB only supports regression".into()))
+        Err(SmeltError::Other(
+            "QuantileGB only supports regression".into(),
+        ))
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
@@ -125,12 +143,13 @@ impl Learner for QuantileGB {
 
             let indices: Vec<usize> = (0..n_samples).collect();
             let mut builder = TreeBuilder::new(
-                self.max_depth, self.min_samples_split, self.min_samples_leaf,
-                None, n_features,
+                self.max_depth,
+                self.min_samples_split,
+                self.min_samples_leaf,
+                None,
+                n_features,
             );
-            let root = builder.build_regressor(
-                &features.view(), &neg_grads, &indices, 0, &mut rng,
-            );
+            let root = builder.build_regressor(&features.view(), &neg_grads, &indices, 0, &mut rng);
 
             for i in 0..n_samples {
                 if let LeafValue::Value(v) = root.predict_one(features.row(i)) {
@@ -141,7 +160,9 @@ impl Learner for QuantileGB {
         }
 
         Ok(Box::new(TrainedQuantileGB {
-            trees, initial, learning_rate: self.learning_rate,
+            trees,
+            initial,
+            learning_rate: self.learning_rate,
         }))
     }
 }

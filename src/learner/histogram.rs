@@ -29,7 +29,9 @@ impl HistBins {
         let mut cols = Vec::with_capacity(n_features);
 
         for j in 0..n_features {
-            let mut vals: Vec<f64> = features.column(j).iter()
+            let mut vals: Vec<f64> = features
+                .column(j)
+                .iter()
                 .copied()
                 .filter(|v| !v.is_nan())
                 .collect();
@@ -60,9 +62,12 @@ impl HistBins {
                 if val.is_nan() {
                     col.push(NAN_BIN);
                 } else {
-                    col.push(bounds.iter()
-                        .position(|&b| val < b)
-                        .unwrap_or(bounds.len() - 1) as u8);
+                    col.push(
+                        bounds
+                            .iter()
+                            .position(|&b| val < b)
+                            .unwrap_or(bounds.len() - 1) as u8,
+                    );
                 }
             }
             cols.push(col);

@@ -1,7 +1,7 @@
 //! Input validation utilities for tasks and predictions.
 
+use crate::{Result, SmeltError};
 use ndarray::Array2;
-use crate::{SmeltError, Result};
 
 /// Check that a feature matrix contains no NaN values.
 /// Returns an error with the location of the first NaN found.
@@ -9,9 +9,10 @@ pub fn check_no_nan(features: &Array2<f64>) -> Result<()> {
     for i in 0..features.nrows() {
         for j in 0..features.ncols() {
             if features[[i, j]].is_nan() {
-                return Err(SmeltError::InvalidParameter(
-                    format!("NaN found at row {}, column {}", i, j)
-                ));
+                return Err(SmeltError::InvalidParameter(format!(
+                    "NaN found at row {}, column {}",
+                    i, j
+                )));
             }
         }
     }

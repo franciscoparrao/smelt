@@ -2,9 +2,9 @@
 
 pub mod spatial;
 
-use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
 
 pub use spatial::{SpatialBlockCV, SpatialBufferCV};
 
@@ -21,12 +21,19 @@ pub struct CrossValidation {
 }
 
 impl Default for CrossValidation {
-    fn default() -> Self { Self { folds: 5, seed: 42 } }
+    fn default() -> Self {
+        Self { folds: 5, seed: 42 }
+    }
 }
 
 impl CrossValidation {
-    pub fn new(folds: usize) -> Self { Self { folds, seed: 42 } }
-    pub fn with_seed(mut self, seed: u64) -> Self { self.seed = seed; self }
+    pub fn new(folds: usize) -> Self {
+        Self { folds, seed: 42 }
+    }
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
 }
 
 impl Resample for CrossValidation {
@@ -36,16 +43,23 @@ impl Resample for CrossValidation {
         indices.shuffle(&mut rng);
 
         let fold_size = n_samples / self.folds;
-        (0..self.folds).map(|fold| {
-            let test_start = fold * fold_size;
-            let test_end = if fold == self.folds - 1 { n_samples } else { test_start + fold_size };
-            let test: Vec<usize> = indices[test_start..test_end].to_vec();
-            let train: Vec<usize> = indices[..test_start].iter()
-                .chain(indices[test_end..].iter())
-                .copied()
-                .collect();
-            (train, test)
-        }).collect()
+        (0..self.folds)
+            .map(|fold| {
+                let test_start = fold * fold_size;
+                let test_end = if fold == self.folds - 1 {
+                    n_samples
+                } else {
+                    test_start + fold_size
+                };
+                let test: Vec<usize> = indices[test_start..test_end].to_vec();
+                let train: Vec<usize> = indices[..test_start]
+                    .iter()
+                    .chain(indices[test_end..].iter())
+                    .copied()
+                    .collect();
+                (train, test)
+            })
+            .collect()
     }
 }
 
@@ -56,12 +70,22 @@ pub struct Holdout {
 }
 
 impl Default for Holdout {
-    fn default() -> Self { Self { ratio: 0.8, seed: 42 } }
+    fn default() -> Self {
+        Self {
+            ratio: 0.8,
+            seed: 42,
+        }
+    }
 }
 
 impl Holdout {
-    pub fn new(ratio: f64) -> Self { Self { ratio, seed: 42 } }
-    pub fn with_seed(mut self, seed: u64) -> Self { self.seed = seed; self }
+    pub fn new(ratio: f64) -> Self {
+        Self { ratio, seed: 42 }
+    }
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
 }
 
 impl Resample for Holdout {

@@ -2,57 +2,57 @@
 //!
 //! Each learner implements the `Learner` trait.
 
-pub mod tree;
-pub mod histogram;
+pub mod adaboost;
+pub mod bagging;
+pub mod catboost;
+pub mod des;
+pub mod ebm;
+pub mod geo_xgboost;
 pub(crate) mod hist_pool;
+pub mod histogram;
+pub mod hoeffding;
 pub mod knn;
+pub mod lightgbm;
 pub mod linear_regression;
 pub mod logistic_regression;
-pub mod regularized;
 pub mod naive_bayes;
-pub mod adaboost;
-pub mod svm;
-pub mod xgboost;
-pub mod lightgbm;
-pub mod catboost;
-pub mod hoeffding;
-pub mod des;
-pub mod geo_xgboost;
 pub mod oblique;
-pub mod stacking;
 pub mod quantile;
 pub mod quantile_forest;
-pub mod ebm;
-pub mod bagging;
+pub mod regularized;
+pub mod stacking;
+pub mod svm;
+pub mod tree;
+pub mod xgboost;
 
-use ndarray::Array2;
-use crate::task::{ClassificationTask, RegressionTask};
-use crate::prediction::Prediction;
 use crate::Result;
+use crate::prediction::Prediction;
+use crate::task::{ClassificationTask, RegressionTask};
+use ndarray::Array2;
 
-pub use tree::decision_tree::DecisionTree;
-pub use tree::random_forest::RandomForest;
-pub use tree::gradient_boosting::GradientBoosting;
-pub use tree::extra_trees::ExtraTrees;
+pub use adaboost::AdaBoost;
+pub use bagging::Bagging;
+pub use catboost::CatBoost;
+pub use des::DynamicEnsemble;
+pub use ebm::EBM;
+pub use geo_xgboost::GeoXGBoost;
+pub use hoeffding::HoeffdingTree;
 pub use knn::KNearestNeighbors;
+pub use lightgbm::LightGBM;
 pub use linear_regression::LinearRegression;
 pub use logistic_regression::LogisticRegression;
-pub use regularized::{Ridge, Lasso, ElasticNet};
 pub use naive_bayes::GaussianNB;
-pub use adaboost::AdaBoost;
-pub use svm::LinearSVM;
-pub use xgboost::XGBoost;
-pub use lightgbm::LightGBM;
-pub use catboost::CatBoost;
-pub use hoeffding::HoeffdingTree;
-pub use des::DynamicEnsemble;
-pub use geo_xgboost::GeoXGBoost;
-pub use oblique::{ObliqueTree, ObliqueForest};
-pub use stacking::Stacking;
+pub use oblique::{ObliqueForest, ObliqueTree};
 pub use quantile::QuantileGB;
 pub use quantile_forest::QuantileForest;
-pub use ebm::EBM;
-pub use bagging::Bagging;
+pub use regularized::{ElasticNet, Lasso, Ridge};
+pub use stacking::Stacking;
+pub use svm::LinearSVM;
+pub use tree::decision_tree::DecisionTree;
+pub use tree::extra_trees::ExtraTrees;
+pub use tree::gradient_boosting::GradientBoosting;
+pub use tree::random_forest::RandomForest;
+pub use xgboost::XGBoost;
 
 /// Core trait for classification learners.
 pub trait Learner: Send + Sync {
@@ -72,5 +72,7 @@ pub trait TrainedModel: Send + Sync {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction>;
 
     /// Feature importances (if available).
-    fn feature_importance(&self) -> Option<Vec<(String, f64)>> { None }
+    fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
+        None
+    }
 }

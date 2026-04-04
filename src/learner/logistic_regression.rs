@@ -2,11 +2,11 @@
 //!
 //! Binary classification with sigmoid. Multiclass via one-vs-rest.
 
-use ndarray::{Array1, Array2};
-use crate::task::{ClassificationTask, RegressionTask, Task};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::{Result, SmeltError};
+use ndarray::{Array1, Array2};
 
 /// Logistic Regression learner.
 ///
@@ -41,7 +41,9 @@ impl Default for LogisticRegression {
 }
 
 impl LogisticRegression {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn with_learning_rate(mut self, lr: f64) -> Self {
         self.learning_rate = lr;
@@ -110,7 +112,7 @@ fn train_binary(
 
 // --- Trained model ---
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct TrainedLogisticRegression {
@@ -149,7 +151,9 @@ impl TrainedModel for TrainedLogisticRegression {
                 probabilities.push(vec![1.0 - prob, prob]);
             } else {
                 // Multiclass OVR: pick class with highest score
-                let scores: Vec<f64> = self.classifiers.iter()
+                let scores: Vec<f64> = self
+                    .classifiers
+                    .iter()
                     .map(|w| {
                         let mut z = w[p];
                         for j in 0..p {
@@ -159,9 +163,12 @@ impl TrainedModel for TrainedLogisticRegression {
                     })
                     .collect();
 
-                let pred_class = scores.iter().enumerate()
+                let pred_class = scores
+                    .iter()
+                    .enumerate()
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                    .unwrap().0;
+                    .unwrap()
+                    .0;
                 predicted.push(pred_class);
 
                 // Normalize scores to probabilities
@@ -197,7 +204,8 @@ impl TrainedModel for TrainedLogisticRegression {
             return None;
         }
         Some(
-            self.feature_names.iter()
+            self.feature_names
+                .iter()
                 .zip(&importance)
                 .map(|(name, &imp)| (name.clone(), imp / n_classifiers / total * n_classifiers))
                 .collect(),
@@ -208,7 +216,9 @@ impl TrainedModel for TrainedLogisticRegression {
 // --- Learner impl ---
 
 impl Learner for LogisticRegression {
-    fn id(&self) -> &str { "logistic_regression" }
+    fn id(&self) -> &str {
+        "logistic_regression"
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let x = task.features();
@@ -237,15 +247,31 @@ impl Learner for LogisticRegression {
         }
 
         let classifiers = if n_classes == 2 {
-            let y_binary: Vec<f64> = target.iter().map(|&t| if t == 1 { 1.0 } else { 0.0 }).collect();
-            vec![train_binary(&x_scaled, &y_binary, self.learning_rate, self.max_iter, self.tol)]
+            let y_binary: Vec<f64> = target
+                .iter()
+                .map(|&t| if t == 1 { 1.0 } else { 0.0 })
+                .collect();
+            vec![train_binary(
+                &x_scaled,
+                &y_binary,
+                self.learning_rate,
+                self.max_iter,
+                self.tol,
+            )]
         } else {
             (0..n_classes)
                 .map(|c| {
-                    let y_binary: Vec<f64> = target.iter()
+                    let y_binary: Vec<f64> = target
+                        .iter()
                         .map(|&t| if t == c { 1.0 } else { 0.0 })
                         .collect();
-                    train_binary(&x_scaled, &y_binary, self.learning_rate, self.max_iter, self.tol)
+                    train_binary(
+                        &x_scaled,
+                        &y_binary,
+                        self.learning_rate,
+                        self.max_iter,
+                        self.tol,
+                    )
                 })
                 .collect()
         };
@@ -260,6 +286,8 @@ impl Learner for LogisticRegression {
     }
 
     fn train_regress(&mut self, _task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other("LogisticRegression does not support regression".into()))
+        Err(SmeltError::Other(
+            "LogisticRegression does not support regression".into(),
+        ))
     }
 }

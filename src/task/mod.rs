@@ -2,8 +2,8 @@
 //!
 //! Inspired by mlr3's `Task` system.
 
+use crate::{Result, SmeltError};
 use ndarray::Array2;
-use crate::{SmeltError, Result};
 // validate module used by learner predict methods
 
 /// Core trait for all task types.
@@ -13,9 +13,13 @@ pub trait Task {
     /// Feature matrix (n_samples × n_features).
     fn features(&self) -> &Array2<f64>;
     /// Number of samples.
-    fn n_samples(&self) -> usize { self.features().nrows() }
+    fn n_samples(&self) -> usize {
+        self.features().nrows()
+    }
     /// Number of features.
-    fn n_features(&self) -> usize { self.features().ncols() }
+    fn n_features(&self) -> usize {
+        self.features().ncols()
+    }
     /// Feature names.
     fn feature_names(&self) -> &[String];
 }
@@ -31,11 +35,7 @@ pub struct ClassificationTask {
 }
 
 impl ClassificationTask {
-    pub fn new(
-        id: impl Into<String>,
-        features: Array2<f64>,
-        target: Vec<usize>,
-    ) -> Result<Self> {
+    pub fn new(id: impl Into<String>, features: Array2<f64>, target: Vec<usize>) -> Result<Self> {
         if features.nrows() == 0 {
             return Err(SmeltError::EmptyDataset);
         }
@@ -46,7 +46,9 @@ impl ClassificationTask {
             });
         }
         if features.ncols() == 0 {
-            return Err(SmeltError::InvalidParameter("features must have at least 1 column".into()));
+            return Err(SmeltError::InvalidParameter(
+                "features must have at least 1 column".into(),
+            ));
         }
         let n_features = features.ncols();
         let n_classes = target.iter().copied().max().unwrap_or(0) + 1;
@@ -75,15 +77,27 @@ impl ClassificationTask {
         self
     }
 
-    pub fn target(&self) -> &[usize] { &self.target }
-    pub fn n_classes(&self) -> usize { self.class_names.len() }
-    pub fn class_names(&self) -> &[String] { &self.class_names }
+    pub fn target(&self) -> &[usize] {
+        &self.target
+    }
+    pub fn n_classes(&self) -> usize {
+        self.class_names.len()
+    }
+    pub fn class_names(&self) -> &[String] {
+        &self.class_names
+    }
 }
 
 impl Task for ClassificationTask {
-    fn id(&self) -> &str { &self.id }
-    fn features(&self) -> &Array2<f64> { &self.features }
-    fn feature_names(&self) -> &[String] { &self.feature_names }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn features(&self) -> &Array2<f64> {
+        &self.features
+    }
+    fn feature_names(&self) -> &[String] {
+        &self.feature_names
+    }
 }
 
 /// Regression task with continuous target values.
@@ -96,11 +110,7 @@ pub struct RegressionTask {
 }
 
 impl RegressionTask {
-    pub fn new(
-        id: impl Into<String>,
-        features: Array2<f64>,
-        target: Vec<f64>,
-    ) -> Result<Self> {
+    pub fn new(id: impl Into<String>, features: Array2<f64>, target: Vec<f64>) -> Result<Self> {
         if features.nrows() == 0 {
             return Err(SmeltError::EmptyDataset);
         }
@@ -111,7 +121,9 @@ impl RegressionTask {
             });
         }
         if features.ncols() == 0 {
-            return Err(SmeltError::InvalidParameter("features must have at least 1 column".into()));
+            return Err(SmeltError::InvalidParameter(
+                "features must have at least 1 column".into(),
+            ));
         }
         let n_features = features.ncols();
         Ok(Self {
@@ -133,11 +145,19 @@ impl RegressionTask {
         Ok(self)
     }
 
-    pub fn target(&self) -> &[f64] { &self.target }
+    pub fn target(&self) -> &[f64] {
+        &self.target
+    }
 }
 
 impl Task for RegressionTask {
-    fn id(&self) -> &str { &self.id }
-    fn features(&self) -> &Array2<f64> { &self.features }
-    fn feature_names(&self) -> &[String] { &self.feature_names }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn features(&self) -> &Array2<f64> {
+        &self.features
+    }
+    fn feature_names(&self) -> &[String] {
+        &self.feature_names
+    }
 }

@@ -1,11 +1,11 @@
 //! Pipeline: chains transformers with a learner into a single Learner.
 
-use ndarray::Array2;
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use super::Transformer;
+use crate::Result;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
-use super::Transformer;
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use ndarray::Array2;
 
 /// Chains zero or more Transformers followed by a Learner.
 ///
@@ -35,12 +35,13 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn new(
-        transformers: Vec<Box<dyn Transformer>>,
-        learner: Box<dyn Learner>,
-    ) -> Self {
+    pub fn new(transformers: Vec<Box<dyn Transformer>>, learner: Box<dyn Learner>) -> Self {
         let id = Self::build_id(&transformers, learner.id());
-        Self { transformers, learner, id }
+        Self {
+            transformers,
+            learner,
+            id,
+        }
     }
 
     fn build_id(transformers: &[Box<dyn Transformer>], learner_id: &str) -> String {
@@ -73,7 +74,9 @@ impl TrainedModel for TrainedPipeline {
 }
 
 impl Learner for Pipeline {
-    fn id(&self) -> &str { &self.id }
+    fn id(&self) -> &str {
+        &self.id
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let mut features = task.features().clone();
@@ -86,16 +89,14 @@ impl Learner for Pipeline {
             names = transformer.transform_names(&names)?;
         }
 
-        let transformed_task = ClassificationTask::new(
-            task.id(), features, task.target().to_vec(),
-        )?.with_feature_names(names)?;
+        let transformed_task =
+            ClassificationTask::new(task.id(), features, task.target().to_vec())?
+                .with_feature_names(names)?;
 
         let model = self.learner.train_classif(&transformed_task)?;
 
-        let fitted: Vec<Box<dyn Transformer>> = self.transformers
-            .iter()
-            .map(|t| t.clone_box())
-            .collect();
+        let fitted: Vec<Box<dyn Transformer>> =
+            self.transformers.iter().map(|t| t.clone_box()).collect();
 
         Ok(Box::new(TrainedPipeline {
             transformers: fitted,
@@ -113,16 +114,13 @@ impl Learner for Pipeline {
             names = transformer.transform_names(&names)?;
         }
 
-        let transformed_task = RegressionTask::new(
-            task.id(), features, task.target().to_vec(),
-        )?.with_feature_names(names)?;
+        let transformed_task = RegressionTask::new(task.id(), features, task.target().to_vec())?
+            .with_feature_names(names)?;
 
         let model = self.learner.train_regress(&transformed_task)?;
 
-        let fitted: Vec<Box<dyn Transformer>> = self.transformers
-            .iter()
-            .map(|t| t.clone_box())
-            .collect();
+        let fitted: Vec<Box<dyn Transformer>> =
+            self.transformers.iter().map(|t| t.clone_box()).collect();
 
         Ok(Box::new(TrainedPipeline {
             transformers: fitted,

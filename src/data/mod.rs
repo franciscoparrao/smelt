@@ -1,10 +1,10 @@
 //! Data loading: CSV file import into Tasks.
 
-use std::path::Path;
-use ndarray::Array2;
-use crate::task::{ClassificationTask, RegressionTask};
 use crate::preprocess::LabelEncoder;
-use crate::{SmeltError, Result};
+use crate::task::{ClassificationTask, RegressionTask};
+use crate::{Result, SmeltError};
+use ndarray::Array2;
+use std::path::Path;
 
 /// Loads a CSV file into a classification or regression Task.
 ///
@@ -57,7 +57,8 @@ impl CsvLoader {
             .from_path(&self.path)
             .map_err(|e| SmeltError::Csv(e.to_string()))?;
 
-        let headers: Vec<String> = rdr.headers()
+        let headers: Vec<String> = rdr
+            .headers()
             .map_err(|e| SmeltError::Csv(e.to_string()))?
             .iter()
             .map(|h| h.to_string())
@@ -65,8 +66,10 @@ impl CsvLoader {
 
         let mut rows = Vec::new();
         for result in rdr.records() {
-            if let Some(max) = self.max_rows {
-                if rows.len() >= max { break; }
+            if let Some(max) = self.max_rows
+                && rows.len() >= max
+            {
+                break;
             }
             let record = result.map_err(|e| SmeltError::Csv(e.to_string()))?;
             let row: Vec<String> = record.iter().map(|f| f.to_string()).collect();
@@ -81,9 +84,13 @@ impl CsvLoader {
     }
 
     fn find_target_col(&self, headers: &[String]) -> Result<usize> {
-        let target_name = self.target_col.as_ref()
+        let target_name = self
+            .target_col
+            .as_ref()
             .ok_or_else(|| SmeltError::Other("target column not specified".into()))?;
-        headers.iter().position(|h| h == target_name)
+        headers
+            .iter()
+            .position(|h| h == target_name)
             .ok_or_else(|| SmeltError::FeatureNotFound(target_name.clone()))
     }
 
@@ -93,25 +100,37 @@ impl CsvLoader {
         let target_idx = self.find_target_col(&headers)?;
 
         // Try parsing target as usize first, fall back to label encoding
-        let target_strings: Vec<String> = rows.iter()
-            .map(|r| r[target_idx].clone())
-            .collect();
+        let target_strings: Vec<String> = rows.iter().map(|r| r[target_idx].clone()).collect();
 
         let target: Vec<usize> = match target_strings[0].parse::<usize>() {
-            Ok(_) => {
-                target_strings.iter()
-                    .map(|s| s.parse::<usize>()
-                        .map_err(|_| SmeltError::Csv(format!("cannot parse target '{}' as integer", s))))
-                    .collect::<Result<Vec<_>>>()?
-            }
+            Ok(_) => target_strings
+                .iter()
+                .map(|s| {
+                    s.parse::<usize>().map_err(|_| {
+                        SmeltError::Csv(format!("cannot parse target '{}' as integer", s))
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
             Err(_) => {
-                let encoder = LabelEncoder::fit(&target_strings.iter().map(|s| s.as_str()).collect::<Vec<_>>());
-                encoder.encode(&target_strings.iter().map(|s| s.as_str()).collect::<Vec<_>>())?
+                let encoder = LabelEncoder::fit(
+                    &target_strings
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>(),
+                );
+                encoder.encode(
+                    &target_strings
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>(),
+                )?
             }
         };
 
         // Parse feature columns
-        let feature_names: Vec<String> = headers.iter().enumerate()
+        let feature_names: Vec<String> = headers
+            .iter()
+            .enumerate()
             .filter(|&(i, _)| i != target_idx)
             .map(|(_, h)| h.clone())
             .collect();
@@ -126,16 +145,19 @@ impl CsvLoader {
                 if col == target_idx {
                     continue;
                 }
-                features[[i, j]] = val.parse::<f64>()
-                    .map_err(|_| SmeltError::Csv(
-                        format!("cannot parse '{}' as number at row {}, col '{}'", val, i + 1, headers[col])
-                    ))?;
+                features[[i, j]] = val.parse::<f64>().map_err(|_| {
+                    SmeltError::Csv(format!(
+                        "cannot parse '{}' as number at row {}, col '{}'",
+                        val,
+                        i + 1,
+                        headers[col]
+                    ))
+                })?;
                 j += 1;
             }
         }
 
-        ClassificationTask::new("csv", features, target)?
-            .with_feature_names(feature_names)
+        ClassificationTask::new("csv", features, target)?.with_feature_names(feature_names)
     }
 
     /// Load as a regression task. Target values must be numeric.
@@ -143,14 +165,18 @@ impl CsvLoader {
         let (headers, rows) = self.read_raw()?;
         let target_idx = self.find_target_col(&headers)?;
 
-        let target: Vec<f64> = rows.iter()
-            .map(|r| r[target_idx].parse::<f64>()
-                .map_err(|_| SmeltError::Csv(
-                    format!("cannot parse target '{}' as number", r[target_idx])
-                )))
+        let target: Vec<f64> = rows
+            .iter()
+            .map(|r| {
+                r[target_idx].parse::<f64>().map_err(|_| {
+                    SmeltError::Csv(format!("cannot parse target '{}' as number", r[target_idx]))
+                })
+            })
             .collect::<Result<Vec<_>>>()?;
 
-        let feature_names: Vec<String> = headers.iter().enumerate()
+        let feature_names: Vec<String> = headers
+            .iter()
+            .enumerate()
             .filter(|&(i, _)| i != target_idx)
             .map(|(_, h)| h.clone())
             .collect();
@@ -165,15 +191,18 @@ impl CsvLoader {
                 if col == target_idx {
                     continue;
                 }
-                features[[i, j]] = val.parse::<f64>()
-                    .map_err(|_| SmeltError::Csv(
-                        format!("cannot parse '{}' as number at row {}, col '{}'", val, i + 1, headers[col])
-                    ))?;
+                features[[i, j]] = val.parse::<f64>().map_err(|_| {
+                    SmeltError::Csv(format!(
+                        "cannot parse '{}' as number at row {}, col '{}'",
+                        val,
+                        i + 1,
+                        headers[col]
+                    ))
+                })?;
                 j += 1;
             }
         }
 
-        RegressionTask::new("csv", features, target)?
-            .with_feature_names(feature_names)
+        RegressionTask::new("csv", features, target)?.with_feature_names(feature_names)
     }
 }

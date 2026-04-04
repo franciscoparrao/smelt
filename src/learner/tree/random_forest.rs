@@ -1,15 +1,15 @@
 //! Random Forest: ensemble of decision trees with bootstrap sampling and feature subsampling.
 
-use ndarray::Array2;
-use rand::Rng;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use rayon::prelude::*;
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use super::{LeafValue, Node, TreeBuilder};
+use crate::Result;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
-use super::{Node, LeafValue, TreeBuilder};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use ndarray::Array2;
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rayon::prelude::*;
 
 /// Random Forest learner.
 ///
@@ -54,7 +54,9 @@ impl Default for RandomForest {
 }
 
 impl RandomForest {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
@@ -96,12 +98,14 @@ impl RandomForest {
             // sqrt heuristic
             (n_features as f64).sqrt().ceil() as usize
         } else {
-            (n_features as f64 * self.max_features_fraction).ceil().max(1.0) as usize
+            (n_features as f64 * self.max_features_fraction)
+                .ceil()
+                .max(1.0) as usize
         }
     }
 }
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct TrainedRandomForest {
@@ -136,9 +140,12 @@ impl TrainedModel for TrainedRandomForest {
                 for p in &mut avg_probs {
                     *p /= n_trees;
                 }
-                let pred_class = avg_probs.iter().enumerate()
+                let pred_class = avg_probs
+                    .iter()
+                    .enumerate()
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                    .unwrap().0;
+                    .unwrap()
+                    .0;
                 predicted.push(pred_class);
                 probabilities.push(avg_probs);
             }
@@ -150,9 +157,13 @@ impl TrainedModel for TrainedRandomForest {
             })
         } else {
             let n_trees = self.trees.len() as f64;
-            let predicted: Vec<f64> = features.rows().into_iter()
+            let predicted: Vec<f64> = features
+                .rows()
+                .into_iter()
                 .map(|row| {
-                    let sum: f64 = self.trees.iter()
+                    let sum: f64 = self
+                        .trees
+                        .iter()
                         .map(|tree| match tree.predict_one(row) {
                             LeafValue::Value(v) => *v,
                             _ => unreachable!(),
@@ -172,7 +183,8 @@ impl TrainedModel for TrainedRandomForest {
             return None;
         }
         Some(
-            self.feature_names.iter()
+            self.feature_names
+                .iter()
                 .zip(&self.feature_importances)
                 .map(|(name, &imp)| (name.clone(), imp / total))
                 .collect(),
@@ -181,7 +193,9 @@ impl TrainedModel for TrainedRandomForest {
 }
 
 impl Learner for RandomForest {
-    fn id(&self) -> &str { "random_forest" }
+    fn id(&self) -> &str {
+        "random_forest"
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
@@ -201,11 +215,19 @@ impl Learner for RandomForest {
                     .collect();
 
                 let mut builder = TreeBuilder::new(
-                    self.max_depth, self.min_samples_split, self.min_samples_leaf,
-                    Some(max_feat), n_features,
+                    self.max_depth,
+                    self.min_samples_split,
+                    self.min_samples_leaf,
+                    Some(max_feat),
+                    n_features,
                 );
                 let root = builder.build_classifier(
-                    &features.view(), target, &indices, n_classes, 0, &mut rng,
+                    &features.view(),
+                    target,
+                    &indices,
+                    n_classes,
+                    0,
+                    &mut rng,
                 );
                 (root, builder.feature_importances)
             })
@@ -245,12 +267,13 @@ impl Learner for RandomForest {
                     .collect();
 
                 let mut builder = TreeBuilder::new(
-                    self.max_depth, self.min_samples_split, self.min_samples_leaf,
-                    Some(max_feat), n_features,
+                    self.max_depth,
+                    self.min_samples_split,
+                    self.min_samples_leaf,
+                    Some(max_feat),
+                    n_features,
                 );
-                let root = builder.build_regressor(
-                    &features.view(), target, &indices, 0, &mut rng,
-                );
+                let root = builder.build_regressor(&features.view(), target, &indices, 0, &mut rng);
                 (root, builder.feature_importances)
             })
             .collect();

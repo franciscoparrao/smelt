@@ -6,11 +6,11 @@
 //! Reference: Liu, F., Ting, K., & Zhou, Z. (2008).
 //! Isolation Forest. ICDM, 413-422.
 
+use crate::Result;
 use ndarray::Array2;
 use rand::Rng;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
-use crate::Result;
+use rand::rngs::StdRng;
 
 /// Isolation Forest for anomaly/outlier detection.
 ///
@@ -55,11 +55,25 @@ impl Default for IsolationForest {
 }
 
 impl IsolationForest {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_n_estimators(mut self, n: usize) -> Self { self.n_estimators = n; self }
-    pub fn with_max_samples(mut self, n: usize) -> Self { self.max_samples = Some(n); self }
-    pub fn with_contamination(mut self, c: f64) -> Self { self.contamination = c; self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_n_estimators(mut self, n: usize) -> Self {
+        self.n_estimators = n;
+        self
+    }
+    pub fn with_max_samples(mut self, n: usize) -> Self {
+        self.max_samples = Some(n);
+        self
+    }
+    pub fn with_contamination(mut self, c: f64) -> Self {
+        self.contamination = c;
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 
     /// Fit the forest and compute anomaly scores + labels.
     pub fn fit_predict(&self, features: &Array2<f64>) -> Result<AnomalyResult> {
@@ -86,9 +100,11 @@ impl IsolationForest {
         let mut scores = Vec::with_capacity(n_samples);
 
         for i in 0..n_samples {
-            let avg_path: f64 = trees.iter()
+            let avg_path: f64 = trees
+                .iter()
                 .map(|tree| path_length(tree, features, i, 0) as f64)
-                .sum::<f64>() / self.n_estimators as f64;
+                .sum::<f64>()
+                / self.n_estimators as f64;
 
             // s(x,n) = 2^{-E[h(x)]/c(n)}
             let score = 2.0f64.powf(-avg_path / c_n);
@@ -106,13 +122,19 @@ impl IsolationForest {
         };
 
         // Label: 1 = anomaly, 0 = normal
-        let labels: Vec<i32> = scores.iter()
+        let labels: Vec<i32> = scores
+            .iter()
             .map(|&s| if s >= threshold { 1 } else { 0 })
             .collect();
 
         let n_anomalies = labels.iter().filter(|&&l| l == 1).count();
 
-        Ok(AnomalyResult { scores, labels, threshold, n_anomalies })
+        Ok(AnomalyResult {
+            scores,
+            labels,
+            threshold,
+            n_anomalies,
+        })
     }
 }
 
@@ -132,7 +154,9 @@ pub struct AnomalyResult {
 // ── Isolation tree internals ────────────────────────────────────────
 
 enum INode {
-    Leaf { size: usize },
+    Leaf {
+        size: usize,
+    },
     Split {
         feature: usize,
         threshold: f64,
@@ -158,9 +182,13 @@ fn build_itree(
     // Random feature and random threshold
     let feat = rng.random_range(0..n_features);
 
-    let min_val = indices.iter().map(|&i| features[[i, feat]])
+    let min_val = indices
+        .iter()
+        .map(|&i| features[[i, feat]])
         .fold(f64::INFINITY, f64::min);
-    let max_val = indices.iter().map(|&i| features[[i, feat]])
+    let max_val = indices
+        .iter()
+        .map(|&i| features[[i, feat]])
         .fold(f64::NEG_INFINITY, f64::max);
 
     if (max_val - min_val).abs() < f64::EPSILON {
@@ -169,8 +197,16 @@ fn build_itree(
 
     let threshold = rng.random_range(min_val..max_val);
 
-    let left_idx: Vec<usize> = indices.iter().filter(|&&i| features[[i, feat]] < threshold).copied().collect();
-    let right_idx: Vec<usize> = indices.iter().filter(|&&i| features[[i, feat]] >= threshold).copied().collect();
+    let left_idx: Vec<usize> = indices
+        .iter()
+        .filter(|&&i| features[[i, feat]] < threshold)
+        .copied()
+        .collect();
+    let right_idx: Vec<usize> = indices
+        .iter()
+        .filter(|&&i| features[[i, feat]] >= threshold)
+        .copied()
+        .collect();
 
     if left_idx.is_empty() || right_idx.is_empty() {
         return INode::Leaf { size: n };
@@ -190,7 +226,12 @@ fn build_itree(
 fn path_length(node: &INode, features: &Array2<f64>, sample: usize, depth: usize) -> usize {
     match node {
         INode::Leaf { size } => depth + c_factor(*size) as usize,
-        INode::Split { feature, threshold, left, right } => {
+        INode::Split {
+            feature,
+            threshold,
+            left,
+            right,
+        } => {
             if features[[sample, *feature]] < *threshold {
                 path_length(left, features, sample, depth + 1)
             } else {
@@ -203,7 +244,9 @@ fn path_length(node: &INode, features: &Array2<f64>, sample: usize, depth: usize
 /// Average path length of unsuccessful search in BST (normalization factor).
 /// c(n) = 2*H(n-1) - 2*(n-1)/n where H(i) = ln(i) + 0.5772 (Euler constant)
 fn c_factor(n: usize) -> f64 {
-    if n <= 1 { return 0.0; }
+    if n <= 1 {
+        return 0.0;
+    }
     let n = n as f64;
     2.0 * (n - 1.0).ln() + 0.5772156649 - 2.0 * (n - 1.0) / n
 }

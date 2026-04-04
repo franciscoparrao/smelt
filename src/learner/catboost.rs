@@ -13,18 +13,18 @@
 //! Reference: Prokhorenkova, L. et al. (2018). CatBoost: unbiased boosting
 //! with categorical features. NeurIPS.
 
-use ndarray::{Array2, ArrayView1};
-use rand::seq::SliceRandom;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use rayon::prelude::*;
-use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
 use super::histogram::HistBins;
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::Result;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use ndarray::{Array2, ArrayView1};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
+use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// CatBoost-inspired symmetric GBM with ordered target statistics.
 ///
@@ -53,8 +53,8 @@ use crate::Result;
 pub struct CatBoost {
     n_estimators: usize,
     learning_rate: f64,
-    depth: usize,                  // oblivious tree depth
-    lambda: f64,                   // L2 regularization
+    depth: usize, // oblivious tree depth
+    lambda: f64,  // L2 regularization
     /// Indices of categorical features (will use target statistics encoding).
     cat_features: Vec<usize>,
     /// Prior for target statistics smoothing.
@@ -65,22 +65,49 @@ pub struct CatBoost {
 impl Default for CatBoost {
     fn default() -> Self {
         Self {
-            n_estimators: 100, learning_rate: 0.1, depth: 6,
-            lambda: 3.0, cat_features: Vec::new(),
-            prior_strength: 1.0, seed: 42,
+            n_estimators: 100,
+            learning_rate: 0.1,
+            depth: 6,
+            lambda: 3.0,
+            cat_features: Vec::new(),
+            prior_strength: 1.0,
+            seed: 42,
         }
     }
 }
 
 impl CatBoost {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_n_estimators(mut self, n: usize) -> Self { self.n_estimators = n; self }
-    pub fn with_learning_rate(mut self, lr: f64) -> Self { self.learning_rate = lr; self }
-    pub fn with_depth(mut self, d: usize) -> Self { self.depth = d; self }
-    pub fn with_lambda(mut self, l: f64) -> Self { self.lambda = l; self }
-    pub fn with_cat_features(mut self, cats: Vec<usize>) -> Self { self.cat_features = cats; self }
-    pub fn with_prior_strength(mut self, p: f64) -> Self { self.prior_strength = p; self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_n_estimators(mut self, n: usize) -> Self {
+        self.n_estimators = n;
+        self
+    }
+    pub fn with_learning_rate(mut self, lr: f64) -> Self {
+        self.learning_rate = lr;
+        self
+    }
+    pub fn with_depth(mut self, d: usize) -> Self {
+        self.depth = d;
+        self
+    }
+    pub fn with_lambda(mut self, l: f64) -> Self {
+        self.lambda = l;
+        self
+    }
+    pub fn with_cat_features(mut self, cats: Vec<usize>) -> Self {
+        self.cat_features = cats;
+        self
+    }
+    pub fn with_prior_strength(mut self, p: f64) -> Self {
+        self.prior_strength = p;
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 }
 
 // ── Ordered Target Statistics ───────────────────────────────────────
@@ -99,7 +126,9 @@ fn ordered_target_encode(
     let n = features.nrows();
     let mut encoded = features.clone();
 
-    if cat_features.is_empty() { return encoded; }
+    if cat_features.is_empty() {
+        return encoded;
+    }
 
     // Random permutation
     let mut perm: Vec<usize> = (0..n).collect();
@@ -185,7 +214,8 @@ fn build_oblivious_tree(
                 let mut best_local_bin = 0;
 
                 // Pre-build histograms for all partitions
-                let part_hists: Vec<(Vec<f64>, Vec<f64>)> = partitions.iter()
+                let part_hists: Vec<(Vec<f64>, Vec<f64>)> = partitions
+                    .iter()
                     .map(|partition| {
                         let mut bg = vec![0.0; nb];
                         let mut bh = vec![0.0; nb];
@@ -200,12 +230,17 @@ fn build_oblivious_tree(
 
                 // Prefix sums + single scan O(n_partitions * n_bins)
                 // Pre-compute prefix sums and totals per partition
-                let prefix: Vec<(Vec<f64>, Vec<f64>, f64, f64)> = part_hists.iter()
+                let prefix: Vec<(Vec<f64>, Vec<f64>, f64, f64)> = part_hists
+                    .iter()
                     .map(|(bg, bh)| {
                         let mut pg = vec![0.0; nb + 1];
                         let mut ph = vec![0.0; nb + 1];
-                        for b in 0..nb { pg[b+1] = pg[b] + bg[b]; ph[b+1] = ph[b] + bh[b]; }
-                        let tg = pg[nb]; let th = ph[nb];
+                        for b in 0..nb {
+                            pg[b + 1] = pg[b] + bg[b];
+                            ph[b + 1] = ph[b] + bh[b];
+                        }
+                        let tg = pg[nb];
+                        let th = ph[nb];
                         (pg, ph, tg, th)
                     })
                     .collect();
@@ -213,10 +248,13 @@ fn build_oblivious_tree(
                 for bin in 0..nb.saturating_sub(1) {
                     let mut total_gain = 0.0;
                     for (pg, ph, tg, th) in &prefix {
-                        let gl = pg[bin + 1]; let hl = ph[bin + 1];
-                        let gr = tg - gl; let hr = th - hl;
+                        let gl = pg[bin + 1];
+                        let hl = ph[bin + 1];
+                        let gr = tg - gl;
+                        let hr = th - hl;
                         if hl > 0.0 && hr > 0.0 {
-                            total_gain += gl*gl/(hl+lambda) + gr*gr/(hr+lambda) - tg*tg/(th+lambda);
+                            total_gain += gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
+                                - tg * tg / (th + lambda);
                         }
                     }
                     if total_gain > best_local_gain {
@@ -261,15 +299,24 @@ fn build_oblivious_tree(
     for (leaf_idx, partition) in partitions.iter().enumerate() {
         let g: f64 = partition.iter().map(|&i| grads[i]).sum();
         let h: f64 = partition.iter().map(|&i| hess[i]).sum();
-        leaf_weights[leaf_idx] = if h + lambda > 0.0 { -g / (h + lambda) } else { 0.0 };
+        leaf_weights[leaf_idx] = if h + lambda > 0.0 {
+            -g / (h + lambda)
+        } else {
+            0.0
+        };
     }
 
-    ObliviousTree { splits, leaf_weights }
+    ObliviousTree {
+        splits,
+        leaf_weights,
+    }
 }
 
 // ── Trained model ───────────────────────────────────────────────────
 
-fn sigmoid(x: f64) -> f64 { 1.0 / (1.0 + (-x).exp()) }
+fn sigmoid(x: f64) -> f64 {
+    1.0 / (1.0 + (-x).exp())
+}
 fn softmax(s: &[f64]) -> Vec<f64> {
     let mx = s.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let e: Vec<f64> = s.iter().map(|&v| (v - mx).exp()).collect();
@@ -278,7 +325,11 @@ fn softmax(s: &[f64]) -> Vec<f64> {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) enum CBMode { Regression, BinaryClassif, MultiClassif { n_classes: usize } }
+pub(crate) enum CBMode {
+    Regression,
+    BinaryClassif,
+    MultiClassif { n_classes: usize },
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct TrainedCatBoost {
@@ -308,12 +359,17 @@ impl TrainedModel for TrainedCatBoost {
 
         match &self.mode {
             CBMode::Regression => {
-                let predicted: Vec<f64> = encoded.rows().into_iter()
+                let predicted: Vec<f64> = encoded
+                    .rows()
+                    .into_iter()
                     .map(|r| {
                         let mut v = self.initial[0];
-                        for t in &self.trees { v += self.learning_rate * t.predict_one(r); }
+                        for t in &self.trees {
+                            v += self.learning_rate * t.predict_one(r);
+                        }
                         v
-                    }).collect();
+                    })
+                    .collect();
                 Ok(Prediction::regression(predicted))
             }
             CBMode::BinaryClassif => {
@@ -321,12 +377,18 @@ impl TrainedModel for TrainedCatBoost {
                 let mut probabilities = Vec::with_capacity(features.nrows());
                 for r in encoded.rows() {
                     let mut f = self.initial[0];
-                    for t in &self.trees { f += self.learning_rate * t.predict_one(r); }
+                    for t in &self.trees {
+                        f += self.learning_rate * t.predict_one(r);
+                    }
                     let p = sigmoid(f);
                     predicted.push(if p >= 0.5 { 1 } else { 0 });
                     probabilities.push(vec![1.0 - p, p]);
                 }
-                Ok(Prediction::Classification { predicted, truth: None, probabilities: Some(probabilities) })
+                Ok(Prediction::Classification {
+                    predicted,
+                    truth: None,
+                    probabilities: Some(probabilities),
+                })
             }
             CBMode::MultiClassif { n_classes } => {
                 let k = *n_classes;
@@ -335,15 +397,26 @@ impl TrainedModel for TrainedCatBoost {
                 for r in encoded.rows() {
                     let mut scores = self.initial.clone();
                     let ni = self.trees.len() / k;
-                    for i in 0..ni { for c in 0..k {
-                        scores[c] += self.learning_rate * self.trees[i*k+c].predict_one(r);
-                    }}
+                    for i in 0..ni {
+                        for c in 0..k {
+                            scores[c] += self.learning_rate * self.trees[i * k + c].predict_one(r);
+                        }
+                    }
                     let probs = softmax(&scores);
-                    let pred = probs.iter().enumerate()
-                        .max_by(|a,b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)).unwrap().0;
-                    predicted.push(pred); probabilities.push(probs);
+                    let pred = probs
+                        .iter()
+                        .enumerate()
+                        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap()
+                        .0;
+                    predicted.push(pred);
+                    probabilities.push(probs);
                 }
-                Ok(Prediction::Classification { predicted, truth: None, probabilities: Some(probabilities) })
+                Ok(Prediction::Classification {
+                    predicted,
+                    truth: None,
+                    probabilities: Some(probabilities),
+                })
             }
         }
     }
@@ -352,7 +425,9 @@ impl TrainedModel for TrainedCatBoost {
 // ── Learner ─────────────────────────────────────────────────────────
 
 impl Learner for CatBoost {
-    fn id(&self) -> &str { "catboost" }
+    fn id(&self) -> &str {
+        "catboost"
+    }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
@@ -361,8 +436,14 @@ impl Learner for CatBoost {
         let mut rng = StdRng::seed_from_u64(self.seed);
 
         let prior = target.iter().sum::<f64>() / ns as f64;
-        let encoded = ordered_target_encode(features, target, &self.cat_features,
-            prior, self.prior_strength, &mut rng);
+        let encoded = ordered_target_encode(
+            features,
+            target,
+            &self.cat_features,
+            prior,
+            self.prior_strength,
+            &mut rng,
+        );
 
         let initial = prior;
         let mut preds = vec![initial; ns];
@@ -373,26 +454,41 @@ impl Learner for CatBoost {
         for _ in 0..self.n_estimators {
             let grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
             let hess = vec![1.0; ns];
-            let tree = build_oblivious_tree(&bins, &grads, &hess, &indices,
-                self.depth, nf, self.lambda);
-            for i in 0..ns { preds[i] += self.learning_rate * tree.predict_one(encoded.row(i)); }
+            let tree =
+                build_oblivious_tree(&bins, &grads, &hess, &indices, self.depth, nf, self.lambda);
+            for i in 0..ns {
+                preds[i] += self.learning_rate * tree.predict_one(encoded.row(i));
+            }
             trees.push(tree);
         }
 
         // Build final encoding map for prediction
-        let cat_encodings = build_final_encodings(features, target, &self.cat_features,
-            prior, self.prior_strength);
+        let cat_encodings = build_final_encodings(
+            features,
+            target,
+            &self.cat_features,
+            prior,
+            self.prior_strength,
+        );
 
         Ok(Box::new(TrainedCatBoost {
-            trees, initial: vec![initial], learning_rate: self.learning_rate,
-            mode: CBMode::Regression, feature_names: task.feature_names().to_vec(),
-            cat_features: self.cat_features.clone(), cat_encodings,
+            trees,
+            initial: vec![initial],
+            learning_rate: self.learning_rate,
+            mode: CBMode::Regression,
+            feature_names: task.feature_names().to_vec(),
+            cat_features: self.cat_features.clone(),
+            cat_encodings,
         }))
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let nc = task.n_classes();
-        if nc == 2 { self.train_binary(task) } else { self.train_multiclass(task) }
+        if nc == 2 {
+            self.train_binary(task)
+        } else {
+            self.train_multiclass(task)
+        }
     }
 }
 
@@ -405,8 +501,14 @@ impl CatBoost {
 
         let target_f64: Vec<f64> = target.iter().map(|&t| t as f64).collect();
         let prior = target_f64.iter().sum::<f64>() / ns as f64;
-        let encoded = ordered_target_encode(features, &target_f64, &self.cat_features,
-            prior, self.prior_strength, &mut rng);
+        let encoded = ordered_target_encode(
+            features,
+            &target_f64,
+            &self.cat_features,
+            prior,
+            self.prior_strength,
+            &mut rng,
+        );
 
         let p_pos = target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64;
         let initial = (p_pos / (1.0 - p_pos).max(1e-15)).ln();
@@ -417,20 +519,36 @@ impl CatBoost {
 
         for _ in 0..self.n_estimators {
             let grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
-            let hess: Vec<f64> = (0..ns).map(|i| { let p = sigmoid(fv[i]); p * (1.0-p).max(1e-15) }).collect();
-            let tree = build_oblivious_tree(&bins, &grads, &hess, &indices,
-                self.depth, nf, self.lambda);
-            for i in 0..ns { fv[i] += self.learning_rate * tree.predict_one(encoded.row(i)); }
+            let hess: Vec<f64> = (0..ns)
+                .map(|i| {
+                    let p = sigmoid(fv[i]);
+                    p * (1.0 - p).max(1e-15)
+                })
+                .collect();
+            let tree =
+                build_oblivious_tree(&bins, &grads, &hess, &indices, self.depth, nf, self.lambda);
+            for i in 0..ns {
+                fv[i] += self.learning_rate * tree.predict_one(encoded.row(i));
+            }
             trees.push(tree);
         }
 
-        let cat_encodings = build_final_encodings(features, &target_f64, &self.cat_features,
-            prior, self.prior_strength);
+        let cat_encodings = build_final_encodings(
+            features,
+            &target_f64,
+            &self.cat_features,
+            prior,
+            self.prior_strength,
+        );
 
         Ok(Box::new(TrainedCatBoost {
-            trees, initial: vec![initial], learning_rate: self.learning_rate,
-            mode: CBMode::BinaryClassif, feature_names: task.feature_names().to_vec(),
-            cat_features: self.cat_features.clone(), cat_encodings,
+            trees,
+            initial: vec![initial],
+            learning_rate: self.learning_rate,
+            mode: CBMode::BinaryClassif,
+            feature_names: task.feature_names().to_vec(),
+            cat_features: self.cat_features.clone(),
+            cat_encodings,
         }))
     }
 
@@ -442,12 +560,23 @@ impl CatBoost {
 
         let target_f64: Vec<f64> = target.iter().map(|&t| t as f64).collect();
         let prior = target_f64.iter().sum::<f64>() / ns as f64;
-        let encoded = ordered_target_encode(features, &target_f64, &self.cat_features,
-            prior, self.prior_strength, &mut rng);
+        let encoded = ordered_target_encode(
+            features,
+            &target_f64,
+            &self.cat_features,
+            prior,
+            self.prior_strength,
+            &mut rng,
+        );
 
         let mut cc = vec![0usize; nc];
-        for &t in target { cc[t] += 1; }
-        let initial: Vec<f64> = cc.iter().map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln()).collect();
+        for &t in target {
+            cc[t] += 1;
+        }
+        let initial: Vec<f64> = cc
+            .iter()
+            .map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln())
+            .collect();
         let mut fv: Vec<Vec<f64>> = (0..ns).map(|_| initial.clone()).collect();
         let mut trees = Vec::with_capacity(self.n_estimators * nc);
         let indices: Vec<usize> = (0..ns).collect();
@@ -456,22 +585,44 @@ impl CatBoost {
         for _ in 0..self.n_estimators {
             let probs: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
             for c in 0..nc {
-                let grads: Vec<f64> = (0..ns).map(|i| probs[i][c] - if target[i]==c {1.0} else {0.0}).collect();
-                let hess: Vec<f64> = (0..ns).map(|i| (probs[i][c] * (1.0-probs[i][c])).max(1e-15)).collect();
-                let tree = build_oblivious_tree(&bins, &grads, &hess, &indices,
-                    self.depth, nf, self.lambda);
-                for i in 0..ns { fv[i][c] += self.learning_rate * tree.predict_one(encoded.row(i)); }
+                let grads: Vec<f64> = (0..ns)
+                    .map(|i| probs[i][c] - if target[i] == c { 1.0 } else { 0.0 })
+                    .collect();
+                let hess: Vec<f64> = (0..ns)
+                    .map(|i| (probs[i][c] * (1.0 - probs[i][c])).max(1e-15))
+                    .collect();
+                let tree = build_oblivious_tree(
+                    &bins,
+                    &grads,
+                    &hess,
+                    &indices,
+                    self.depth,
+                    nf,
+                    self.lambda,
+                );
+                for i in 0..ns {
+                    fv[i][c] += self.learning_rate * tree.predict_one(encoded.row(i));
+                }
                 trees.push(tree);
             }
         }
 
-        let cat_encodings = build_final_encodings(features, &target_f64, &self.cat_features,
-            prior, self.prior_strength);
+        let cat_encodings = build_final_encodings(
+            features,
+            &target_f64,
+            &self.cat_features,
+            prior,
+            self.prior_strength,
+        );
 
         Ok(Box::new(TrainedCatBoost {
-            trees, initial, learning_rate: self.learning_rate,
-            mode: CBMode::MultiClassif { n_classes: nc }, feature_names: task.feature_names().to_vec(),
-            cat_features: self.cat_features.clone(), cat_encodings,
+            trees,
+            initial,
+            learning_rate: self.learning_rate,
+            mode: CBMode::MultiClassif { n_classes: nc },
+            feature_names: task.feature_names().to_vec(),
+            cat_features: self.cat_features.clone(),
+            cat_encodings,
         }))
     }
 }

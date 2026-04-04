@@ -7,10 +7,10 @@
 //! Reference: Romano, Y., Patterson, E., & Candès, E. (2019).
 //! Conformalized Quantile Regression. NeurIPS.
 
-use ndarray::Array2;
 use crate::learner::TrainedModel;
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::{Result, SmeltError};
+use ndarray::Array2;
 
 /// CQR prediction interval.
 #[derive(Debug, Clone)]
@@ -68,11 +68,10 @@ impl<'a> CQR<'a> {
 
         // Conformity scores: max(lower - y, y - upper)
         // This captures how much the true value exceeds the predicted interval
-        let mut scores: Vec<f64> = cal_targets.iter()
+        let mut scores: Vec<f64> = cal_targets
+            .iter()
             .zip(lower_vals.iter().zip(upper_vals))
-            .map(|(&y, (&lo, &hi))| {
-                (lo - y).max(y - hi)
-            })
+            .map(|(&y, (&lo, &hi))| (lo - y).max(y - hi))
             .collect();
         scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -81,7 +80,11 @@ impl<'a> CQR<'a> {
         let q_idx = ((n as f64 + 1.0) * (1.0 - alpha)).ceil() as usize;
         let correction = scores[q_idx.min(n) - 1];
 
-        Ok(Self { lower_model, upper_model, correction })
+        Ok(Self {
+            lower_model,
+            upper_model,
+            correction,
+        })
     }
 
     /// Predict with conformalized intervals.
@@ -98,7 +101,9 @@ impl<'a> CQR<'a> {
             _ => return Err(SmeltError::Other("Expected regression prediction".into())),
         };
 
-        Ok(lower_vals.iter().zip(upper_vals)
+        Ok(lower_vals
+            .iter()
+            .zip(upper_vals)
             .map(|(&lo, &hi)| CQRInterval {
                 prediction: (lo + hi) / 2.0,
                 lower: lo - self.correction,
@@ -108,5 +113,7 @@ impl<'a> CQR<'a> {
     }
 
     /// The conformal correction applied to the quantile intervals.
-    pub fn correction(&self) -> f64 { self.correction }
+    pub fn correction(&self) -> f64 {
+        self.correction
+    }
 }

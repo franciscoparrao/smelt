@@ -5,15 +5,15 @@
 //!
 //! Reference: Meinshausen, N. (2006). Quantile Regression Forests. JMLR 7, 983-999.
 
-use ndarray::Array2;
-use rand::Rng;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use rayon::prelude::*;
-use crate::task::{ClassificationTask, RegressionTask, Task};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::{Result, SmeltError};
+use ndarray::Array2;
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rayon::prelude::*;
 
 /// Quantile Regression Forest.
 ///
@@ -49,22 +49,43 @@ pub struct QuantileForest {
 
 impl Default for QuantileForest {
     fn default() -> Self {
-        Self { n_estimators: 100, max_depth: None, min_samples_leaf: 5, seed: 42 }
+        Self {
+            n_estimators: 100,
+            max_depth: None,
+            min_samples_leaf: 5,
+            seed: 42,
+        }
     }
 }
 
 impl QuantileForest {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_n_estimators(mut self, n: usize) -> Self { self.n_estimators = n; self }
-    pub fn with_max_depth(mut self, d: usize) -> Self { self.max_depth = Some(d); self }
-    pub fn with_min_samples_leaf(mut self, n: usize) -> Self { self.min_samples_leaf = n; self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_n_estimators(mut self, n: usize) -> Self {
+        self.n_estimators = n;
+        self
+    }
+    pub fn with_max_depth(mut self, d: usize) -> Self {
+        self.max_depth = Some(d);
+        self
+    }
+    pub fn with_min_samples_leaf(mut self, n: usize) -> Self {
+        self.min_samples_leaf = n;
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 }
 
 // ── QRF Tree internals ─────────────────────────────────────────────
 
 enum QRFNode {
-    Leaf { values: Vec<f64> }, // all target values in this leaf
+    Leaf {
+        values: Vec<f64>,
+    }, // all target values in this leaf
     Split {
         feature: usize,
         threshold: f64,
@@ -77,9 +98,17 @@ impl QRFNode {
     fn find_leaf(&self, row: &[f64]) -> &[f64] {
         match self {
             QRFNode::Leaf { values } => values,
-            QRFNode::Split { feature, threshold, left, right } => {
-                if row[*feature] <= *threshold { left.find_leaf(row) }
-                else { right.find_leaf(row) }
+            QRFNode::Split {
+                feature,
+                threshold,
+                left,
+                right,
+            } => {
+                if row[*feature] <= *threshold {
+                    left.find_leaf(row)
+                } else {
+                    right.find_leaf(row)
+                }
             }
         }
     }
@@ -97,9 +126,7 @@ fn build_qrf_tree(
 ) -> QRFNode {
     let n = indices.len();
 
-    if n <= min_samples_leaf * 2
-        || max_depth.is_some_and(|d| depth >= d)
-    {
+    if n <= min_samples_leaf * 2 || max_depth.is_some_and(|d| depth >= d) {
         let values: Vec<f64> = indices.iter().map(|&i| target[i]).collect();
         return QRFNode::Leaf { values };
     }
@@ -120,11 +147,15 @@ fn build_qrf_tree(
 
     for &feat in &feat_indices[..n_try.min(n_features)] {
         let mut sorted: Vec<usize> = indices.to_vec();
-        sorted.sort_by(|&a, &b| features[[a, feat]].partial_cmp(&features[[b, feat]])
-            .unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|&a, &b| {
+            features[[a, feat]]
+                .partial_cmp(&features[[b, feat]])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         for s in min_samples_leaf..(n.saturating_sub(min_samples_leaf)) {
-            if (features[[sorted[s], feat]] - features[[sorted[s-1], feat]]).abs() < f64::EPSILON {
+            if (features[[sorted[s], feat]] - features[[sorted[s - 1], feat]]).abs() < f64::EPSILON
+            {
                 continue;
             }
             let left = &sorted[..s];
@@ -135,7 +166,8 @@ fn build_qrf_tree(
 
             if gain > best_gain {
                 best_gain = gain;
-                let threshold = (features[[sorted[s-1], feat]] + features[[sorted[s], feat]]) / 2.0;
+                let threshold =
+                    (features[[sorted[s - 1], feat]] + features[[sorted[s], feat]]) / 2.0;
                 best_split = Some((feat, threshold, left.to_vec(), right.to_vec()));
             }
         }
@@ -143,9 +175,32 @@ fn build_qrf_tree(
 
     match best_split {
         Some((feat, threshold, left_idx, right_idx)) => {
-            let left = build_qrf_tree(features, target, &left_idx, max_depth, min_samples_leaf, n_features, depth+1, rng);
-            let right = build_qrf_tree(features, target, &right_idx, max_depth, min_samples_leaf, n_features, depth+1, rng);
-            QRFNode::Split { feature: feat, threshold, left: Box::new(left), right: Box::new(right) }
+            let left = build_qrf_tree(
+                features,
+                target,
+                &left_idx,
+                max_depth,
+                min_samples_leaf,
+                n_features,
+                depth + 1,
+                rng,
+            );
+            let right = build_qrf_tree(
+                features,
+                target,
+                &right_idx,
+                max_depth,
+                min_samples_leaf,
+                n_features,
+                depth + 1,
+                rng,
+            );
+            QRFNode::Split {
+                feature: feat,
+                threshold,
+                left: Box::new(left),
+                right: Box::new(right),
+            }
         }
         None => {
             let values: Vec<f64> = indices.iter().map(|&i| target[i]).collect();
@@ -157,7 +212,11 @@ fn build_qrf_tree(
 fn mse_indices(target: &[f64], indices: &[usize]) -> f64 {
     let n = indices.len() as f64;
     let mean = indices.iter().map(|&i| target[i]).sum::<f64>() / n;
-    indices.iter().map(|&i| (target[i] - mean).powi(2)).sum::<f64>() / n
+    indices
+        .iter()
+        .map(|&i| (target[i] - mean).powi(2))
+        .sum::<f64>()
+        / n
 }
 
 // ── Trained QRF ─────────────────────────────────────────────────────
@@ -173,7 +232,9 @@ impl TrainedQuantileForest {
     pub fn predict_quantile(&self, features: &Array2<f64>, quantile: f64) -> Result<Vec<f64>> {
         crate::validate::check_n_features(features, self.n_features)?;
 
-        Ok(features.rows().into_iter()
+        Ok(features
+            .rows()
+            .into_iter()
             .map(|row| {
                 let row_vec: Vec<f64> = row.to_vec();
                 let mut all_values: Vec<f64> = Vec::new();
@@ -182,7 +243,9 @@ impl TrainedQuantileForest {
                 }
                 all_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 let idx = ((all_values.len() as f64 * quantile).ceil() as usize)
-                    .min(all_values.len()).max(1) - 1;
+                    .min(all_values.len())
+                    .max(1)
+                    - 1;
                 all_values[idx]
             })
             .collect())
@@ -207,10 +270,14 @@ impl TrainedModel for TrainedQuantileForest {
 // ── Learner impl ────────────────────────────────────────────────────
 
 impl Learner for QuantileForest {
-    fn id(&self) -> &str { "quantile_forest" }
+    fn id(&self) -> &str {
+        "quantile_forest"
+    }
 
     fn train_classif(&mut self, _: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other("QuantileForest only supports regression".into()))
+        Err(SmeltError::Other(
+            "QuantileForest only supports regression".into(),
+        ))
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
@@ -227,8 +294,16 @@ impl Learner for QuantileForest {
                 let indices: Vec<usize> = (0..n_samples)
                     .map(|_| rng.random_range(0..n_samples))
                     .collect();
-                build_qrf_tree(features, target, &indices, self.max_depth,
-                    self.min_samples_leaf, n_features, 0, &mut rng)
+                build_qrf_tree(
+                    features,
+                    target,
+                    &indices,
+                    self.max_depth,
+                    self.min_samples_leaf,
+                    n_features,
+                    0,
+                    &mut rng,
+                )
             })
             .collect();
 

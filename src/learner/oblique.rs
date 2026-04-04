@@ -7,15 +7,15 @@
 //! Reference: Tomita et al. (2020) "Sparse Projection Oblique Randomer Forests"
 //! JMLR 21(104):1-39.
 
-use ndarray::{Array2, ArrayView1};
-use rand::Rng;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use rayon::prelude::*;
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::Result;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use ndarray::{Array2, ArrayView1};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rayon::prelude::*;
 
 // ── Oblique tree node ───────────────────────────────────────────────
 
@@ -51,7 +51,12 @@ impl ObliqueNode {
     fn predict_one(&self, sample: ArrayView1<f64>) -> &ObliqueLeaf {
         match self {
             ObliqueNode::Leaf(leaf) => leaf,
-            ObliqueNode::Split { projection, threshold, left, right } => {
+            ObliqueNode::Split {
+                projection,
+                threshold,
+                left,
+                right,
+            } => {
                 if projection.project(sample) <= *threshold {
                     left.predict_one(sample)
                 } else {
@@ -68,7 +73,7 @@ struct ObliqueTreeBuilder {
     max_depth: Option<usize>,
     min_samples_split: usize,
     min_samples_leaf: usize,
-    n_projections: usize,   // projections to try per node
+    n_projections: usize,     // projections to try per node
     features_per_proj: usize, // features per projection (sparsity)
     n_features: usize,
     feature_importances: Vec<f64>,
@@ -85,9 +90,14 @@ impl ObliqueTreeBuilder {
             indices.swap(i, j);
         }
 
-        let weights: Vec<(usize, f64)> = indices[..k].iter()
+        let weights: Vec<(usize, f64)> = indices[..k]
+            .iter()
             .map(|&idx| {
-                let w = if rng.random_range(0..2) == 0 { -1.0 } else { 1.0 };
+                let w = if rng.random_range(0..2) == 0 {
+                    -1.0
+                } else {
+                    1.0
+                };
                 (idx, w)
             })
             .collect();
@@ -123,12 +133,16 @@ impl ObliqueTreeBuilder {
                 self.feature_importances[feat] += gain * indices.len() as f64;
             }
 
-            let left = self.build_classifier(features, target, &left_idx, n_classes, depth + 1, rng);
-            let right = self.build_classifier(features, target, &right_idx, n_classes, depth + 1, rng);
+            let left =
+                self.build_classifier(features, target, &left_idx, n_classes, depth + 1, rng);
+            let right =
+                self.build_classifier(features, target, &right_idx, n_classes, depth + 1, rng);
 
             ObliqueNode::Split {
-                projection: proj, threshold,
-                left: Box::new(left), right: Box::new(right),
+                projection: proj,
+                threshold,
+                left: Box::new(left),
+                right: Box::new(right),
             }
         } else {
             ObliqueNode::Leaf(classification_leaf(target, indices, n_classes))
@@ -165,8 +179,10 @@ impl ObliqueTreeBuilder {
             let right = self.build_regressor(features, target, &right_idx, depth + 1, rng);
 
             ObliqueNode::Split {
-                projection: proj, threshold,
-                left: Box::new(left), right: Box::new(right),
+                projection: proj,
+                threshold,
+                left: Box::new(left),
+                right: Box::new(right),
             }
         } else {
             ObliqueNode::Leaf(regression_leaf(target, indices))
@@ -190,14 +206,17 @@ impl ObliqueTreeBuilder {
             let proj = self.random_projection(rng);
 
             // Project all samples
-            let mut projected: Vec<(usize, f64)> = indices.iter()
+            let mut projected: Vec<(usize, f64)> = indices
+                .iter()
                 .map(|&i| (i, proj.project(features.row(i))))
                 .collect();
             projected.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
             // Try all split points
             for s in 1..projected.len() {
-                if (projected[s].1 - projected[s - 1].1).abs() < f64::EPSILON { continue; }
+                if (projected[s].1 - projected[s - 1].1).abs() < f64::EPSILON {
+                    continue;
+                }
 
                 let left_idx: Vec<usize> = projected[..s].iter().map(|(i, _)| *i).collect();
                 let right_idx: Vec<usize> = projected[s..].iter().map(|(i, _)| *i).collect();
@@ -232,13 +251,16 @@ impl ObliqueTreeBuilder {
         for _ in 0..self.n_projections {
             let proj = self.random_projection(rng);
 
-            let mut projected: Vec<(usize, f64)> = indices.iter()
+            let mut projected: Vec<(usize, f64)> = indices
+                .iter()
                 .map(|&i| (i, proj.project(features.row(i))))
                 .collect();
             projected.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
             for s in 1..projected.len() {
-                if (projected[s].1 - projected[s - 1].1).abs() < f64::EPSILON { continue; }
+                if (projected[s].1 - projected[s - 1].1).abs() < f64::EPSILON {
+                    continue;
+                }
 
                 let left_idx: Vec<usize> = projected[..s].iter().map(|(i, _)| *i).collect();
                 let right_idx: Vec<usize> = projected[s..].iter().map(|(i, _)| *i).collect();
@@ -268,27 +290,45 @@ fn all_same_class(target: &[usize], indices: &[usize]) -> bool {
 
 fn all_same_value(target: &[f64], indices: &[usize]) -> bool {
     let first = target[indices[0]];
-    indices.iter().all(|&i| (target[i] - first).abs() < f64::EPSILON)
+    indices
+        .iter()
+        .all(|&i| (target[i] - first).abs() < f64::EPSILON)
 }
 
 fn gini(target: &[usize], indices: &[usize], n_classes: usize) -> f64 {
     let mut counts = vec![0usize; n_classes];
-    for &i in indices { counts[target[i]] += 1; }
+    for &i in indices {
+        counts[target[i]] += 1;
+    }
     let total = indices.len() as f64;
-    1.0 - counts.iter().map(|&c| (c as f64 / total).powi(2)).sum::<f64>()
+    1.0 - counts
+        .iter()
+        .map(|&c| (c as f64 / total).powi(2))
+        .sum::<f64>()
 }
 
 fn mse(target: &[f64], indices: &[usize]) -> f64 {
     let mean = indices.iter().map(|&i| target[i]).sum::<f64>() / indices.len() as f64;
-    indices.iter().map(|&i| (target[i] - mean).powi(2)).sum::<f64>() / indices.len() as f64
+    indices
+        .iter()
+        .map(|&i| (target[i] - mean).powi(2))
+        .sum::<f64>()
+        / indices.len() as f64
 }
 
 fn classification_leaf(target: &[usize], indices: &[usize], n_classes: usize) -> ObliqueLeaf {
     let mut counts = vec![0usize; n_classes];
-    for &i in indices { counts[target[i]] += 1; }
+    for &i in indices {
+        counts[target[i]] += 1;
+    }
     let total = indices.len() as f64;
     let probs: Vec<f64> = counts.iter().map(|&c| c as f64 / total).collect();
-    let predicted = counts.iter().enumerate().max_by_key(|&(_, &c)| c).unwrap().0;
+    let predicted = counts
+        .iter()
+        .enumerate()
+        .max_by_key(|&(_, &c)| c)
+        .unwrap()
+        .0;
     ObliqueLeaf::Class(predicted, probs)
 }
 
@@ -309,8 +349,12 @@ struct TrainedObliqueTree {
 impl TrainedModel for TrainedObliqueTree {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
         crate::validate::check_n_features(features, self.feature_names.len())?;
-        predict_from_oblique_roots(&[&self.root], features, self.is_classifier,
-            self.feature_names.len())
+        predict_from_oblique_roots(
+            &[&self.root],
+            features,
+            self.is_classifier,
+            self.feature_names.len(),
+        )
     }
 
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
@@ -330,8 +374,12 @@ impl TrainedModel for TrainedObliqueForest {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
         crate::validate::check_n_features(features, self.feature_names.len())?;
         let refs: Vec<&ObliqueNode> = self.trees.iter().collect();
-        predict_from_oblique_roots(&refs, features, self.is_classifier,
-            self.n_classes.unwrap_or(0))
+        predict_from_oblique_roots(
+            &refs,
+            features,
+            self.is_classifier,
+            self.n_classes.unwrap_or(0),
+        )
     }
 
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
@@ -340,8 +388,10 @@ impl TrainedModel for TrainedObliqueForest {
 }
 
 fn predict_from_oblique_roots(
-    trees: &[&ObliqueNode], features: &Array2<f64>,
-    is_classifier: bool, n_classes: usize,
+    trees: &[&ObliqueNode],
+    features: &Array2<f64>,
+    is_classifier: bool,
+    n_classes: usize,
 ) -> Result<Prediction> {
     let n_trees = trees.len() as f64;
 
@@ -353,23 +403,41 @@ fn predict_from_oblique_roots(
             let mut avg_probs = vec![0.0; n_classes];
             for tree in trees {
                 if let ObliqueLeaf::Class(_cls, probs) = tree.predict_one(row) {
-                    for (j, p) in probs.iter().enumerate() { avg_probs[j] += p; }
+                    for (j, p) in probs.iter().enumerate() {
+                        avg_probs[j] += p;
+                    }
                 }
             }
-            for p in &mut avg_probs { *p /= n_trees; }
-            let cls = avg_probs.iter().enumerate()
+            for p in &mut avg_probs {
+                *p /= n_trees;
+            }
+            let cls = avg_probs
+                .iter()
+                .enumerate()
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap().0;
+                .unwrap()
+                .0;
             predicted.push(cls);
             probabilities.push(avg_probs);
         }
-        Ok(Prediction::Classification { predicted, truth: None, probabilities: Some(probabilities) })
+        Ok(Prediction::Classification {
+            predicted,
+            truth: None,
+            probabilities: Some(probabilities),
+        })
     } else {
-        let predicted: Vec<f64> = features.rows().into_iter()
+        let predicted: Vec<f64> = features
+            .rows()
+            .into_iter()
             .map(|row| {
-                trees.iter()
-                    .map(|t| match t.predict_one(row) { ObliqueLeaf::Value(v) => *v, _ => 0.0 })
-                    .sum::<f64>() / n_trees
+                trees
+                    .iter()
+                    .map(|t| match t.predict_one(row) {
+                        ObliqueLeaf::Value(v) => *v,
+                        _ => 0.0,
+                    })
+                    .sum::<f64>()
+                    / n_trees
             })
             .collect();
         Ok(Prediction::regression(predicted))
@@ -378,9 +446,16 @@ fn predict_from_oblique_roots(
 
 fn normalize_importance(names: &[String], importances: &[f64]) -> Option<Vec<(String, f64)>> {
     let total: f64 = importances.iter().sum();
-    if total == 0.0 { return None; }
-    Some(names.iter().zip(importances)
-        .map(|(n, &i)| (n.clone(), i / total)).collect())
+    if total == 0.0 {
+        return None;
+    }
+    Some(
+        names
+            .iter()
+            .zip(importances)
+            .map(|(n, &i)| (n.clone(), i / total))
+            .collect(),
+    )
 }
 
 // ── ObliqueTree learner ─────────────────────────────────────────────
@@ -412,61 +487,101 @@ pub struct ObliqueTree {
 impl Default for ObliqueTree {
     fn default() -> Self {
         Self {
-            max_depth: None, min_samples_split: 2, min_samples_leaf: 1,
-            n_projections: 10, features_per_proj: None, seed: 42,
+            max_depth: None,
+            min_samples_split: 2,
+            min_samples_leaf: 1,
+            n_projections: 10,
+            features_per_proj: None,
+            seed: 42,
         }
     }
 }
 
 impl ObliqueTree {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_max_depth(mut self, d: usize) -> Self { self.max_depth = Some(d); self }
-    pub fn with_n_projections(mut self, n: usize) -> Self { self.n_projections = n; self }
-    pub fn with_features_per_proj(mut self, k: usize) -> Self { self.features_per_proj = Some(k); self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_max_depth(mut self, d: usize) -> Self {
+        self.max_depth = Some(d);
+        self
+    }
+    pub fn with_n_projections(mut self, n: usize) -> Self {
+        self.n_projections = n;
+        self
+    }
+    pub fn with_features_per_proj(mut self, k: usize) -> Self {
+        self.features_per_proj = Some(k);
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 }
 
 impl Learner for ObliqueTree {
-    fn id(&self) -> &str { "oblique_tree" }
+    fn id(&self) -> &str {
+        "oblique_tree"
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let nf = task.n_features();
-        let fpp = self.features_per_proj.unwrap_or((nf as f64).sqrt().ceil() as usize);
+        let fpp = self
+            .features_per_proj
+            .unwrap_or((nf as f64).sqrt().ceil() as usize);
         let indices: Vec<usize> = (0..task.n_samples()).collect();
         let mut rng = StdRng::seed_from_u64(self.seed);
 
         let mut builder = ObliqueTreeBuilder {
-            max_depth: self.max_depth, min_samples_split: self.min_samples_split,
+            max_depth: self.max_depth,
+            min_samples_split: self.min_samples_split,
             min_samples_leaf: self.min_samples_leaf,
-            n_projections: self.n_projections, features_per_proj: fpp,
-            n_features: nf, feature_importances: vec![0.0; nf],
+            n_projections: self.n_projections,
+            features_per_proj: fpp,
+            n_features: nf,
+            feature_importances: vec![0.0; nf],
         };
-        let root = builder.build_classifier(task.features(), task.target(), &indices,
-            task.n_classes(), 0, &mut rng);
+        let root = builder.build_classifier(
+            task.features(),
+            task.target(),
+            &indices,
+            task.n_classes(),
+            0,
+            &mut rng,
+        );
 
         Ok(Box::new(TrainedObliqueTree {
-            root, feature_names: task.feature_names().to_vec(),
-            feature_importances: builder.feature_importances, is_classifier: true,
+            root,
+            feature_names: task.feature_names().to_vec(),
+            feature_importances: builder.feature_importances,
+            is_classifier: true,
         }))
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         let nf = task.n_features();
-        let fpp = self.features_per_proj.unwrap_or((nf as f64).sqrt().ceil() as usize);
+        let fpp = self
+            .features_per_proj
+            .unwrap_or((nf as f64).sqrt().ceil() as usize);
         let indices: Vec<usize> = (0..task.n_samples()).collect();
         let mut rng = StdRng::seed_from_u64(self.seed);
 
         let mut builder = ObliqueTreeBuilder {
-            max_depth: self.max_depth, min_samples_split: self.min_samples_split,
+            max_depth: self.max_depth,
+            min_samples_split: self.min_samples_split,
             min_samples_leaf: self.min_samples_leaf,
-            n_projections: self.n_projections, features_per_proj: fpp,
-            n_features: nf, feature_importances: vec![0.0; nf],
+            n_projections: self.n_projections,
+            features_per_proj: fpp,
+            n_features: nf,
+            feature_importances: vec![0.0; nf],
         };
         let root = builder.build_regressor(task.features(), task.target(), &indices, 0, &mut rng);
 
         Ok(Box::new(TrainedObliqueTree {
-            root, feature_names: task.feature_names().to_vec(),
-            feature_importances: builder.feature_importances, is_classifier: false,
+            root,
+            feature_names: task.feature_names().to_vec(),
+            feature_importances: builder.feature_importances,
+            is_classifier: false,
         }))
     }
 }
@@ -504,47 +619,80 @@ pub struct ObliqueForest {
 impl Default for ObliqueForest {
     fn default() -> Self {
         Self {
-            n_estimators: 100, max_depth: None, min_samples_split: 2,
-            min_samples_leaf: 1, n_projections: 10, features_per_proj: None, seed: 42,
+            n_estimators: 100,
+            max_depth: None,
+            min_samples_split: 2,
+            min_samples_leaf: 1,
+            n_projections: 10,
+            features_per_proj: None,
+            seed: 42,
         }
     }
 }
 
 impl ObliqueForest {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_n_estimators(mut self, n: usize) -> Self { self.n_estimators = n; self }
-    pub fn with_max_depth(mut self, d: usize) -> Self { self.max_depth = Some(d); self }
-    pub fn with_n_projections(mut self, n: usize) -> Self { self.n_projections = n; self }
-    pub fn with_features_per_proj(mut self, k: usize) -> Self { self.features_per_proj = Some(k); self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_n_estimators(mut self, n: usize) -> Self {
+        self.n_estimators = n;
+        self
+    }
+    pub fn with_max_depth(mut self, d: usize) -> Self {
+        self.max_depth = Some(d);
+        self
+    }
+    pub fn with_n_projections(mut self, n: usize) -> Self {
+        self.n_projections = n;
+        self
+    }
+    pub fn with_features_per_proj(mut self, k: usize) -> Self {
+        self.features_per_proj = Some(k);
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 }
 
 impl Learner for ObliqueForest {
-    fn id(&self) -> &str { "oblique_forest" }
+    fn id(&self) -> &str {
+        "oblique_forest"
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let nf = task.n_features();
         let ns = task.n_samples();
         let nc = task.n_classes();
-        let fpp = self.features_per_proj.unwrap_or((nf as f64).sqrt().ceil() as usize);
+        let fpp = self
+            .features_per_proj
+            .unwrap_or((nf as f64).sqrt().ceil() as usize);
 
         let results: Vec<(ObliqueNode, Vec<f64>)> = (0..self.n_estimators)
             .into_par_iter()
             .map(|i| {
                 let mut rng = StdRng::seed_from_u64(self.seed.wrapping_add(i as u64));
                 // Bootstrap sample
-                let indices: Vec<usize> = (0..ns)
-                    .map(|_| rng.random_range(0..ns))
-                    .collect();
+                let indices: Vec<usize> = (0..ns).map(|_| rng.random_range(0..ns)).collect();
 
                 let mut builder = ObliqueTreeBuilder {
-                    max_depth: self.max_depth, min_samples_split: self.min_samples_split,
+                    max_depth: self.max_depth,
+                    min_samples_split: self.min_samples_split,
                     min_samples_leaf: self.min_samples_leaf,
-                    n_projections: self.n_projections, features_per_proj: fpp,
-                    n_features: nf, feature_importances: vec![0.0; nf],
+                    n_projections: self.n_projections,
+                    features_per_proj: fpp,
+                    n_features: nf,
+                    feature_importances: vec![0.0; nf],
                 };
-                let root = builder.build_classifier(task.features(), task.target(),
-                    &indices, nc, 0, &mut rng);
+                let root = builder.build_classifier(
+                    task.features(),
+                    task.target(),
+                    &indices,
+                    nc,
+                    0,
+                    &mut rng,
+                );
                 (root, builder.feature_importances)
             })
             .collect();
@@ -552,37 +700,45 @@ impl Learner for ObliqueForest {
         let mut total_imp = vec![0.0; nf];
         let mut trees = Vec::with_capacity(self.n_estimators);
         for (root, imp) in results {
-            for (j, v) in imp.iter().enumerate() { total_imp[j] += v; }
+            for (j, v) in imp.iter().enumerate() {
+                total_imp[j] += v;
+            }
             trees.push(root);
         }
 
         Ok(Box::new(TrainedObliqueForest {
-            trees, feature_names: task.feature_names().to_vec(),
-            feature_importances: total_imp, n_classes: Some(nc), is_classifier: true,
+            trees,
+            feature_names: task.feature_names().to_vec(),
+            feature_importances: total_imp,
+            n_classes: Some(nc),
+            is_classifier: true,
         }))
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         let nf = task.n_features();
         let ns = task.n_samples();
-        let fpp = self.features_per_proj.unwrap_or((nf as f64).sqrt().ceil() as usize);
+        let fpp = self
+            .features_per_proj
+            .unwrap_or((nf as f64).sqrt().ceil() as usize);
 
         let results: Vec<(ObliqueNode, Vec<f64>)> = (0..self.n_estimators)
             .into_par_iter()
             .map(|i| {
                 let mut rng = StdRng::seed_from_u64(self.seed.wrapping_add(i as u64));
-                let indices: Vec<usize> = (0..ns)
-                    .map(|_| rng.random_range(0..ns))
-                    .collect();
+                let indices: Vec<usize> = (0..ns).map(|_| rng.random_range(0..ns)).collect();
 
                 let mut builder = ObliqueTreeBuilder {
-                    max_depth: self.max_depth, min_samples_split: self.min_samples_split,
+                    max_depth: self.max_depth,
+                    min_samples_split: self.min_samples_split,
                     min_samples_leaf: self.min_samples_leaf,
-                    n_projections: self.n_projections, features_per_proj: fpp,
-                    n_features: nf, feature_importances: vec![0.0; nf],
+                    n_projections: self.n_projections,
+                    features_per_proj: fpp,
+                    n_features: nf,
+                    feature_importances: vec![0.0; nf],
                 };
-                let root = builder.build_regressor(task.features(), task.target(),
-                    &indices, 0, &mut rng);
+                let root =
+                    builder.build_regressor(task.features(), task.target(), &indices, 0, &mut rng);
                 (root, builder.feature_importances)
             })
             .collect();
@@ -590,13 +746,18 @@ impl Learner for ObliqueForest {
         let mut total_imp = vec![0.0; nf];
         let mut trees = Vec::with_capacity(self.n_estimators);
         for (root, imp) in results {
-            for (j, v) in imp.iter().enumerate() { total_imp[j] += v; }
+            for (j, v) in imp.iter().enumerate() {
+                total_imp[j] += v;
+            }
             trees.push(root);
         }
 
         Ok(Box::new(TrainedObliqueForest {
-            trees, feature_names: task.feature_names().to_vec(),
-            feature_importances: total_imp, n_classes: None, is_classifier: false,
+            trees,
+            feature_names: task.feature_names().to_vec(),
+            feature_importances: total_imp,
+            n_classes: None,
+            is_classifier: false,
         }))
     }
 }

@@ -4,9 +4,9 @@
 //!   RUSTFLAGS="-C target-cpu=native" cargo run --release --example bench_vectorization
 
 use ndarray::Array2;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
 use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use smelt_ml::prelude::*;
 use std::time::Instant;
 
@@ -41,7 +41,10 @@ fn main() {
     // XGBoost
     let mut times = Vec::new();
     for _ in 0..n_runs {
-        let mut xgb = XGBoost::new().with_n_estimators(100).with_max_depth(6).with_learning_rate(0.3);
+        let mut xgb = XGBoost::new()
+            .with_n_estimators(100)
+            .with_max_depth(6)
+            .with_learning_rate(0.3);
         let t0 = Instant::now();
         let _ = xgb.train_classif(&task).unwrap();
         times.push(t0.elapsed().as_secs_f64() * 1000.0);
@@ -52,7 +55,10 @@ fn main() {
     // CatBoost
     let mut times = Vec::new();
     for _ in 0..n_runs {
-        let mut cb = CatBoost::new().with_n_estimators(100).with_depth(6).with_learning_rate(0.3);
+        let mut cb = CatBoost::new()
+            .with_n_estimators(100)
+            .with_depth(6)
+            .with_learning_rate(0.3);
         let t0 = Instant::now();
         let _ = cb.train_classif(&task).unwrap();
         times.push(t0.elapsed().as_secs_f64() * 1000.0);

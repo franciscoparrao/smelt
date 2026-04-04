@@ -3,12 +3,12 @@
 //! Level 0: trains K base learners with cross-validation.
 //! Level 1: trains a meta-learner on out-of-fold predictions from level 0.
 
-use ndarray::{Array2, Axis};
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::Result;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::resample::{Resample, CrossValidation};
-use crate::Result;
+use crate::resample::{CrossValidation, Resample};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use ndarray::{Array2, Axis};
 
 /// Stacking ensemble (Super Learner).
 ///
@@ -57,8 +57,14 @@ impl Stacking {
         }
     }
 
-    pub fn with_cv_folds(mut self, folds: usize) -> Self { self.cv_folds = folds; self }
-    pub fn with_cv_seed(mut self, seed: u64) -> Self { self.cv_seed = seed; self }
+    pub fn with_cv_folds(mut self, folds: usize) -> Self {
+        self.cv_folds = folds;
+        self
+    }
+    pub fn with_cv_seed(mut self, seed: u64) -> Self {
+        self.cv_seed = seed;
+        self
+    }
 }
 
 struct TrainedStacking {
@@ -88,7 +94,11 @@ impl TrainedStacking {
 
             for (m, model) in self.base_models.iter().enumerate() {
                 let pred = model.predict(features)?;
-                if let Prediction::Classification { probabilities: Some(probs), .. } = &pred {
+                if let Prediction::Classification {
+                    probabilities: Some(probs),
+                    ..
+                } = &pred
+                {
                     for i in 0..n_samples {
                         for c in 0..nc {
                             meta[[i, m * nc + c]] = probs[i][c];
@@ -113,7 +123,9 @@ impl TrainedStacking {
 }
 
 impl Learner for Stacking {
-    fn id(&self) -> &str { "stacking" }
+    fn id(&self) -> &str {
+        "stacking"
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
@@ -140,7 +152,11 @@ impl Learner for Stacking {
                 let test_features = features.select(Axis(0), test_idx);
                 let pred = model.predict(&test_features)?;
 
-                if let Prediction::Classification { probabilities: Some(probs), .. } = &pred {
+                if let Prediction::Classification {
+                    probabilities: Some(probs),
+                    ..
+                } = &pred
+                {
                     for (j, &idx) in test_idx.iter().enumerate() {
                         for c in 0..n_classes {
                             oof_meta[[idx, m * n_classes + c]] = probs[j][c];
@@ -163,8 +179,11 @@ impl Learner for Stacking {
         }
 
         Ok(Box::new(TrainedStacking {
-            base_models, meta_model, n_base,
-            is_classifier: true, n_classes: Some(n_classes),
+            base_models,
+            meta_model,
+            n_base,
+            is_classifier: true,
+            n_classes: Some(n_classes),
         }))
     }
 
@@ -209,8 +228,11 @@ impl Learner for Stacking {
         }
 
         Ok(Box::new(TrainedStacking {
-            base_models, meta_model, n_base,
-            is_classifier: false, n_classes: None,
+            base_models,
+            meta_model,
+            n_base,
+            is_classifier: false,
+            n_classes: None,
         }))
     }
 }

@@ -4,12 +4,12 @@ pub mod isolation_forest;
 
 pub use isolation_forest::IsolationForest;
 
-use ndarray::{Array2, ArrayView1};
-use rand::Rng;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
 use crate::Result;
 use crate::SmeltError;
+use ndarray::{Array2, ArrayView1};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Clustering result.
 #[derive(Debug, Clone)]
@@ -26,13 +26,17 @@ impl ClusterResult {
     /// Silhouette score: measures how well samples are clustered. Range [-1, 1].
     pub fn silhouette_score(&self, features: &Array2<f64>) -> f64 {
         let n = features.nrows();
-        if self.n_clusters < 2 { return 0.0; }
+        if self.n_clusters < 2 {
+            return 0.0;
+        }
 
         let mut total = 0.0;
         let mut count = 0;
 
         for i in 0..n {
-            if self.labels[i] < 0 { continue; } // skip noise
+            if self.labels[i] < 0 {
+                continue;
+            } // skip noise
             let ci = self.labels[i];
 
             // a(i) = mean distance to samples in same cluster
@@ -44,12 +48,18 @@ impl ClusterResult {
                     a_count += 1;
                 }
             }
-            let a = if a_count > 0 { a_sum / a_count as f64 } else { 0.0 };
+            let a = if a_count > 0 {
+                a_sum / a_count as f64
+            } else {
+                0.0
+            };
 
             // b(i) = min mean distance to samples in nearest other cluster
             let mut b = f64::INFINITY;
             for c in 0..self.n_clusters as i32 {
-                if c == ci { continue; }
+                if c == ci {
+                    continue;
+                }
                 let mut b_sum = 0.0;
                 let mut b_count = 0;
                 for j in 0..n {
@@ -75,7 +85,11 @@ impl ClusterResult {
 
 #[inline]
 fn euclidean(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
-    a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum::<f64>().sqrt()
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| (x - y).powi(2))
+        .sum::<f64>()
+        .sqrt()
 }
 
 // ── K-Means ─────────────────────────────────────────────────────────
@@ -99,16 +113,30 @@ pub struct KMeans {
 }
 
 impl KMeans {
-    pub fn new(k: usize) -> Self { Self { k, max_iter: 300, seed: 42 } }
-    pub fn with_max_iter(mut self, n: usize) -> Self { self.max_iter = n; self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn new(k: usize) -> Self {
+        Self {
+            k,
+            max_iter: 300,
+            seed: 42,
+        }
+    }
+    pub fn with_max_iter(mut self, n: usize) -> Self {
+        self.max_iter = n;
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 
     pub fn fit(&self, features: &Array2<f64>) -> Result<ClusterResult> {
         let n = features.nrows();
         let p = features.ncols();
         if n < self.k {
-            return Err(SmeltError::InvalidParameter(
-                format!("k={} > n_samples={}", self.k, n)));
+            return Err(SmeltError::InvalidParameter(format!(
+                "k={} > n_samples={}",
+                self.k, n
+            )));
         }
 
         let mut rng = StdRng::seed_from_u64(self.seed);
@@ -117,7 +145,9 @@ impl KMeans {
         let mut centroid_idx: Vec<usize> = Vec::with_capacity(self.k);
         while centroid_idx.len() < self.k {
             let idx = rng.random_range(0..n);
-            if !centroid_idx.contains(&idx) { centroid_idx.push(idx); }
+            if !centroid_idx.contains(&idx) {
+                centroid_idx.push(idx);
+            }
         }
         let mut centroids = Array2::zeros((self.k, p));
         for (c, &idx) in centroid_idx.iter().enumerate() {
@@ -134,29 +164,45 @@ impl KMeans {
                 let mut best_d = f64::INFINITY;
                 for c in 0..self.k {
                     let d = euclidean(features.row(i), centroids.row(c));
-                    if d < best_d { best_d = d; best_c = c; }
+                    if d < best_d {
+                        best_d = d;
+                        best_c = c;
+                    }
                 }
-                if labels[i] != best_c as i32 { changed = true; labels[i] = best_c as i32; }
+                if labels[i] != best_c as i32 {
+                    changed = true;
+                    labels[i] = best_c as i32;
+                }
             }
 
-            if !changed { break; }
+            if !changed {
+                break;
+            }
 
             // Update centroids
             let mut sums: Array2<f64> = Array2::zeros((self.k, p));
             let mut counts = vec![0usize; self.k];
             for i in 0..n {
                 let c = labels[i] as usize;
-                for j in 0..p { sums[[c, j]] += features[[i, j]]; }
+                for j in 0..p {
+                    sums[[c, j]] += features[[i, j]];
+                }
                 counts[c] += 1;
             }
             for c in 0..self.k {
                 if counts[c] > 0 {
-                    for j in 0..p { centroids[[c, j]] = sums[[c, j]] / counts[c] as f64; }
+                    for j in 0..p {
+                        centroids[[c, j]] = sums[[c, j]] / counts[c] as f64;
+                    }
                 }
             }
         }
 
-        Ok(ClusterResult { labels, n_clusters: self.k, centroids: Some(centroids) })
+        Ok(ClusterResult {
+            labels,
+            n_clusters: self.k,
+            centroids: Some(centroids),
+        })
     }
 }
 
@@ -183,7 +229,9 @@ pub struct DBSCAN {
 }
 
 impl DBSCAN {
-    pub fn new(eps: f64, min_pts: usize) -> Self { Self { eps, min_pts } }
+    pub fn new(eps: f64, min_pts: usize) -> Self {
+        Self { eps, min_pts }
+    }
 
     pub fn fit(&self, features: &Array2<f64>) -> Result<ClusterResult> {
         let n = features.nrows();
@@ -191,7 +239,9 @@ impl DBSCAN {
         let mut cluster_id = 0i32;
 
         for i in 0..n {
-            if labels[i] != -1 { continue; } // already assigned
+            if labels[i] != -1 {
+                continue;
+            } // already assigned
 
             let neighbors = self.range_query(features, i);
             if neighbors.len() < self.min_pts {
@@ -218,10 +268,8 @@ impl DBSCAN {
                 let q_neighbors = self.range_query(features, q);
                 if q_neighbors.len() >= self.min_pts {
                     for &nn in &q_neighbors {
-                        if labels[nn] == -1 || labels[nn] == -1 {
-                            if !seed_set.contains(&nn) {
-                                seed_set.push(nn);
-                            }
+                        if labels[nn] == -1 && !seed_set.contains(&nn) {
+                            seed_set.push(nn);
                         }
                     }
                 }
@@ -231,8 +279,16 @@ impl DBSCAN {
             cluster_id += 1;
         }
 
-        let n_clusters = if cluster_id > 0 { cluster_id as usize } else { 0 };
-        Ok(ClusterResult { labels, n_clusters, centroids: None })
+        let n_clusters = if cluster_id > 0 {
+            cluster_id as usize
+        } else {
+            0
+        };
+        Ok(ClusterResult {
+            labels,
+            n_clusters,
+            centroids: None,
+        })
     }
 
     fn range_query(&self, features: &Array2<f64>, point: usize) -> Vec<usize> {

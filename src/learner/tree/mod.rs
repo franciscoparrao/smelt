@@ -1,9 +1,9 @@
 //! Shared tree-building infrastructure for DecisionTree, RandomForest, and GradientBoosting.
 
 pub mod decision_tree;
-pub mod random_forest;
-pub mod gradient_boosting;
 pub mod extra_trees;
+pub mod gradient_boosting;
+pub mod random_forest;
 
 use ndarray::{ArrayView1, ArrayView2};
 use rand::Rng;
@@ -11,7 +11,7 @@ use rand::seq::index::sample;
 
 // --- Core types ---
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub enum Node {
@@ -34,7 +34,12 @@ impl Node {
     pub(crate) fn predict_one(&self, sample: ArrayView1<f64>) -> &LeafValue {
         match self {
             Node::Leaf(value) => value,
-            Node::Split { feature, threshold, left, right } => {
+            Node::Split {
+                feature,
+                threshold,
+                left,
+                right,
+            } => {
                 if sample[*feature] <= *threshold {
                     left.predict_one(sample)
                 } else {
@@ -112,15 +117,15 @@ impl TreeBuilder {
         if let Some((feat, threshold, left_idx, right_idx, gain)) =
             self.best_split_classif(features, target, indices, n_classes, &candidates, rng)
         {
-            if left_idx.len() < self.min_samples_leaf
-                || right_idx.len() < self.min_samples_leaf
-            {
+            if left_idx.len() < self.min_samples_leaf || right_idx.len() < self.min_samples_leaf {
                 return Node::Leaf(classification_leaf(target, indices, n_classes));
             }
 
             self.feature_importances[feat] += gain * indices.len() as f64;
-            let left = self.build_classifier(features, target, &left_idx, n_classes, depth + 1, rng);
-            let right = self.build_classifier(features, target, &right_idx, n_classes, depth + 1, rng);
+            let left =
+                self.build_classifier(features, target, &left_idx, n_classes, depth + 1, rng);
+            let right =
+                self.build_classifier(features, target, &right_idx, n_classes, depth + 1, rng);
 
             Node::Split {
                 feature: feat,
@@ -152,9 +157,7 @@ impl TreeBuilder {
         if let Some((feat, threshold, left_idx, right_idx, gain)) =
             self.best_split_regress(features, target, indices, &candidates, rng)
         {
-            if left_idx.len() < self.min_samples_leaf
-                || right_idx.len() < self.min_samples_leaf
-            {
+            if left_idx.len() < self.min_samples_leaf || right_idx.len() < self.min_samples_leaf {
                 return Node::Leaf(regression_leaf(target, indices));
             }
 
@@ -190,7 +193,8 @@ impl TreeBuilder {
         for &feat in candidate_features {
             let mut sorted: Vec<usize> = indices.to_vec();
             sorted.sort_by(|&a, &b| {
-                features[[a, feat]].partial_cmp(&features[[b, feat]])
+                features[[a, feat]]
+                    .partial_cmp(&features[[b, feat]])
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
@@ -202,14 +206,20 @@ impl TreeBuilder {
                     continue;
                 }
                 let threshold = rng.random_range(min_val..max_val);
-                match sorted.iter().position(|&idx| features[[idx, feat]] > threshold) {
+                match sorted
+                    .iter()
+                    .position(|&idx| features[[idx, feat]] > threshold)
+                {
                     Some(pos) if pos > 0 => vec![pos],
                     _ => continue,
                 }
             } else {
                 // Standard: all valid split points
                 (1..sorted.len())
-                    .filter(|&i| (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs() >= f64::EPSILON)
+                    .filter(|&i| {
+                        (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs()
+                            >= f64::EPSILON
+                    })
                     .collect()
             };
 
@@ -223,7 +233,8 @@ impl TreeBuilder {
 
                 if gain > best_gain {
                     best_gain = gain;
-                    let threshold = (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
+                    let threshold =
+                        (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
                     best = Some((feat, threshold, left_idx.to_vec(), right_idx.to_vec(), gain));
                 }
             }
@@ -248,7 +259,8 @@ impl TreeBuilder {
         for &feat in candidate_features {
             let mut sorted: Vec<usize> = indices.to_vec();
             sorted.sort_by(|&a, &b| {
-                features[[a, feat]].partial_cmp(&features[[b, feat]])
+                features[[a, feat]]
+                    .partial_cmp(&features[[b, feat]])
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
@@ -259,13 +271,19 @@ impl TreeBuilder {
                     continue;
                 }
                 let threshold = rng.random_range(min_val..max_val);
-                match sorted.iter().position(|&idx| features[[idx, feat]] > threshold) {
+                match sorted
+                    .iter()
+                    .position(|&idx| features[[idx, feat]] > threshold)
+                {
                     Some(pos) if pos > 0 => vec![pos],
                     _ => continue,
                 }
             } else {
                 (1..sorted.len())
-                    .filter(|&i| (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs() >= f64::EPSILON)
+                    .filter(|&i| {
+                        (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs()
+                            >= f64::EPSILON
+                    })
                     .collect()
             };
 
@@ -279,7 +297,8 @@ impl TreeBuilder {
 
                 if gain > best_gain {
                     best_gain = gain;
-                    let threshold = (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
+                    let threshold =
+                        (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
                     best = Some((feat, threshold, left_idx.to_vec(), right_idx.to_vec(), gain));
                 }
             }
@@ -302,22 +321,38 @@ pub(crate) fn gini(target: &[usize], indices: &[usize], n_classes: usize) -> f64
         counts[target[i]] += 1;
     }
     let total = indices.len() as f64;
-    1.0 - counts.iter().map(|&c| (c as f64 / total).powi(2)).sum::<f64>()
+    1.0 - counts
+        .iter()
+        .map(|&c| (c as f64 / total).powi(2))
+        .sum::<f64>()
 }
 
 pub(crate) fn mse(target: &[f64], indices: &[usize]) -> f64 {
     let mean = indices.iter().map(|&i| target[i]).sum::<f64>() / indices.len() as f64;
-    indices.iter().map(|&i| (target[i] - mean).powi(2)).sum::<f64>() / indices.len() as f64
+    indices
+        .iter()
+        .map(|&i| (target[i] - mean).powi(2))
+        .sum::<f64>()
+        / indices.len() as f64
 }
 
-pub(crate) fn classification_leaf(target: &[usize], indices: &[usize], n_classes: usize) -> LeafValue {
+pub(crate) fn classification_leaf(
+    target: &[usize],
+    indices: &[usize],
+    n_classes: usize,
+) -> LeafValue {
     let mut counts = vec![0usize; n_classes];
     for &i in indices {
         counts[target[i]] += 1;
     }
     let total = indices.len() as f64;
     let probs: Vec<f64> = counts.iter().map(|&c| c as f64 / total).collect();
-    let predicted = counts.iter().enumerate().max_by_key(|&(_, &c)| c).unwrap().0;
+    let predicted = counts
+        .iter()
+        .enumerate()
+        .max_by_key(|&(_, &c)| c)
+        .unwrap()
+        .0;
     LeafValue::Class(predicted, probs)
 }
 

@@ -1,3 +1,7 @@
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::type_complexity)]
+
 //! # Smelt
 //!
 //! A machine learning framework for Rust, inspired by mlr3.
@@ -33,43 +37,59 @@
 //! assert!(acc > 0.0);
 //! ```
 
-pub mod task;
-pub mod learner;
-pub mod prediction;
-pub mod resample;
-pub mod measure;
 pub mod benchmark;
-pub mod preprocess;
-pub mod tuning;
-pub mod importance;
-pub mod conformal;
+pub mod benchmark_design;
 pub mod causal;
-pub mod survival;
 pub mod cluster;
+pub mod conformal;
+pub mod data;
+pub mod importance;
+pub mod learner;
+pub mod measure;
 pub mod multilabel;
 pub mod multioutput;
-pub mod benchmark_design;
-pub mod data;
+pub mod prediction;
+pub mod preprocess;
+pub mod resample;
 pub mod serialize;
+pub mod survival;
+pub mod task;
+pub mod tuning;
 
-pub mod validate;
 mod error;
+pub mod validate;
 
-pub use error::{SmeltError, Result};
+pub use error::{Result, SmeltError};
 
 /// Convenience re-exports for `use smelt_ml::prelude::*`
 pub mod prelude {
-    pub use crate::task::{Task, ClassificationTask, RegressionTask};
-    pub use crate::learner::{Learner, DecisionTree, KNearestNeighbors, LinearRegression, LogisticRegression, RandomForest, GradientBoosting, ExtraTrees, GaussianNB, Ridge, Lasso, ElasticNet, AdaBoost, LinearSVM, XGBoost, LightGBM, CatBoost, HoeffdingTree, DynamicEnsemble, GeoXGBoost, ObliqueTree, ObliqueForest, Stacking, QuantileGB, QuantileForest, EBM, Bagging};
-    pub use crate::prediction::Prediction;
-    pub use crate::resample::{Resample, CrossValidation, Holdout, SpatialBlockCV, SpatialBufferCV};
-    pub use crate::measure::{Measure, Accuracy, Precision, Recall, F1Score, LogLoss, AucRoc, Rmse, Mae, RSquared, Mape};
-    pub use crate::preprocess::{Transformer, StandardScaler, MinMaxScaler, Imputer, ImputeStrategy, OneHotEncoder, LabelEncoder, Smote, Adasyn, FilterSelector, PCA, RFE, Pipeline};
-    pub use crate::tuning::{GridSearch, RandomSearch, BayesianOptimizer, Hyperband, TuneResult, ParamDistribution};
-    pub use crate::cluster::{KMeans, DBSCAN, ClusterResult, IsolationForest};
-    pub use crate::importance::{FeatureImportance, permutation_importance_classif, permutation_importance_regress};
-    pub use crate::data::CsvLoader;
-    pub use crate::serialize::{SerializableModel, save_json, load_json};
     pub use crate::benchmark::{self, BenchmarkResult};
-    pub use crate::error::{SmeltError, Result};
+    pub use crate::cluster::{ClusterResult, DBSCAN, IsolationForest, KMeans};
+    pub use crate::data::CsvLoader;
+    pub use crate::error::{Result, SmeltError};
+    pub use crate::importance::{
+        FeatureImportance, permutation_importance_classif, permutation_importance_regress,
+    };
+    pub use crate::learner::{
+        AdaBoost, Bagging, CatBoost, DecisionTree, DynamicEnsemble, EBM, ElasticNet, ExtraTrees,
+        GaussianNB, GeoXGBoost, GradientBoosting, HoeffdingTree, KNearestNeighbors, Lasso, Learner,
+        LightGBM, LinearRegression, LinearSVM, LogisticRegression, ObliqueForest, ObliqueTree,
+        QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, XGBoost,
+    };
+    pub use crate::measure::{
+        Accuracy, AucRoc, F1Score, LogLoss, Mae, Mape, Measure, Precision, RSquared, Recall, Rmse,
+    };
+    pub use crate::prediction::Prediction;
+    pub use crate::preprocess::{
+        Adasyn, FilterSelector, ImputeStrategy, Imputer, LabelEncoder, MinMaxScaler, OneHotEncoder,
+        PCA, Pipeline, RFE, Smote, StandardScaler, Transformer,
+    };
+    pub use crate::resample::{
+        CrossValidation, Holdout, Resample, SpatialBlockCV, SpatialBufferCV,
+    };
+    pub use crate::serialize::{SerializableModel, load_json, save_json};
+    pub use crate::task::{ClassificationTask, RegressionTask, Task};
+    pub use crate::tuning::{
+        BayesianOptimizer, GridSearch, Hyperband, ParamDistribution, RandomSearch, TuneResult,
+    };
 }

@@ -1,9 +1,9 @@
 //! Spatial cross-validation strategies for geospatial data.
 
-use rand::seq::SliceRandom;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
 use super::Resample;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
 
 /// Spatial block cross-validation.
 ///
@@ -36,9 +36,11 @@ impl SpatialBlockCV {
 impl Resample for SpatialBlockCV {
     fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
         assert_eq!(
-            self.coords.len(), n_samples,
+            self.coords.len(),
+            n_samples,
             "coords length ({}) must match n_samples ({})",
-            self.coords.len(), n_samples
+            self.coords.len(),
+            n_samples
         );
 
         // Compute bounding box
@@ -57,7 +59,9 @@ impl Resample for SpatialBlockCV {
         let cell_h = (max_y - min_y + f64::EPSILON) / grid_size as f64;
 
         // Assign each sample to a cell, then cell to fold
-        let cell_assignments: Vec<usize> = self.coords.iter()
+        let cell_assignments: Vec<usize> = self
+            .coords
+            .iter()
             .map(|&(x, y)| {
                 let col = ((x - min_x) / cell_w).floor() as usize;
                 let row = ((y - min_y) / cell_h).floor() as usize;
@@ -104,7 +108,12 @@ pub struct SpatialBufferCV {
 
 impl SpatialBufferCV {
     pub fn new(n_folds: usize, coords: Vec<(f64, f64)>, buffer_distance: f64) -> Self {
-        Self { n_folds, coords, buffer_distance, seed: 42 }
+        Self {
+            n_folds,
+            coords,
+            buffer_distance,
+            seed: 42,
+        }
     }
 
     pub fn with_seed(mut self, seed: u64) -> Self {
@@ -120,9 +129,11 @@ fn euclidean_dist(a: (f64, f64), b: (f64, f64)) -> f64 {
 impl Resample for SpatialBufferCV {
     fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
         assert_eq!(
-            self.coords.len(), n_samples,
+            self.coords.len(),
+            n_samples,
             "coords length ({}) must match n_samples ({})",
-            self.coords.len(), n_samples
+            self.coords.len(),
+            n_samples
         );
 
         // Standard k-fold shuffle
@@ -135,11 +146,16 @@ impl Resample for SpatialBufferCV {
         (0..self.n_folds)
             .map(|fold| {
                 let test_start = fold * fold_size;
-                let test_end = if fold == self.n_folds - 1 { n_samples } else { test_start + fold_size };
+                let test_end = if fold == self.n_folds - 1 {
+                    n_samples
+                } else {
+                    test_start + fold_size
+                };
                 let test: Vec<usize> = indices[test_start..test_end].to_vec();
 
                 // Remove train samples within buffer_distance of any test sample
-                let train: Vec<usize> = indices[..test_start].iter()
+                let train: Vec<usize> = indices[..test_start]
+                    .iter()
                     .chain(indices[test_end..].iter())
                     .copied()
                     .filter(|&train_idx| {

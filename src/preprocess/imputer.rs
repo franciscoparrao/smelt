@@ -1,8 +1,8 @@
 //! Missing value imputation.
 
-use ndarray::Array2;
-use crate::{SmeltError, Result};
 use super::Transformer;
+use crate::{Result, SmeltError};
+use ndarray::Array2;
 
 /// Strategy for filling missing values.
 #[derive(Clone)]
@@ -36,12 +36,21 @@ pub struct Imputer {
 
 impl Imputer {
     pub fn new(strategy: ImputeStrategy) -> Self {
-        Self { strategy, fill_values: None }
+        Self {
+            strategy,
+            fill_values: None,
+        }
     }
 
-    pub fn mean() -> Self { Self::new(ImputeStrategy::Mean) }
-    pub fn median() -> Self { Self::new(ImputeStrategy::Median) }
-    pub fn constant(value: f64) -> Self { Self::new(ImputeStrategy::Constant(value)) }
+    pub fn mean() -> Self {
+        Self::new(ImputeStrategy::Mean)
+    }
+    pub fn median() -> Self {
+        Self::new(ImputeStrategy::Median)
+    }
+    pub fn constant(value: f64) -> Self {
+        Self::new(ImputeStrategy::Constant(value))
+    }
 }
 
 fn compute_median(values: &mut [f64]) -> f64 {
@@ -58,7 +67,9 @@ fn compute_median(values: &mut [f64]) -> f64 {
 }
 
 impl Transformer for Imputer {
-    fn id(&self) -> &str { "imputer" }
+    fn id(&self) -> &str {
+        "imputer"
+    }
 
     fn fit(&mut self, features: &Array2<f64>) -> Result<()> {
         let ncols = features.ncols();
@@ -107,5 +118,7 @@ impl Transformer for Imputer {
         Ok(result)
     }
 
-    fn clone_box(&self) -> Box<dyn Transformer> { Box::new(self.clone()) }
+    fn clone_box(&self) -> Box<dyn Transformer> {
+        Box::new(self.clone())
+    }
 }

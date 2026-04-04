@@ -3,9 +3,9 @@
 //! Or for perf stat: perf stat cargo run --release --example profile_scaling -- 10000
 
 use ndarray::Array2;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
 use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use smelt_ml::prelude::*;
 
 fn sample_normal(rng: &mut StdRng) -> f64 {
@@ -15,7 +15,8 @@ fn sample_normal(rng: &mut StdRng) -> f64 {
 }
 
 fn main() {
-    let n: usize = std::env::args().nth(1)
+    let n: usize = std::env::args()
+        .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(10_000);
 
@@ -27,10 +28,12 @@ fn main() {
         }
     }
     let weights: Vec<f64> = (0..10).map(|_| sample_normal(&mut rng)).collect();
-    let target: Vec<usize> = (0..n).map(|i| {
-        let s: f64 = (0..10).map(|j| features[[i, j]] * weights[j]).sum();
-        if s > 0.0 { 1 } else { 0 }
-    }).collect();
+    let target: Vec<usize> = (0..n)
+        .map(|i| {
+            let s: f64 = (0..10).map(|j| features[[i, j]] * weights[j]).sum();
+            if s > 0.0 { 1 } else { 0 }
+        })
+        .collect();
 
     let task = ClassificationTask::new("prof", features, target).unwrap();
     let mut xgb = XGBoost::new()

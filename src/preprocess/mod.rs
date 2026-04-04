@@ -1,29 +1,29 @@
 //! Preprocessing: feature scaling, encoding, imputation, and pipeline composition.
 
-pub mod scaler;
-pub mod imputer;
-pub mod encoder;
-pub mod label_encoder;
-pub mod smote;
 pub mod adasyn;
+pub mod encoder;
 pub mod filter;
+pub mod imputer;
+pub mod label_encoder;
 pub mod pca;
-pub mod rfe;
 pub mod pipeline;
+pub mod rfe;
+pub mod scaler;
+pub mod smote;
 
-use ndarray::Array2;
 use crate::Result;
+use ndarray::Array2;
 
-pub use scaler::{StandardScaler, MinMaxScaler};
-pub use imputer::{Imputer, ImputeStrategy};
-pub use encoder::OneHotEncoder;
-pub use label_encoder::LabelEncoder;
-pub use smote::Smote;
 pub use adasyn::Adasyn;
+pub use encoder::OneHotEncoder;
 pub use filter::FilterSelector;
+pub use imputer::{ImputeStrategy, Imputer};
+pub use label_encoder::LabelEncoder;
 pub use pca::PCA;
-pub use rfe::RFE;
 pub use pipeline::Pipeline;
+pub use rfe::RFE;
+pub use scaler::{MinMaxScaler, StandardScaler};
+pub use smote::Smote;
 
 /// Trait for feature transformers (scalers, encoders, imputers).
 ///
@@ -52,7 +52,11 @@ pub trait Transformer: Send + Sync {
     }
 
     /// Supervised fit + transform.
-    fn fit_transform_supervised(&mut self, features: &Array2<f64>, target: &[f64]) -> Result<Array2<f64>> {
+    fn fit_transform_supervised(
+        &mut self,
+        features: &Array2<f64>,
+        target: &[f64],
+    ) -> Result<Array2<f64>> {
         self.fit_supervised(features, target)?;
         self.transform(features)
     }

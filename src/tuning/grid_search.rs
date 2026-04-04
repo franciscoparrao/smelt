@@ -1,12 +1,12 @@
 //! Exhaustive grid search over hyperparameter combinations.
 
-use crate::task::{ClassificationTask, RegressionTask};
+use super::{ParamGrid, ParamSet, TuneResult, cartesian_product};
+use crate::Result;
+use crate::benchmark;
 use crate::learner::Learner;
 use crate::measure::Measure;
 use crate::resample::Resample;
-use crate::benchmark;
-use crate::Result;
-use super::{ParamSet, ParamGrid, TuneResult, cartesian_product};
+use crate::task::{ClassificationTask, RegressionTask};
 
 /// Exhaustive search over a grid of hyperparameter values.
 ///
@@ -71,7 +71,11 @@ impl GridSearch {
             results.push((params, mean_score));
         }
 
-        Ok(TuneResult::select_best(results, measure.id().to_string(), measure.maximize()))
+        Ok(TuneResult::select_best(
+            results,
+            measure.id().to_string(),
+            measure.maximize(),
+        ))
     }
 
     /// Tune for regression. Returns the best hyperparameter configuration.
@@ -91,6 +95,10 @@ impl GridSearch {
             results.push((params, mean_score));
         }
 
-        Ok(TuneResult::select_best(results, measure.id().to_string(), measure.maximize()))
+        Ok(TuneResult::select_best(
+            results,
+            measure.id().to_string(),
+            measure.maximize(),
+        ))
     }
 }

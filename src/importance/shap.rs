@@ -6,11 +6,11 @@
 //! Reference: Lundberg, S. et al. (2020). From local explanations to global
 //! understanding with explainable AI for trees. Nature Machine Intelligence.
 
-use ndarray::Array2;
-use crate::task::{RegressionTask, ClassificationTask, Task};
+use crate::Result;
 use crate::learner::TrainedModel;
 use crate::prediction::Prediction;
-use crate::Result;
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use ndarray::Array2;
 
 /// SHAP values for a single prediction.
 #[derive(Debug, Clone)]
@@ -114,7 +114,9 @@ pub fn tree_shap_regress(
                 let mut x_with = features.row(bg_idx).to_vec();
                 x_with[j] = features[[i, j]];
                 let mut arr_with = Array2::zeros((1, n_features));
-                for (k, &v) in x_with.iter().enumerate() { arr_with[[0, k]] = v; }
+                for (k, &v) in x_with.iter().enumerate() {
+                    arr_with[[0, k]] = v;
+                }
 
                 let p_with = model.predict(&arr_with)?;
                 if let Prediction::Regression { predicted, .. } = &p_with {
@@ -125,7 +127,9 @@ pub fn tree_shap_regress(
                 let mut x_without = features.row(i).to_vec();
                 x_without[j] = features[[bg_idx, j]];
                 let mut arr_without = Array2::zeros((1, n_features));
-                for (k, &v) in x_without.iter().enumerate() { arr_without[[0, k]] = v; }
+                for (k, &v) in x_without.iter().enumerate() {
+                    arr_without[[0, k]] = v;
+                }
 
                 let p_without = model.predict(&arr_without)?;
                 if let Prediction::Regression { predicted, .. } = &p_without {
@@ -152,12 +156,16 @@ pub fn tree_shap_regress(
         }
     }
     let n = explanations.len() as f64;
-    let global_importance: Vec<(String, f64)> = names.iter()
+    let global_importance: Vec<(String, f64)> = names
+        .iter()
         .zip(&global_imp)
         .map(|(name, &imp)| (name.clone(), imp / n))
         .collect();
 
-    Ok(ShapResult { explanations, global_importance })
+    Ok(ShapResult {
+        explanations,
+        global_importance,
+    })
 }
 
 /// Compute TreeSHAP values for classification (uses class probabilities).
@@ -179,9 +187,10 @@ pub fn tree_shap_classif(
     let bg_features = features.select(ndarray::Axis(0), &bg_indices);
     let bg_pred = model.predict(&bg_features)?;
     let base_value = match &bg_pred {
-        Prediction::Classification { probabilities: Some(probs), .. } => {
-            probs.iter().map(|p| p[target_class]).sum::<f64>() / probs.len() as f64
-        }
+        Prediction::Classification {
+            probabilities: Some(probs),
+            ..
+        } => probs.iter().map(|p| p[target_class]).sum::<f64>() / probs.len() as f64,
         _ => return Err(crate::SmeltError::Other("Requires probabilities".into())),
     };
 
@@ -190,7 +199,10 @@ pub fn tree_shap_classif(
     for i in 0..n_samples {
         let pred_i = model.predict(&features.select(ndarray::Axis(0), &[i]))?;
         let prediction = match &pred_i {
-            Prediction::Classification { probabilities: Some(probs), .. } => probs[0][target_class],
+            Prediction::Classification {
+                probabilities: Some(probs),
+                ..
+            } => probs[0][target_class],
             _ => 0.0,
         };
 
@@ -204,15 +216,27 @@ pub fn tree_shap_classif(
                 let mut x_with = features.row(bg_idx).to_vec();
                 x_with[j] = features[[i, j]];
                 let mut arr = Array2::zeros((1, n_features));
-                for (k, &v) in x_with.iter().enumerate() { arr[[0, k]] = v; }
-                if let Prediction::Classification { probabilities: Some(probs), .. } = &model.predict(&arr)? {
+                for (k, &v) in x_with.iter().enumerate() {
+                    arr[[0, k]] = v;
+                }
+                if let Prediction::Classification {
+                    probabilities: Some(probs),
+                    ..
+                } = &model.predict(&arr)?
+                {
                     with_feature += probs[0][target_class];
                 }
 
                 let mut x_without = features.row(i).to_vec();
                 x_without[j] = features[[bg_idx, j]];
-                for (k, &v) in x_without.iter().enumerate() { arr[[0, k]] = v; }
-                if let Prediction::Classification { probabilities: Some(probs), .. } = &model.predict(&arr)? {
+                for (k, &v) in x_without.iter().enumerate() {
+                    arr[[0, k]] = v;
+                }
+                if let Prediction::Classification {
+                    probabilities: Some(probs),
+                    ..
+                } = &model.predict(&arr)?
+                {
                     without_feature += probs[0][target_class];
                 }
             }
@@ -221,16 +245,28 @@ pub fn tree_shap_classif(
         }
 
         explanations.push(ShapValues {
-            base_value, values: shap_values,
-            feature_names: names.clone(), prediction,
+            base_value,
+            values: shap_values,
+            feature_names: names.clone(),
+            prediction,
         });
     }
 
     let mut global_imp = vec![0.0; n_features];
-    for exp in &explanations { for (j, &v) in exp.values.iter().enumerate() { global_imp[j] += v.abs(); } }
+    for exp in &explanations {
+        for (j, &v) in exp.values.iter().enumerate() {
+            global_imp[j] += v.abs();
+        }
+    }
     let n = explanations.len() as f64;
-    let global_importance = names.iter().zip(&global_imp)
-        .map(|(name, &imp)| (name.clone(), imp / n)).collect();
+    let global_importance = names
+        .iter()
+        .zip(&global_imp)
+        .map(|(name, &imp)| (name.clone(), imp / n))
+        .collect();
 
-    Ok(ShapResult { explanations, global_importance })
+    Ok(ShapResult {
+        explanations,
+        global_importance,
+    })
 }

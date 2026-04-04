@@ -14,14 +14,14 @@
 //! - Athey, S., & Imbens, G. (2016). Recursive partitioning for heterogeneous causal effects. PNAS.
 //! - Wager, S., & Athey, S. (2018). Estimation and inference of heterogeneous treatment effects using random forests. JASA.
 
-use ndarray::{Array2, ArrayView1};
-use rand::seq::SliceRandom;
-use rand::Rng;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use rayon::prelude::*;
 use crate::Result;
 use crate::SmeltError;
+use ndarray::{Array2, ArrayView1};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
+use rayon::prelude::*;
 
 /// Estimated causal effect for a single observation.
 #[derive(Debug, Clone)]
@@ -100,12 +100,29 @@ impl Default for CausalForest {
 }
 
 impl CausalForest {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_n_estimators(mut self, n: usize) -> Self { self.n_estimators = n; self }
-    pub fn with_max_depth(mut self, d: usize) -> Self { self.max_depth = Some(d); self }
-    pub fn with_min_samples_leaf(mut self, n: usize) -> Self { self.min_samples_leaf = n; self }
-    pub fn with_honesty_fraction(mut self, f: f64) -> Self { self.honesty_fraction = f; self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_n_estimators(mut self, n: usize) -> Self {
+        self.n_estimators = n;
+        self
+    }
+    pub fn with_max_depth(mut self, d: usize) -> Self {
+        self.max_depth = Some(d);
+        self
+    }
+    pub fn with_min_samples_leaf(mut self, n: usize) -> Self {
+        self.min_samples_leaf = n;
+        self
+    }
+    pub fn with_honesty_fraction(mut self, f: f64) -> Self {
+        self.honesty_fraction = f;
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 
     /// Estimate heterogeneous treatment effects.
     ///
@@ -144,17 +161,23 @@ impl CausalForest {
                 sub_indices.truncate(sub_size);
 
                 // Honest split: training vs estimation
-                let split_point = (sub_indices.len() as f64 * (1.0 - self.honesty_fraction)) as usize;
+                let split_point =
+                    (sub_indices.len() as f64 * (1.0 - self.honesty_fraction)) as usize;
                 let train_idx = &sub_indices[..split_point];
                 let est_idx = &sub_indices[split_point..];
 
                 // Build causal tree on training indices
                 let mut importances = vec![0.0; n_features];
                 let root = build_causal_tree(
-                    features, treatment, outcome,
-                    train_idx, n_features,
-                    self.max_depth, self.min_samples_leaf,
-                    &mut importances, &mut rng,
+                    features,
+                    treatment,
+                    outcome,
+                    train_idx,
+                    n_features,
+                    self.max_depth,
+                    self.min_samples_leaf,
+                    &mut importances,
+                    &mut rng,
                 );
 
                 // Estimate tau using estimation indices (honest)
@@ -184,27 +207,34 @@ impl CausalForest {
         let mut total_importances = vec![0.0; n_features];
 
         for (_, imp) in &tree_results {
-            for (j, v) in imp.iter().enumerate() { total_importances[j] += v; }
+            for (j, v) in imp.iter().enumerate() {
+                total_importances[j] += v;
+            }
         }
 
         for i in 0..n_samples {
-            let tau_estimates: Vec<f64> = tree_results.iter()
+            let tau_estimates: Vec<f64> = tree_results
+                .iter()
                 .filter_map(|(effects, _)| effects[i])
                 .collect();
 
             if tau_estimates.is_empty() {
                 effects.push(CausalEffect {
-                    estimate: 0.0, std_error: f64::INFINITY,
-                    ci_lower: f64::NEG_INFINITY, ci_upper: f64::INFINITY,
+                    estimate: 0.0,
+                    std_error: f64::INFINITY,
+                    ci_lower: f64::NEG_INFINITY,
+                    ci_upper: f64::INFINITY,
                 });
                 continue;
             }
 
             let n = tau_estimates.len() as f64;
             let mean_tau = tau_estimates.iter().sum::<f64>() / n;
-            let var_tau = tau_estimates.iter()
+            let var_tau = tau_estimates
+                .iter()
                 .map(|&t| (t - mean_tau).powi(2))
-                .sum::<f64>() / n;
+                .sum::<f64>()
+                / n;
             let se = (var_tau / n).sqrt();
 
             effects.push(CausalEffect {
@@ -217,14 +247,19 @@ impl CausalForest {
 
         // ATE
         let ate = effects.iter().map(|e| e.estimate).sum::<f64>() / n_samples as f64;
-        let ate_var = effects.iter().map(|e| (e.estimate - ate).powi(2)).sum::<f64>()
+        let ate_var = effects
+            .iter()
+            .map(|e| (e.estimate - ate).powi(2))
+            .sum::<f64>()
             / (n_samples as f64 * n_samples as f64);
         let ate_se = ate_var.sqrt();
 
         // Feature importance
         let total_imp: f64 = total_importances.iter().sum();
         let feature_importance = if total_imp > 0.0 {
-            feature_names.iter().zip(&total_importances)
+            feature_names
+                .iter()
+                .zip(&total_importances)
                 .map(|(n, &v)| (n.clone(), v / total_imp))
                 .collect()
         } else {
@@ -232,7 +267,10 @@ impl CausalForest {
         };
 
         Ok(CausalForestResult {
-            effects, ate, ate_std_error: ate_se, feature_importance,
+            effects,
+            ate,
+            ate_std_error: ate_se,
+            feature_importance,
         })
     }
 }
@@ -321,8 +359,18 @@ fn build_causal_tree(
     importances: &mut Vec<f64>,
     rng: &mut impl Rng,
 ) -> CausalNode {
-    build_node(features, treatment, outcome, indices, n_features,
-        max_depth, min_samples_leaf, 0, importances, rng)
+    build_node(
+        features,
+        treatment,
+        outcome,
+        indices,
+        n_features,
+        max_depth,
+        min_samples_leaf,
+        0,
+        importances,
+        rng,
+    )
 }
 
 fn build_node(
@@ -342,9 +390,15 @@ fn build_node(
     // Stopping conditions
     if indices.len() < 2 * min_samples_leaf
         || max_depth.is_some_and(|d| depth >= d)
-        || n_treated < 2 || n_control < 2
+        || n_treated < 2
+        || n_control < 2
     {
-        return CausalNode { tau, n_treated, n_control, split: None };
+        return CausalNode {
+            tau,
+            n_treated,
+            n_control,
+            split: None,
+        };
     }
 
     // Find best split: maximize heterogeneity in tau
@@ -360,12 +414,15 @@ fn build_node(
 
     for &feat in &feat_indices[..n_try.min(n_features)] {
         let mut sorted: Vec<usize> = indices.to_vec();
-        sorted.sort_by(|&a, &b| features[[a, feat]]
-            .partial_cmp(&features[[b, feat]])
-            .unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|&a, &b| {
+            features[[a, feat]]
+                .partial_cmp(&features[[b, feat]])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         for s in min_samples_leaf..(sorted.len().saturating_sub(min_samples_leaf)) {
-            if (features[[sorted[s], feat]] - features[[sorted[s - 1], feat]]).abs() < f64::EPSILON {
+            if (features[[sorted[s], feat]] - features[[sorted[s - 1], feat]]).abs() < f64::EPSILON
+            {
                 continue;
             }
 
@@ -391,7 +448,8 @@ fn build_node(
 
             if criterion > best_criterion {
                 best_criterion = criterion;
-                let threshold = (features[[sorted[s - 1], feat]] + features[[sorted[s], feat]]) / 2.0;
+                let threshold =
+                    (features[[sorted[s - 1], feat]] + features[[sorted[s], feat]]) / 2.0;
                 best_split = Some((feat, threshold, left_idx.to_vec(), right_idx.to_vec()));
             }
         }
@@ -401,20 +459,48 @@ fn build_node(
         Some((feat, threshold, left_idx, right_idx)) => {
             importances[feat] += best_criterion * indices.len() as f64;
 
-            let left = build_node(features, treatment, outcome, &left_idx, n_features,
-                max_depth, min_samples_leaf, depth + 1, importances, rng);
-            let right = build_node(features, treatment, outcome, &right_idx, n_features,
-                max_depth, min_samples_leaf, depth + 1, importances, rng);
+            let left = build_node(
+                features,
+                treatment,
+                outcome,
+                &left_idx,
+                n_features,
+                max_depth,
+                min_samples_leaf,
+                depth + 1,
+                importances,
+                rng,
+            );
+            let right = build_node(
+                features,
+                treatment,
+                outcome,
+                &right_idx,
+                n_features,
+                max_depth,
+                min_samples_leaf,
+                depth + 1,
+                importances,
+                rng,
+            );
 
             CausalNode {
-                tau, n_treated, n_control,
+                tau,
+                n_treated,
+                n_control,
                 split: Some(CausalSplit {
-                    feature: feat, threshold,
+                    feature: feat,
+                    threshold,
                     left: Box::new(left),
                     right: Box::new(right),
                 }),
             }
         }
-        None => CausalNode { tau, n_treated, n_control, split: None },
+        None => CausalNode {
+            tau,
+            n_treated,
+            n_control,
+            split: None,
+        },
     }
 }

@@ -1,15 +1,15 @@
 //! Random search over hyperparameter distributions.
 
-use rand::Rng;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use crate::task::{ClassificationTask, RegressionTask};
+use super::{ParamDistribution, ParamSet, ParamSpace, TuneResult};
+use crate::Result;
+use crate::benchmark;
 use crate::learner::Learner;
 use crate::measure::Measure;
 use crate::resample::Resample;
-use crate::benchmark;
-use crate::Result;
-use super::{ParamSet, ParamSpace, ParamDistribution, TuneResult};
+use crate::task::{ClassificationTask, RegressionTask};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Random search over hyperparameter distributions.
 ///
@@ -77,9 +77,7 @@ impl RandomSearch {
         let mut params = ParamSet::new();
         for (name, dist) in &self.param_space {
             let value = match dist {
-                ParamDistribution::Uniform(low, high) => {
-                    rng.random_range(*low..=*high)
-                }
+                ParamDistribution::Uniform(low, high) => rng.random_range(*low..=*high),
                 ParamDistribution::LogUniform(low, high) => {
                     let log_low = low.log10();
                     let log_high = high.log10();
@@ -114,7 +112,11 @@ impl RandomSearch {
             results.push((params, mean_score));
         }
 
-        Ok(TuneResult::select_best(results, measure.id().to_string(), measure.maximize()))
+        Ok(TuneResult::select_best(
+            results,
+            measure.id().to_string(),
+            measure.maximize(),
+        ))
     }
 
     /// Tune for regression.
@@ -135,6 +137,10 @@ impl RandomSearch {
             results.push((params, mean_score));
         }
 
-        Ok(TuneResult::select_best(results, measure.id().to_string(), measure.maximize()))
+        Ok(TuneResult::select_best(
+            results,
+            measure.id().to_string(),
+            measure.maximize(),
+        ))
     }
 }

@@ -1,8 +1,8 @@
 //! Test CatBoost accuracy on high-cardinality categoricals
 use ndarray::Array2;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
 use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use smelt_ml::prelude::*;
 
 fn main() {
@@ -48,7 +48,9 @@ fn main() {
         .with_learning_rate(0.3)
         .with_cat_features(vec![5]);
     let model = cb.train_classif(&train_task).unwrap();
-    let pred = model.predict(&test_features).unwrap()
+    let pred = model
+        .predict(&test_features)
+        .unwrap()
         .with_truth_classif(test_target.clone());
     let acc = Accuracy.score(&pred).unwrap();
     println!("smelt CatBoost (cat_features=[5]): {:.3}", acc);
@@ -59,7 +61,9 @@ fn main() {
         .with_depth(6)
         .with_learning_rate(0.3);
     let model2 = cb2.train_classif(&train_task).unwrap();
-    let pred2 = model2.predict(&test_features).unwrap()
+    let pred2 = model2
+        .predict(&test_features)
+        .unwrap()
         .with_truth_classif(test_target.clone());
     let acc2 = Accuracy.score(&pred2).unwrap();
     println!("smelt CatBoost (numeric only):    {:.3}", acc2);

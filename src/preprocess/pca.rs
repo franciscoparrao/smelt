@@ -1,8 +1,8 @@
 //! Principal Component Analysis as a Transformer.
 
-use ndarray::Array2;
-use crate::{SmeltError, Result};
 use super::Transformer;
+use crate::{Result, SmeltError};
+use ndarray::Array2;
 
 /// PCA dimensionality reduction via eigendecomposition of the covariance matrix.
 ///
@@ -26,12 +26,18 @@ pub struct PCA {
 
 impl PCA {
     pub fn new(n_components: usize) -> Self {
-        Self { n_components, means: None, components: None }
+        Self {
+            n_components,
+            means: None,
+            components: None,
+        }
     }
 }
 
 impl Transformer for PCA {
-    fn id(&self) -> &str { "pca" }
+    fn id(&self) -> &str {
+        "pca"
+    }
 
     fn fit(&mut self, features: &Array2<f64>) -> Result<()> {
         let n = features.nrows() as f64;
@@ -39,9 +45,7 @@ impl Transformer for PCA {
         let nc = self.n_components.min(p);
 
         // Compute means
-        let means: Vec<f64> = (0..p)
-            .map(|j| features.column(j).sum() / n)
-            .collect();
+        let means: Vec<f64> = (0..p).map(|j| features.column(j).sum() / n).collect();
 
         // Center data
         let mut centered = features.clone();
@@ -70,7 +74,8 @@ impl Transformer for PCA {
 
         if features.ncols() != means.len() {
             return Err(SmeltError::DimensionMismatch {
-                expected: means.len(), got: features.ncols(),
+                expected: means.len(),
+                got: features.ncols(),
             });
         }
 
@@ -86,11 +91,16 @@ impl Transformer for PCA {
     }
 
     fn transform_names(&self, _names: &[String]) -> Result<Vec<String>> {
-        let nc = self.components.as_ref().map_or(self.n_components, |c| c.nrows());
+        let nc = self
+            .components
+            .as_ref()
+            .map_or(self.n_components, |c| c.nrows());
         Ok((0..nc).map(|i| format!("PC{}", i + 1)).collect())
     }
 
-    fn clone_box(&self) -> Box<dyn Transformer> { Box::new(self.clone()) }
+    fn clone_box(&self) -> Box<dyn Transformer> {
+        Box::new(self.clone())
+    }
 }
 
 /// Find top-k eigenvectors via power iteration with deflation.
@@ -106,14 +116,21 @@ fn power_iteration_deflation(matrix: &Array2<f64>, k: usize) -> Array2<f64> {
         for _ in 0..200 {
             let mv = mat.dot(&v);
             let norm = mv.iter().map(|&x| x * x).sum::<f64>().sqrt();
-            if norm < 1e-15 { break; }
+            if norm < 1e-15 {
+                break;
+            }
             let new_v = &mv / norm;
 
             // Check convergence
-            let diff: f64 = v.iter().zip(new_v.iter())
-                .map(|(a, b)| (a - b).powi(2)).sum::<f64>();
+            let diff: f64 = v
+                .iter()
+                .zip(new_v.iter())
+                .map(|(a, b)| (a - b).powi(2))
+                .sum::<f64>();
             v = new_v;
-            if diff < 1e-12 { break; }
+            if diff < 1e-12 {
+                break;
+            }
         }
 
         eigenvectors.row_mut(component).assign(&v);

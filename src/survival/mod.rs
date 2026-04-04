@@ -7,13 +7,13 @@
 //! - Ishwaran et al. (2008). Random survival forests. Annals of Applied Statistics.
 //! - Hothorn et al. (2006). Survival ensembles. Biostatistics.
 
-use ndarray::{Array2, ArrayView1};
-use rand::Rng;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use rayon::prelude::*;
 use crate::Result;
 use crate::SmeltError;
+use ndarray::{Array2, ArrayView1};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rayon::prelude::*;
 
 /// Survival observation: time and event indicator.
 #[derive(Debug, Clone, Copy)]
@@ -41,7 +41,9 @@ impl SurvivalPrediction {
     /// Predicted median survival time (time where S(t) = 0.5).
     pub fn median_survival(&self) -> Option<f64> {
         for (i, &s) in self.survival.iter().enumerate() {
-            if s <= 0.5 { return Some(self.times[i]); }
+            if s <= 0.5 {
+                return Some(self.times[i]);
+            }
         }
         None
     }
@@ -50,7 +52,9 @@ impl SurvivalPrediction {
     pub fn survival_at(&self, t: f64) -> f64 {
         let mut s = 1.0;
         for (i, &time) in self.times.iter().enumerate() {
-            if time > t { break; }
+            if time > t {
+                break;
+            }
             s = self.survival[i];
         }
         s
@@ -60,20 +64,25 @@ impl SurvivalPrediction {
 /// Concordance index (C-index): measures discrimination of survival model.
 /// C = P(risk_i > risk_j | T_i < T_j) for comparable pairs.
 /// Range [0, 1], 0.5 = random, 1.0 = perfect.
-pub fn concordance_index(
-    predictions: &[SurvivalPrediction],
-    events: &[SurvivalEvent],
-) -> f64 {
+pub fn concordance_index(predictions: &[SurvivalPrediction], events: &[SurvivalEvent]) -> f64 {
     let n = events.len();
     let mut concordant = 0.0;
     let mut total = 0.0;
 
     for i in 0..n {
-        if !events[i].event { continue; } // skip censored as reference
+        if !events[i].event {
+            continue;
+        } // skip censored as reference
         for j in 0..n {
-            if i == j { continue; }
-            if events[j].time < events[i].time { continue; } // j must survive longer
-            if events[j].time == events[i].time && !events[j].event { continue; }
+            if i == j {
+                continue;
+            }
+            if events[j].time < events[i].time {
+                continue;
+            } // j must survive longer
+            if events[j].time == events[i].time && !events[j].event {
+                continue;
+            }
 
             total += 1.0;
             if predictions[i].risk_score > predictions[j].risk_score {
@@ -90,18 +99,32 @@ pub fn concordance_index(
 // ── RSF Tree ────────────────────────────────────────────────────────
 
 enum RSFNode {
-    Leaf { hazards: Vec<(f64, f64)> }, // (time, cumulative_hazard) — Nelson-Aalen
-    Split { feature: usize, threshold: f64,
-            left: Box<RSFNode>, right: Box<RSFNode> },
+    Leaf {
+        hazards: Vec<(f64, f64)>,
+    }, // (time, cumulative_hazard) — Nelson-Aalen
+    Split {
+        feature: usize,
+        threshold: f64,
+        left: Box<RSFNode>,
+        right: Box<RSFNode>,
+    },
 }
 
 impl RSFNode {
     fn find_leaf(&self, row: ArrayView1<f64>) -> &[(f64, f64)] {
         match self {
             RSFNode::Leaf { hazards } => hazards,
-            RSFNode::Split { feature, threshold, left, right } => {
-                if row[*feature] <= *threshold { left.find_leaf(row) }
-                else { right.find_leaf(row) }
+            RSFNode::Split {
+                feature,
+                threshold,
+                left,
+                right,
+            } => {
+                if row[*feature] <= *threshold {
+                    left.find_leaf(row)
+                } else {
+                    right.find_leaf(row)
+                }
             }
         }
     }
@@ -110,21 +133,27 @@ impl RSFNode {
 /// Compute Nelson-Aalen cumulative hazard estimator.
 fn nelson_aalen(events: &[SurvivalEvent], indices: &[usize]) -> Vec<(f64, f64)> {
     // Collect event times and counts
-    let mut times: Vec<f64> = indices.iter()
+    let mut times: Vec<f64> = indices
+        .iter()
         .filter(|&&i| events[i].event)
         .map(|&i| events[i].time)
         .collect();
     times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     times.dedup();
 
-    if times.is_empty() { return vec![(0.0, 0.0)]; }
+    if times.is_empty() {
+        return vec![(0.0, 0.0)];
+    }
 
     let mut result = Vec::with_capacity(times.len());
     let mut cum_hazard = 0.0;
 
     for &t in &times {
         let at_risk = indices.iter().filter(|&&i| events[i].time >= t).count() as f64;
-        let n_events = indices.iter().filter(|&&i| events[i].time == t && events[i].event).count() as f64;
+        let n_events = indices
+            .iter()
+            .filter(|&&i| events[i].time == t && events[i].event)
+            .count() as f64;
 
         if at_risk > 0.0 {
             cum_hazard += n_events / at_risk;
@@ -136,11 +165,7 @@ fn nelson_aalen(events: &[SurvivalEvent], indices: &[usize]) -> Vec<(f64, f64)> 
 }
 
 /// Log-rank split criterion for RSF.
-fn log_rank_score(
-    events: &[SurvivalEvent],
-    left: &[usize],
-    right: &[usize],
-) -> f64 {
+fn log_rank_score(events: &[SurvivalEvent], left: &[usize], right: &[usize]) -> f64 {
     let all: Vec<usize> = left.iter().chain(right.iter()).copied().collect();
     let mut times: Vec<f64> = all.iter().map(|&i| events[i].time).collect();
     times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -151,15 +176,23 @@ fn log_rank_score(
     let mut var = 0.0;
 
     for &t in &times {
-        let d_left = left.iter().filter(|&&i| events[i].time == t && events[i].event).count() as f64;
-        let d_right = right.iter().filter(|&&i| events[i].time == t && events[i].event).count() as f64;
+        let d_left = left
+            .iter()
+            .filter(|&&i| events[i].time == t && events[i].event)
+            .count() as f64;
+        let d_right = right
+            .iter()
+            .filter(|&&i| events[i].time == t && events[i].event)
+            .count() as f64;
         let n_left = left.iter().filter(|&&i| events[i].time >= t).count() as f64;
         let n_right = right.iter().filter(|&&i| events[i].time >= t).count() as f64;
 
         let d = d_left + d_right;
         let n = n_left + n_right;
 
-        if n < 2.0 { continue; }
+        if n < 2.0 {
+            continue;
+        }
 
         obs_left += d_left;
         exp_left += n_left * d / n;
@@ -169,7 +202,11 @@ fn log_rank_score(
         }
     }
 
-    if var > 0.0 { (obs_left - exp_left).powi(2) / var } else { 0.0 }
+    if var > 0.0 {
+        (obs_left - exp_left).powi(2) / var
+    } else {
+        0.0
+    }
 }
 
 fn build_rsf_tree(
@@ -188,7 +225,9 @@ fn build_rsf_tree(
         || max_depth.is_some_and(|d| depth >= d)
         || indices.iter().filter(|&&i| events[i].event).count() < 2
     {
-        return RSFNode::Leaf { hazards: nelson_aalen(events, indices) };
+        return RSFNode::Leaf {
+            hazards: nelson_aalen(events, indices),
+        };
     }
 
     let n_try = ((n_features as f64).sqrt().ceil() as usize).max(1);
@@ -203,11 +242,15 @@ fn build_rsf_tree(
 
     for &feat in &feat_idx[..n_try.min(n_features)] {
         let mut sorted: Vec<usize> = indices.to_vec();
-        sorted.sort_by(|&a, &b| features[[a, feat]].partial_cmp(&features[[b, feat]])
-            .unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|&a, &b| {
+            features[[a, feat]]
+                .partial_cmp(&features[[b, feat]])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         for s in min_node_size..(n.saturating_sub(min_node_size)) {
-            if (features[[sorted[s], feat]] - features[[sorted[s-1], feat]]).abs() < f64::EPSILON {
+            if (features[[sorted[s], feat]] - features[[sorted[s - 1], feat]]).abs() < f64::EPSILON
+            {
                 continue;
             }
             let left = &sorted[..s];
@@ -216,7 +259,8 @@ fn build_rsf_tree(
 
             if score > best_score {
                 best_score = score;
-                let threshold = (features[[sorted[s-1], feat]] + features[[sorted[s], feat]]) / 2.0;
+                let threshold =
+                    (features[[sorted[s - 1], feat]] + features[[sorted[s], feat]]) / 2.0;
                 best_split = Some((feat, threshold, left.to_vec(), right.to_vec()));
             }
         }
@@ -224,11 +268,36 @@ fn build_rsf_tree(
 
     match best_split {
         Some((feat, threshold, left_idx, right_idx)) => {
-            let left = build_rsf_tree(features, events, &left_idx, max_depth, min_node_size, n_features, depth+1, rng);
-            let right = build_rsf_tree(features, events, &right_idx, max_depth, min_node_size, n_features, depth+1, rng);
-            RSFNode::Split { feature: feat, threshold, left: Box::new(left), right: Box::new(right) }
+            let left = build_rsf_tree(
+                features,
+                events,
+                &left_idx,
+                max_depth,
+                min_node_size,
+                n_features,
+                depth + 1,
+                rng,
+            );
+            let right = build_rsf_tree(
+                features,
+                events,
+                &right_idx,
+                max_depth,
+                min_node_size,
+                n_features,
+                depth + 1,
+                rng,
+            );
+            RSFNode::Split {
+                feature: feat,
+                threshold,
+                left: Box::new(left),
+                right: Box::new(right),
+            }
         }
-        None => RSFNode::Leaf { hazards: nelson_aalen(events, indices) },
+        None => RSFNode::Leaf {
+            hazards: nelson_aalen(events, indices),
+        },
     }
 }
 
@@ -270,16 +339,35 @@ pub struct RandomSurvivalForest {
 
 impl Default for RandomSurvivalForest {
     fn default() -> Self {
-        Self { n_estimators: 100, max_depth: None, min_node_size: 6, seed: 42 }
+        Self {
+            n_estimators: 100,
+            max_depth: None,
+            min_node_size: 6,
+            seed: 42,
+        }
     }
 }
 
 impl RandomSurvivalForest {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_n_estimators(mut self, n: usize) -> Self { self.n_estimators = n; self }
-    pub fn with_max_depth(mut self, d: usize) -> Self { self.max_depth = Some(d); self }
-    pub fn with_min_node_size(mut self, n: usize) -> Self { self.min_node_size = n; self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_n_estimators(mut self, n: usize) -> Self {
+        self.n_estimators = n;
+        self
+    }
+    pub fn with_max_depth(mut self, d: usize) -> Self {
+        self.max_depth = Some(d);
+        self
+    }
+    pub fn with_min_node_size(mut self, n: usize) -> Self {
+        self.min_node_size = n;
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 
     /// Fit the forest and predict survival functions for each sample.
     pub fn fit_predict(
@@ -291,7 +379,10 @@ impl RandomSurvivalForest {
         let nf = features.ncols();
 
         if events.len() != n {
-            return Err(SmeltError::DimensionMismatch { expected: n, got: events.len() });
+            return Err(SmeltError::DimensionMismatch {
+                expected: n,
+                got: events.len(),
+            });
         }
 
         // Build trees
@@ -300,8 +391,16 @@ impl RandomSurvivalForest {
             .map(|i| {
                 let mut rng = StdRng::seed_from_u64(self.seed.wrapping_add(i as u64));
                 let indices: Vec<usize> = (0..n).map(|_| rng.random_range(0..n)).collect();
-                build_rsf_tree(features, events, &indices, self.max_depth,
-                    self.min_node_size, nf, 0, &mut rng)
+                build_rsf_tree(
+                    features,
+                    events,
+                    &indices,
+                    self.max_depth,
+                    self.min_node_size,
+                    nf,
+                    0,
+                    &mut rng,
+                )
             })
             .collect();
 
@@ -325,14 +424,19 @@ impl RandomSurvivalForest {
                     // Find cumulative hazard at time t in this tree's leaf
                     let mut h = 0.0;
                     for &(ht, hv) in leaf_hazards {
-                        if ht <= t { h = hv; } else { break; }
+                        if ht <= t {
+                            h = hv;
+                        } else {
+                            break;
+                        }
                     }
                     cum_hazard_at_times[ti] += h;
                 }
             }
 
             let n_trees = self.n_estimators as f64;
-            let cumulative_hazard: Vec<f64> = cum_hazard_at_times.iter().map(|&h| h / n_trees).collect();
+            let cumulative_hazard: Vec<f64> =
+                cum_hazard_at_times.iter().map(|&h| h / n_trees).collect();
             let survival: Vec<f64> = cumulative_hazard.iter().map(|&h| (-h).exp()).collect();
             let risk_score = cumulative_hazard.last().copied().unwrap_or(0.0);
 

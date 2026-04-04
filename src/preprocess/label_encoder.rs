@@ -1,7 +1,7 @@
 //! Label encoding: maps string labels to integer indices.
 
+use crate::{Result, SmeltError};
 use std::collections::HashMap;
-use crate::{SmeltError, Result};
 
 /// Maps string labels to integer indices and back.
 ///
@@ -28,28 +28,35 @@ pub struct LabelEncoder {
 impl LabelEncoder {
     /// Fit the encoder on a set of labels.
     pub fn fit(labels: &[impl AsRef<str>]) -> Self {
-        let mut unique: Vec<String> = labels.iter()
+        let mut unique: Vec<String> = labels
+            .iter()
             .map(|l| l.as_ref().to_string())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
         unique.sort();
-        let class_to_index = unique.iter()
+        let class_to_index = unique
+            .iter()
             .enumerate()
             .map(|(i, c)| (c.clone(), i))
             .collect();
-        Self { classes: unique, class_to_index }
+        Self {
+            classes: unique,
+            class_to_index,
+        }
     }
 
     /// Encode labels to integer indices.
     pub fn encode(&self, labels: &[impl AsRef<str>]) -> Result<Vec<usize>> {
-        labels.iter().map(|l| {
-            self.class_to_index.get(l.as_ref())
-                .copied()
-                .ok_or_else(|| SmeltError::Other(
-                    format!("unknown label: {}", l.as_ref()),
-                ))
-        }).collect()
+        labels
+            .iter()
+            .map(|l| {
+                self.class_to_index
+                    .get(l.as_ref())
+                    .copied()
+                    .ok_or_else(|| SmeltError::Other(format!("unknown label: {}", l.as_ref())))
+            })
+            .collect()
     }
 
     /// Decode integer indices back to labels.
@@ -58,8 +65,12 @@ impl LabelEncoder {
     }
 
     /// Get the list of classes in order.
-    pub fn classes(&self) -> &[String] { &self.classes }
+    pub fn classes(&self) -> &[String] {
+        &self.classes
+    }
 
     /// Number of classes.
-    pub fn n_classes(&self) -> usize { self.classes.len() }
+    pub fn n_classes(&self) -> usize {
+        self.classes.len()
+    }
 }

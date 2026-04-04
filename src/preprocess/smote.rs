@@ -2,12 +2,12 @@
 //!
 //! Generates synthetic samples for minority classes to address class imbalance.
 
+use crate::Result;
+use crate::task::{ClassificationTask, Task};
 use ndarray::Array2;
 use rand::Rng;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
-use crate::task::{ClassificationTask, Task};
-use crate::Result;
+use rand::rngs::StdRng;
 
 /// SMOTE oversampler for handling class imbalance.
 ///
@@ -37,13 +37,26 @@ pub struct Smote {
 }
 
 impl Default for Smote {
-    fn default() -> Self { Self { k_neighbors: 5, seed: 42 } }
+    fn default() -> Self {
+        Self {
+            k_neighbors: 5,
+            seed: 42,
+        }
+    }
 }
 
 impl Smote {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_k_neighbors(mut self, k: usize) -> Self { self.k_neighbors = k; self }
-    pub fn with_seed(mut self, seed: u64) -> Self { self.seed = seed; self }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_k_neighbors(mut self, k: usize) -> Self {
+        self.k_neighbors = k;
+        self
+    }
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
 
     /// Balance the task by oversampling minority classes.
     /// Returns a new ClassificationTask with synthetic samples added.
@@ -55,27 +68,35 @@ impl Smote {
 
         // Count samples per class
         let mut class_counts = vec![0usize; n_classes];
-        for &t in target { class_counts[t] += 1; }
+        for &t in target {
+            class_counts[t] += 1;
+        }
         let max_count = *class_counts.iter().max().unwrap();
 
         let mut rng = StdRng::seed_from_u64(self.seed);
-        let mut new_features: Vec<Vec<f64>> = features.rows().into_iter()
-            .map(|r| r.to_vec()).collect();
+        let mut new_features: Vec<Vec<f64>> =
+            features.rows().into_iter().map(|r| r.to_vec()).collect();
         let mut new_target: Vec<usize> = target.to_vec();
 
         // For each minority class, generate synthetic samples
         for class in 0..n_classes {
             let n_to_generate = max_count - class_counts[class];
-            if n_to_generate == 0 { continue; }
+            if n_to_generate == 0 {
+                continue;
+            }
 
             // Collect indices of this class
-            let class_indices: Vec<usize> = target.iter().enumerate()
+            let class_indices: Vec<usize> = target
+                .iter()
+                .enumerate()
                 .filter(|&(_, &t)| t == class)
                 .map(|(i, _)| i)
                 .collect();
 
             let n_class = class_indices.len();
-            if n_class == 0 { continue; }
+            if n_class == 0 {
+                continue;
+            }
 
             let k = self.k_neighbors.min(n_class - 1).max(1);
 
@@ -85,11 +106,17 @@ impl Smote {
                 let sample = features.row(idx);
 
                 // Find k nearest neighbors within the same class
-                let mut dists: Vec<(usize, f64)> = class_indices.iter()
+                let mut dists: Vec<(usize, f64)> = class_indices
+                    .iter()
                     .filter(|&&i| i != idx)
                     .map(|&i| {
-                        let d: f64 = features.row(i).iter().zip(sample.iter())
-                            .map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt();
+                        let d: f64 = features
+                            .row(i)
+                            .iter()
+                            .zip(sample.iter())
+                            .map(|(a, b)| (a - b).powi(2))
+                            .sum::<f64>()
+                            .sqrt();
                         (i, d)
                     })
                     .collect();
@@ -97,13 +124,18 @@ impl Smote {
 
                 let synthetic: Vec<f64> = if dists.is_empty() {
                     // Only 1 sample in class: duplicate with small noise
-                    sample.iter().map(|&s| s + rng.random_range(-0.01..0.01)).collect()
+                    sample
+                        .iter()
+                        .map(|&s| s + rng.random_range(-0.01..0.01))
+                        .collect()
                 } else {
                     // Pick a random neighbor from k nearest
                     let nn_idx = dists[rng.random_range(0..k.min(dists.len()))].0;
                     let neighbor = features.row(nn_idx);
                     let lambda: f64 = rng.random_range(0.0..1.0);
-                    sample.iter().zip(neighbor.iter())
+                    sample
+                        .iter()
+                        .zip(neighbor.iter())
                         .map(|(&s, &n)| s + lambda * (n - s))
                         .collect()
                 };

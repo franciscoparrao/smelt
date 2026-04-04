@@ -2,16 +2,17 @@
 //!
 //! Run with: cargo test --test xgboost_perf --release -- --nocapture
 
-use std::time::Instant;
 use ndarray::Array2;
 use smelt_ml::prelude::*;
+use std::time::Instant;
 
 fn load_dataset(prefix: &str, n: usize) -> (Array2<f64>, Vec<f64>) {
     let x_str = std::fs::read_to_string(format!("/tmp/bench_{prefix}_{n}_X.csv"))
         .unwrap_or_else(|_| panic!("Run tests/xgboost_perf.py first"));
     let y_str = std::fs::read_to_string(format!("/tmp/bench_{prefix}_{n}_y.csv")).unwrap();
 
-    let rows: Vec<Vec<f64>> = x_str.lines()
+    let rows: Vec<Vec<f64>> = x_str
+        .lines()
         .filter(|l| !l.is_empty())
         .map(|l| l.split(',').map(|v| v.trim().parse().unwrap()).collect())
         .collect();
@@ -19,9 +20,12 @@ fn load_dataset(prefix: &str, n: usize) -> (Array2<f64>, Vec<f64>) {
     let n_features = rows[0].len();
     let mut features = Array2::zeros((n_samples, n_features));
     for (i, row) in rows.iter().enumerate() {
-        for (j, &v) in row.iter().enumerate() { features[[i, j]] = v; }
+        for (j, &v) in row.iter().enumerate() {
+            features[[i, j]] = v;
+        }
     }
-    let target: Vec<f64> = y_str.lines()
+    let target: Vec<f64> = y_str
+        .lines()
         .filter(|l| !l.is_empty())
         .map(|l| l.trim().parse().unwrap())
         .collect();
@@ -33,7 +37,10 @@ fn xgboost_performance_classif() {
     let sizes = [100, 500, 1000, 5000, 10000];
 
     println!("\n=== smelt-ml XGBoost — Classification Benchmark ===");
-    println!("{:>7} {:>8} {:>5} {:>10} {:>6}", "N", "Features", "Trees", "Time (ms)", "Acc");
+    println!(
+        "{:>7} {:>8} {:>5} {:>10} {:>6}",
+        "N", "Features", "Trees", "Time (ms)", "Acc"
+    );
     println!("{}", "-".repeat(45));
 
     for &n in &sizes {
@@ -52,7 +59,9 @@ fn xgboost_performance_classif() {
         let model = xgb.train_classif(&task).unwrap();
         let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
 
-        let pred = model.predict(&features).unwrap()
+        let pred = model
+            .predict(&features)
+            .unwrap()
             .with_truth_classif(task.target().to_vec());
         let acc = Accuracy.score(&pred).unwrap();
 
@@ -65,7 +74,10 @@ fn xgboost_performance_regress() {
     let sizes = [100, 500, 1000, 5000, 10000];
 
     println!("\n=== smelt-ml XGBoost — Regression Benchmark ===");
-    println!("{:>7} {:>8} {:>5} {:>10}", "N", "Features", "Trees", "Time (ms)");
+    println!(
+        "{:>7} {:>8} {:>5} {:>10}",
+        "N", "Features", "Trees", "Time (ms)"
+    );
     println!("{}", "-".repeat(38));
 
     for &n in &sizes {

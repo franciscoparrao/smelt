@@ -3,15 +3,15 @@
 //! Trains one feature at a time in round-robin fashion. The result is an additive model
 //! f(x) = f₁(x₁) + f₂(x₂) + ... where each fᵢ is a shape function that can be visualized.
 
-use ndarray::Array2;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use crate::task::{ClassificationTask, RegressionTask, Task};
-use crate::learner::{Learner, TrainedModel};
-use crate::learner::tree::TreeBuilder;
-use crate::learner::tree::{Node, LeafValue};
-use crate::prediction::Prediction;
 use crate::Result;
+use crate::learner::tree::TreeBuilder;
+use crate::learner::tree::{LeafValue, Node};
+use crate::learner::{Learner, TrainedModel};
+use crate::prediction::Prediction;
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use ndarray::Array2;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Explainable Boosting Machine.
 ///
@@ -33,7 +33,7 @@ use crate::Result;
 /// let model = ebm.train_classif(&task).unwrap();
 /// ```
 pub struct EBM {
-    n_rounds: usize,       // number of cyclic boosting rounds
+    n_rounds: usize, // number of cyclic boosting rounds
     learning_rate: f64,
     max_depth: Option<usize>,
     min_samples_leaf: usize,
@@ -44,7 +44,7 @@ impl Default for EBM {
     fn default() -> Self {
         Self {
             n_rounds: 100,
-            learning_rate: 0.01,  // very low LR is key to EBM
+            learning_rate: 0.01, // very low LR is key to EBM
             max_depth: Some(3),
             min_samples_leaf: 2,
             seed: 42,
@@ -53,14 +53,30 @@ impl Default for EBM {
 }
 
 impl EBM {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_n_rounds(mut self, n: usize) -> Self { self.n_rounds = n; self }
-    pub fn with_learning_rate(mut self, lr: f64) -> Self { self.learning_rate = lr; self }
-    pub fn with_max_depth(mut self, d: usize) -> Self { self.max_depth = Some(d); self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_n_rounds(mut self, n: usize) -> Self {
+        self.n_rounds = n;
+        self
+    }
+    pub fn with_learning_rate(mut self, lr: f64) -> Self {
+        self.learning_rate = lr;
+        self
+    }
+    pub fn with_max_depth(mut self, d: usize) -> Self {
+        self.max_depth = Some(d);
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 }
 
-fn sigmoid(x: f64) -> f64 { 1.0 / (1.0 + (-x).exp()) }
+fn sigmoid(x: f64) -> f64 {
+    1.0 / (1.0 + (-x).exp())
+}
 
 /// Trained EBM. Each entry in `shape_trees` is a list of boosted stumps for that feature.
 struct TrainedEBM {
@@ -111,7 +127,9 @@ impl TrainedModel for TrainedEBM {
             }
 
             Ok(Prediction::Classification {
-                predicted, truth: None, probabilities: Some(probabilities),
+                predicted,
+                truth: None,
+                probabilities: Some(probabilities),
             })
         } else {
             Ok(Prediction::regression(scores))
@@ -130,9 +148,16 @@ impl TrainedModel for TrainedEBM {
         }
 
         let total: f64 = importance.iter().sum();
-        if total == 0.0 { return None; }
-        Some(self.feature_names.iter().zip(&importance)
-            .map(|(n, &i)| (n.clone(), i / total)).collect())
+        if total == 0.0 {
+            return None;
+        }
+        Some(
+            self.feature_names
+                .iter()
+                .zip(&importance)
+                .map(|(n, &i)| (n.clone(), i / total))
+                .collect(),
+        )
     }
 }
 
@@ -147,7 +172,9 @@ fn count_node_importance(node: &Node) -> f64 {
 }
 
 impl Learner for EBM {
-    fn id(&self) -> &str { "ebm" }
+    fn id(&self) -> &str {
+        "ebm"
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
@@ -178,11 +205,18 @@ impl Learner for EBM {
 
                 let indices: Vec<usize> = (0..n_samples).collect();
                 let mut builder = TreeBuilder::new(
-                    self.max_depth, 2, self.min_samples_leaf,
-                    None, 1, // only 1 feature
+                    self.max_depth,
+                    2,
+                    self.min_samples_leaf,
+                    None,
+                    1, // only 1 feature
                 );
                 let tree = builder.build_regressor(
-                    &single_feature.view(), &residuals, &indices, 0, &mut rng,
+                    &single_feature.view(),
+                    &residuals,
+                    &indices,
+                    0,
+                    &mut rng,
                 );
 
                 // Update predictions
@@ -196,9 +230,12 @@ impl Learner for EBM {
         }
 
         Ok(Box::new(TrainedEBM {
-            shape_trees, intercept, learning_rate: self.learning_rate,
+            shape_trees,
+            intercept,
+            learning_rate: self.learning_rate,
             feature_names: task.feature_names().to_vec(),
-            is_classifier: true, n_classes,
+            is_classifier: true,
+            n_classes,
         }))
     }
 
@@ -216,20 +253,20 @@ impl Learner for EBM {
 
         for _ in 0..self.n_rounds {
             for j in 0..n_features {
-                let residuals: Vec<f64> = (0..n_samples)
-                    .map(|i| target[i] - preds[i])
-                    .collect();
+                let residuals: Vec<f64> = (0..n_samples).map(|i| target[i] - preds[i]).collect();
 
                 let col = features.column(j);
                 let single_feature = Array2::from_shape_fn((n_samples, 1), |(i, _)| col[i]);
 
                 let indices: Vec<usize> = (0..n_samples).collect();
-                let mut builder = TreeBuilder::new(
-                    self.max_depth, 2, self.min_samples_leaf,
-                    None, 1,
-                );
+                let mut builder =
+                    TreeBuilder::new(self.max_depth, 2, self.min_samples_leaf, None, 1);
                 let tree = builder.build_regressor(
-                    &single_feature.view(), &residuals, &indices, 0, &mut rng,
+                    &single_feature.view(),
+                    &residuals,
+                    &indices,
+                    0,
+                    &mut rng,
                 );
 
                 for i in 0..n_samples {
@@ -242,9 +279,12 @@ impl Learner for EBM {
         }
 
         Ok(Box::new(TrainedEBM {
-            shape_trees, intercept, learning_rate: self.learning_rate,
+            shape_trees,
+            intercept,
+            learning_rate: self.learning_rate,
             feature_names: task.feature_names().to_vec(),
-            is_classifier: false, n_classes: 0,
+            is_classifier: false,
+            n_classes: 0,
         }))
     }
 }

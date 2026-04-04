@@ -2,11 +2,11 @@
 //!
 //! Solves w = (X'X)^{-1} X'y using Gaussian elimination with partial pivoting.
 
-use ndarray::{Array1, Array2};
-use crate::task::{ClassificationTask, RegressionTask, Task};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::{Result, SmeltError};
+use ndarray::{Array1, Array2};
 
 /// Ordinary Least Squares linear regression.
 ///
@@ -27,11 +27,15 @@ use crate::{SmeltError, Result};
 pub struct LinearRegression;
 
 impl Default for LinearRegression {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 
 impl LinearRegression {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 /// Solve Ax = b using Gaussian elimination with partial pivoting.
@@ -92,7 +96,7 @@ fn solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
 
 // --- Trained model ---
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct TrainedLinearRegression {
@@ -104,7 +108,9 @@ impl TrainedModel for TrainedLinearRegression {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
         crate::validate::check_n_features(features, self.feature_names.len())?;
         let n_features = features.ncols();
-        let predicted: Vec<f64> = features.rows().into_iter()
+        let predicted: Vec<f64> = features
+            .rows()
+            .into_iter()
             .map(|row| {
                 let mut val = self.weights[n_features]; // bias
                 for j in 0..n_features {
@@ -123,7 +129,8 @@ impl TrainedModel for TrainedLinearRegression {
             return None;
         }
         Some(
-            self.feature_names.iter()
+            self.feature_names
+                .iter()
                 .enumerate()
                 .map(|(i, name)| (name.clone(), self.weights[i].abs() / total))
                 .collect(),
@@ -134,10 +141,14 @@ impl TrainedModel for TrainedLinearRegression {
 // --- Learner impl ---
 
 impl Learner for LinearRegression {
-    fn id(&self) -> &str { "linear_regression" }
+    fn id(&self) -> &str {
+        "linear_regression"
+    }
 
     fn train_classif(&mut self, _task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other("LinearRegression does not support classification".into()))
+        Err(SmeltError::Other(
+            "LinearRegression does not support classification".into(),
+        ))
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {

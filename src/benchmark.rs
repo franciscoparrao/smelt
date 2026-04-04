@@ -2,12 +2,12 @@
 //!
 //! Runs a learner on resampled data and evaluates with multiple measures.
 
-use ndarray::Axis;
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::Result;
 use crate::learner::Learner;
 use crate::measure::Measure;
 use crate::resample::Resample;
-use crate::Result;
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use ndarray::Axis;
 
 /// Results from a resampling benchmark run.
 #[derive(Debug)]
@@ -52,7 +52,9 @@ pub fn resample_classif(
 
         let test_features = features.select(Axis(0), test_idx);
         let test_target: Vec<usize> = test_idx.iter().map(|&i| target[i]).collect();
-        let pred = model.predict(&test_features)?.with_truth_classif(test_target);
+        let pred = model
+            .predict(&test_features)?
+            .with_truth_classif(test_target);
 
         let fold_scores: Result<Vec<f64>> = measures.iter().map(|m| m.score(&pred)).collect();
         scores.push(fold_scores?);
@@ -86,7 +88,9 @@ pub fn resample_regress(
 
         let test_features = features.select(Axis(0), test_idx);
         let test_target: Vec<f64> = test_idx.iter().map(|&i| target[i]).collect();
-        let pred = model.predict(&test_features)?.with_truth_regress(test_target);
+        let pred = model
+            .predict(&test_features)?
+            .with_truth_regress(test_target);
 
         let fold_scores: Result<Vec<f64>> = measures.iter().map(|m| m.score(&pred)).collect();
         scores.push(fold_scores?);

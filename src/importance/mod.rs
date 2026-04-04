@@ -2,13 +2,13 @@
 
 pub mod shap;
 
-use rand::seq::SliceRandom;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::Result;
 use crate::learner::TrainedModel;
 use crate::measure::Measure;
-use crate::Result;
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
 
 /// Feature importance result for a single feature.
 #[derive(Debug, Clone)]
@@ -53,8 +53,7 @@ pub fn permutation_importance_classif(
     let truth = task.target();
 
     // Baseline score
-    let baseline_pred = model.predict(features)?
-        .with_truth_classif(truth.to_vec());
+    let baseline_pred = model.predict(features)?.with_truth_classif(truth.to_vec());
     let baseline_score = measure.score(&baseline_pred)?;
 
     let names = task.feature_names().to_vec();
@@ -73,8 +72,7 @@ pub fn permutation_importance_classif(
                     shuffled[[i, j]] = val;
                 }
 
-                let pred = model.predict(&shuffled)?
-                    .with_truth_classif(truth.to_vec());
+                let pred = model.predict(&shuffled)?.with_truth_classif(truth.to_vec());
                 scores.push(measure.score(&pred)?);
             }
 
@@ -85,7 +83,8 @@ pub fn permutation_importance_classif(
                 mean_score - baseline_score
             };
 
-            let variance = scores.iter()
+            let variance = scores
+                .iter()
                 .map(|&s| {
                     let diff = if measure.maximize() {
                         baseline_score - s
@@ -94,7 +93,8 @@ pub fn permutation_importance_classif(
                     };
                     (diff - importance).powi(2)
                 })
-                .sum::<f64>() / scores.len() as f64;
+                .sum::<f64>()
+                / scores.len() as f64;
 
             Ok(FeatureImportance {
                 feature: names[j].clone(),
@@ -104,8 +104,13 @@ pub fn permutation_importance_classif(
         })
         .collect();
 
-    let mut importances: Vec<FeatureImportance> = results.into_iter().collect::<Result<Vec<_>>>()?;
-    importances.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap_or(std::cmp::Ordering::Equal));
+    let mut importances: Vec<FeatureImportance> =
+        results.into_iter().collect::<Result<Vec<_>>>()?;
+    importances.sort_by(|a, b| {
+        b.importance
+            .partial_cmp(&a.importance)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     Ok(importances)
 }
 
@@ -120,8 +125,7 @@ pub fn permutation_importance_regress(
     let features = task.features();
     let truth = task.target();
 
-    let baseline_pred = model.predict(features)?
-        .with_truth_regress(truth.to_vec());
+    let baseline_pred = model.predict(features)?.with_truth_regress(truth.to_vec());
     let baseline_score = measure.score(&baseline_pred)?;
 
     let names = task.feature_names().to_vec();
@@ -140,8 +144,7 @@ pub fn permutation_importance_regress(
                     shuffled[[i, j]] = val;
                 }
 
-                let pred = model.predict(&shuffled)?
-                    .with_truth_regress(truth.to_vec());
+                let pred = model.predict(&shuffled)?.with_truth_regress(truth.to_vec());
                 scores.push(measure.score(&pred)?);
             }
 
@@ -152,7 +155,8 @@ pub fn permutation_importance_regress(
                 mean_score - baseline_score
             };
 
-            let variance = scores.iter()
+            let variance = scores
+                .iter()
                 .map(|&s| {
                     let diff = if measure.maximize() {
                         baseline_score - s
@@ -161,7 +165,8 @@ pub fn permutation_importance_regress(
                     };
                     (diff - importance).powi(2)
                 })
-                .sum::<f64>() / scores.len() as f64;
+                .sum::<f64>()
+                / scores.len() as f64;
 
             Ok(FeatureImportance {
                 feature: names[j].clone(),
@@ -171,7 +176,12 @@ pub fn permutation_importance_regress(
         })
         .collect();
 
-    let mut importances: Vec<FeatureImportance> = results.into_iter().collect::<Result<Vec<_>>>()?;
-    importances.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap_or(std::cmp::Ordering::Equal));
+    let mut importances: Vec<FeatureImportance> =
+        results.into_iter().collect::<Result<Vec<_>>>()?;
+    importances.sort_by(|a, b| {
+        b.importance
+            .partial_cmp(&a.importance)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     Ok(importances)
 }

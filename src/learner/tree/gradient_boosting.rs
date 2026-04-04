@@ -3,15 +3,15 @@
 //! Regression uses MSE loss (residual fitting). Classification uses log-loss
 //! with sigmoid (binary) or softmax (multiclass).
 
-use ndarray::Array2;
-use rand::rngs::StdRng;
-use rand::seq::SliceRandom;
-use rand::SeedableRng;
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use super::{LeafValue, Node, TreeBuilder};
+use crate::Result;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
-use super::{Node, LeafValue, TreeBuilder};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use ndarray::Array2;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
 
 /// Gradient Boosting learner.
 ///
@@ -55,7 +55,9 @@ impl Default for GradientBoosting {
 }
 
 impl GradientBoosting {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
@@ -117,7 +119,7 @@ fn softmax(scores: &[f64]) -> Vec<f64> {
 
 // --- Internal mode ---
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub(crate) enum GBMode {
@@ -141,7 +143,9 @@ impl TrainedModel for TrainedGradientBoosting {
         crate::validate::check_n_features(features, self.feature_names.len())?;
         match &self.mode {
             GBMode::Regression => {
-                let predicted: Vec<f64> = features.rows().into_iter()
+                let predicted: Vec<f64> = features
+                    .rows()
+                    .into_iter()
                     .map(|row| {
                         let mut val = self.initial[0];
                         for tree in &self.trees {
@@ -193,9 +197,12 @@ impl TrainedModel for TrainedGradientBoosting {
                         }
                     }
                     let probs = softmax(&scores);
-                    let pred_class = probs.iter().enumerate()
+                    let pred_class = probs
+                        .iter()
+                        .enumerate()
                         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                        .unwrap().0;
+                        .unwrap()
+                        .0;
                     predicted.push(pred_class);
                     probabilities.push(probs);
                 }
@@ -215,7 +222,8 @@ impl TrainedModel for TrainedGradientBoosting {
             return None;
         }
         Some(
-            self.feature_names.iter()
+            self.feature_names
+                .iter()
                 .zip(&self.feature_importances)
                 .map(|(name, &imp)| (name.clone(), imp / total))
                 .collect(),
@@ -224,7 +232,9 @@ impl TrainedModel for TrainedGradientBoosting {
 }
 
 impl Learner for GradientBoosting {
-    fn id(&self) -> &str { "gradient_boosting" }
+    fn id(&self) -> &str {
+        "gradient_boosting"
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let n_classes = task.n_classes();
@@ -248,7 +258,8 @@ impl Learner for GradientBoosting {
         let mut rng = StdRng::seed_from_u64(self.seed);
 
         for _ in 0..self.n_estimators {
-            let residuals: Vec<f64> = target.iter()
+            let residuals: Vec<f64> = target
+                .iter()
                 .zip(&current_preds)
                 .map(|(y, p)| y - p)
                 .collect();
@@ -256,12 +267,13 @@ impl Learner for GradientBoosting {
             let indices = self.subsample_indices(n_samples, &mut rng);
 
             let mut builder = TreeBuilder::new(
-                self.max_depth, self.min_samples_split, self.min_samples_leaf,
-                None, n_features,
+                self.max_depth,
+                self.min_samples_split,
+                self.min_samples_leaf,
+                None,
+                n_features,
             );
-            let root = builder.build_regressor(
-                &features.view(), &residuals, &indices, 0, &mut rng,
-            );
+            let root = builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng);
 
             // Update predictions
             for i in 0..n_samples {
@@ -304,7 +316,8 @@ impl GradientBoosting {
 
         for _ in 0..self.n_estimators {
             // Pseudo-residuals: y - sigmoid(F)
-            let residuals: Vec<f64> = target.iter()
+            let residuals: Vec<f64> = target
+                .iter()
                 .zip(&current_f)
                 .map(|(&y, &f)| y as f64 - sigmoid(f))
                 .collect();
@@ -312,12 +325,13 @@ impl GradientBoosting {
             let indices = self.subsample_indices(n_samples, &mut rng);
 
             let mut builder = TreeBuilder::new(
-                self.max_depth, self.min_samples_split, self.min_samples_leaf,
-                None, n_features,
+                self.max_depth,
+                self.min_samples_split,
+                self.min_samples_leaf,
+                None,
+                n_features,
             );
-            let root = builder.build_regressor(
-                &features.view(), &residuals, &indices, 0, &mut rng,
-            );
+            let root = builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng);
 
             for i in 0..n_samples {
                 if let LeafValue::Value(v) = root.predict_one(features.row(i)) {
@@ -353,14 +367,13 @@ impl GradientBoosting {
         for &t in target {
             class_counts[t] += 1;
         }
-        let initial: Vec<f64> = class_counts.iter()
+        let initial: Vec<f64> = class_counts
+            .iter()
             .map(|&c| ((c as f64 / n_samples as f64).max(1e-15)).ln())
             .collect();
 
         // Current raw scores: [sample][class]
-        let mut current_f: Vec<Vec<f64>> = (0..n_samples)
-            .map(|_| initial.clone())
-            .collect();
+        let mut current_f: Vec<Vec<f64>> = (0..n_samples).map(|_| initial.clone()).collect();
 
         let mut trees = Vec::with_capacity(self.n_estimators * n_classes);
         let mut total_importances = vec![0.0; n_features];
@@ -383,12 +396,14 @@ impl GradientBoosting {
                     .collect();
 
                 let mut builder = TreeBuilder::new(
-                    self.max_depth, self.min_samples_split, self.min_samples_leaf,
-                    None, n_features,
+                    self.max_depth,
+                    self.min_samples_split,
+                    self.min_samples_leaf,
+                    None,
+                    n_features,
                 );
-                let root = builder.build_regressor(
-                    &features.view(), &residuals, &indices, 0, &mut rng,
-                );
+                let root =
+                    builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng);
 
                 // Update scores for this class
                 for i in 0..n_samples {

@@ -6,10 +6,12 @@
 //! Run with: cargo run --release --example accuracy_validation
 
 use ndarray::Axis;
-use smelt_ml::prelude::*;
 use smelt_ml::data::CsvLoader;
+use smelt_ml::prelude::*;
 
-fn mean(v: &[f64]) -> f64 { v.iter().sum::<f64>() / v.len() as f64 }
+fn mean(v: &[f64]) -> f64 {
+    v.iter().sum::<f64>() / v.len() as f64
+}
 fn std_dev(v: &[f64]) -> f64 {
     let m = mean(v);
     (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
@@ -84,46 +86,112 @@ fn main() {
         .target("target")
         .load_classif()
         .unwrap();
-    println!("\nWine ({} samples, {} features)", wine.n_samples(), wine.features().ncols());
+    println!(
+        "\nWine ({} samples, {} features)",
+        wine.n_samples(),
+        wine.features().ncols()
+    );
     let wf = wine.features().to_owned();
     let wt = wine.target().to_vec();
-    cv_classif(&wf, &wt, || Box::new(DecisionTree::default()), "Decision Tree");
-    cv_classif(&wf, &wt, || Box::new(RandomForest::new().with_n_estimators(100).with_seed(42)), "Random Forest");
-    cv_classif(&wf, &wt, || Box::new(LogisticRegression::new()), "Logistic Regression");
+    cv_classif(
+        &wf,
+        &wt,
+        || Box::new(DecisionTree::default()),
+        "Decision Tree",
+    );
+    cv_classif(
+        &wf,
+        &wt,
+        || Box::new(RandomForest::new().with_n_estimators(100).with_seed(42)),
+        "Random Forest",
+    );
+    cv_classif(
+        &wf,
+        &wt,
+        || Box::new(LogisticRegression::new()),
+        "Logistic Regression",
+    );
 
     // ── Classification: Breast Cancer (569 samples, 30 features, 2 classes) ──
     let bc = CsvLoader::from_path("data/breast_cancer.csv")
         .target("target")
         .load_classif()
         .unwrap();
-    println!("\nBreast Cancer ({} samples, {} features)", bc.n_samples(), bc.features().ncols());
+    println!(
+        "\nBreast Cancer ({} samples, {} features)",
+        bc.n_samples(),
+        bc.features().ncols()
+    );
     let bf = bc.features().to_owned();
     let bt = bc.target().to_vec();
-    cv_classif(&bf, &bt, || Box::new(DecisionTree::default()), "Decision Tree");
-    cv_classif(&bf, &bt, || Box::new(RandomForest::new().with_n_estimators(100).with_seed(42)), "Random Forest");
-    cv_classif(&bf, &bt, || Box::new(LogisticRegression::new()), "Logistic Regression");
+    cv_classif(
+        &bf,
+        &bt,
+        || Box::new(DecisionTree::default()),
+        "Decision Tree",
+    );
+    cv_classif(
+        &bf,
+        &bt,
+        || Box::new(RandomForest::new().with_n_estimators(100).with_seed(42)),
+        "Random Forest",
+    );
+    cv_classif(
+        &bf,
+        &bt,
+        || Box::new(LogisticRegression::new()),
+        "Logistic Regression",
+    );
 
     // ── Classification: Digits (1,797 samples, 64 features, 10 classes) ──
     let digits = CsvLoader::from_path("data/digits.csv")
         .target("target")
         .load_classif()
         .unwrap();
-    println!("\nDigits ({} samples, {} features, 10 classes)", digits.n_samples(), digits.features().ncols());
+    println!(
+        "\nDigits ({} samples, {} features, 10 classes)",
+        digits.n_samples(),
+        digits.features().ncols()
+    );
     let df = digits.features().to_owned();
     let dt = digits.target().to_vec();
-    cv_classif(&df, &dt, || Box::new(DecisionTree::default()), "Decision Tree");
-    cv_classif(&df, &dt, || Box::new(RandomForest::new().with_n_estimators(100).with_seed(42)), "Random Forest");
+    cv_classif(
+        &df,
+        &dt,
+        || Box::new(DecisionTree::default()),
+        "Decision Tree",
+    );
+    cv_classif(
+        &df,
+        &dt,
+        || Box::new(RandomForest::new().with_n_estimators(100).with_seed(42)),
+        "Random Forest",
+    );
 
     // ── Regression: California Housing (20,640 samples, 8 features) ──
     let cal = CsvLoader::from_path("data/california_housing.csv")
         .target("target")
         .load_regress()
         .unwrap();
-    println!("\nCalifornia Housing ({} samples, {} features)", cal.n_samples(), cal.features().ncols());
+    println!(
+        "\nCalifornia Housing ({} samples, {} features)",
+        cal.n_samples(),
+        cal.features().ncols()
+    );
     let cf = cal.features().to_owned();
     let ct = cal.target().to_vec();
-    cv_regress(&cf, &ct, || Box::new(DecisionTree::default()), "Decision Tree");
-    cv_regress(&cf, &ct, || Box::new(RandomForest::new().with_n_estimators(100).with_seed(42)), "Random Forest");
+    cv_regress(
+        &cf,
+        &ct,
+        || Box::new(DecisionTree::default()),
+        "Decision Tree",
+    );
+    cv_regress(
+        &cf,
+        &ct,
+        || Box::new(RandomForest::new().with_n_estimators(100).with_seed(42)),
+        "Random Forest",
+    );
     cv_regress(&cf, &ct, || Box::new(Ridge::new(1.0)), "Ridge Regression");
 
     println!();

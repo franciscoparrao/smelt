@@ -1,4 +1,4 @@
-use ndarray::{array, Array2};
+use ndarray::{Array2, array};
 use smelt_ml::prelude::*;
 
 // ── Task tests ──────────────────────────────────────────────────────
@@ -228,33 +228,52 @@ fn resample_deterministic() {
 fn decision_tree_classif_linearly_separable() {
     // Two clusters clearly separable by x0
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.1, 0.2], [0.0, 0.1],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.1, 0.2],
+        [0.0, 0.1],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("sep", features, target).unwrap();
 
     let mut tree = DecisionTree::default();
     let model = tree.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
 
     let acc = Accuracy.score(&pred).unwrap();
-    assert_eq!(acc, 1.0, "should perfectly separate linearly separable data");
+    assert_eq!(
+        acc, 1.0,
+        "should perfectly separate linearly separable data"
+    );
 }
 
 #[test]
 fn decision_tree_classif_max_depth() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1]
     ];
     let target = vec![0, 0, 0, 1, 1, 1];
     let task = ClassificationTask::new("depth", features, target).unwrap();
 
     let mut tree = DecisionTree::new().with_max_depth(1);
     let model = tree.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
 
     let acc = Accuracy.score(&pred).unwrap();
@@ -270,7 +289,9 @@ fn decision_tree_regress_constant() {
 
     let mut tree = DecisionTree::default();
     let model = tree.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
 
     let rmse = Rmse.score(&pred).unwrap();
@@ -280,16 +301,15 @@ fn decision_tree_regress_constant() {
 #[test]
 fn decision_tree_regress_learns_step_function() {
     // Step function: x < 5 => 0, x >= 5 => 10
-    let features = array![
-        [1.0], [2.0], [3.0], [4.0],
-        [6.0], [7.0], [8.0], [9.0]
-    ];
+    let features = array![[1.0], [2.0], [3.0], [4.0], [6.0], [7.0], [8.0], [9.0]];
     let target = vec![0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0];
     let task = RegressionTask::new("step", features, target).unwrap();
 
     let mut tree = DecisionTree::default();
     let model = tree.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
 
     let rmse = Rmse.score(&pred).unwrap();
@@ -300,8 +320,12 @@ fn decision_tree_regress_learns_step_function() {
 fn decision_tree_feature_importance() {
     // Only feature 0 is informative
     let features = array![
-        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0],
-        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0]
+        [0.0, 42.0],
+        [0.1, 13.0],
+        [0.2, 99.0],
+        [1.0, 42.0],
+        [1.1, 13.0],
+        [1.2, 99.0]
     ];
     let target = vec![0, 0, 0, 1, 1, 1];
     let task = ClassificationTask::new("imp", features, target).unwrap();
@@ -310,8 +334,10 @@ fn decision_tree_feature_importance() {
     let model = tree.train_classif(&task).unwrap();
 
     let importances = model.feature_importance().unwrap();
-    assert!(importances[0].1 > importances[1].1,
-            "feature 0 should be more important than noise feature 1");
+    assert!(
+        importances[0].1 > importances[1].1,
+        "feature 0 should be more important than noise feature 1"
+    );
 }
 
 #[test]
@@ -333,10 +359,22 @@ fn decision_tree_predict_unseen() {
 #[test]
 fn full_pipeline_classif_with_cv() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("pipeline", features.clone(), target.clone()).unwrap();
@@ -355,21 +393,34 @@ fn full_pipeline_classif_with_cv() {
 
         let test_features = features.select(ndarray::Axis(0), test_idx);
         let test_target: Vec<usize> = test_idx.iter().map(|&i| target[i]).collect();
-        let pred = model.predict(&test_features).unwrap()
+        let pred = model
+            .predict(&test_features)
+            .unwrap()
             .with_truth_classif(test_target);
 
         scores.push(Accuracy.score(&pred).unwrap());
     }
 
     let mean_acc = scores.iter().sum::<f64>() / scores.len() as f64;
-    assert!(mean_acc >= 0.75, "CV accuracy on separable data should be high, got {mean_acc}");
+    assert!(
+        mean_acc >= 0.75,
+        "CV accuracy on separable data should be high, got {mean_acc}"
+    );
 }
 
 #[test]
 fn full_pipeline_regress_with_holdout() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
 
@@ -386,7 +437,9 @@ fn full_pipeline_regress_with_holdout() {
 
     let test_features = features.select(ndarray::Axis(0), test_idx);
     let test_target: Vec<f64> = test_idx.iter().map(|&i| target[i]).collect();
-    let pred = model.predict(&test_features).unwrap()
+    let pred = model
+        .predict(&test_features)
+        .unwrap()
         .with_truth_regress(test_target);
 
     let rmse = Rmse.score(&pred).unwrap();
@@ -400,15 +453,21 @@ fn full_pipeline_regress_with_holdout() {
 #[test]
 fn knn_classif_separable() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1]
     ];
     let target = vec![0, 0, 0, 1, 1, 1];
     let task = ClassificationTask::new("knn", features, target).unwrap();
 
     let mut knn = KNearestNeighbors::new(3);
     let model = knn.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
 
     let acc = Accuracy.score(&pred).unwrap();
@@ -426,8 +485,7 @@ fn knn_regress_mean() {
     let model = knn.train_regress(&task).unwrap();
 
     let test = array![[1.0]]; // equidistant from all, mean = 2.0
-    let pred = model.predict(&test).unwrap()
-        .with_truth_regress(vec![2.0]);
+    let pred = model.predict(&test).unwrap().with_truth_regress(vec![2.0]);
 
     let rmse = Rmse.score(&pred).unwrap();
     assert!(rmse < f64::EPSILON);
@@ -456,29 +514,37 @@ fn linear_regression_perfect_fit() {
 
     let mut lr = LinearRegression::default();
     let model = lr.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
 
     let rmse = Rmse.score(&pred).unwrap();
-    assert!(rmse < 1e-10, "OLS should fit y=2x+1 perfectly, got RMSE={rmse}");
+    assert!(
+        rmse < 1e-10,
+        "OLS should fit y=2x+1 perfectly, got RMSE={rmse}"
+    );
 }
 
 #[test]
 fn linear_regression_multivariate() {
     // y = x0 + 2*x1 + 3
-    let features = array![
-        [1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [2.0, 2.0], [3.0, 1.0]
-    ];
+    let features = array![[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [2.0, 2.0], [3.0, 1.0]];
     let target = vec![4.0, 5.0, 6.0, 9.0, 8.0]; // 1+0+3, 0+2+3, 1+2+3, 2+4+3, 3+2+3
     let task = RegressionTask::new("multi", features, target).unwrap();
 
     let mut lr = LinearRegression::default();
     let model = lr.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
 
     let rmse = Rmse.score(&pred).unwrap();
-    assert!(rmse < 1e-10, "OLS should fit y=x0+2*x1+3 perfectly, got RMSE={rmse}");
+    assert!(
+        rmse < 1e-10,
+        "OLS should fit y=x0+2*x1+3 perfectly, got RMSE={rmse}"
+    );
 }
 
 #[test]
@@ -495,8 +561,12 @@ fn linear_regression_rejects_classification() {
 fn linear_regression_feature_importance() {
     // y = 10*x0 + 1*x1, so x0 is much more important
     let features = array![
-        [1.0, 0.0], [2.0, 0.0], [3.0, 0.0],
-        [1.0, 1.0], [2.0, 1.0], [3.0, 1.0]
+        [1.0, 0.0],
+        [2.0, 0.0],
+        [3.0, 0.0],
+        [1.0, 1.0],
+        [2.0, 1.0],
+        [3.0, 1.0]
     ];
     let target = vec![10.0, 20.0, 30.0, 11.0, 21.0, 31.0];
     let task = RegressionTask::new("imp", features, target).unwrap();
@@ -505,7 +575,10 @@ fn linear_regression_feature_importance() {
     let model = lr.train_regress(&task).unwrap();
 
     let imp = model.feature_importance().unwrap();
-    assert!(imp[0].1 > imp[1].1, "x0 (coeff=10) should matter more than x1 (coeff=1)");
+    assert!(
+        imp[0].1 > imp[1].1,
+        "x0 (coeff=10) should matter more than x1 (coeff=1)"
+    );
 }
 
 // ── Logistic Regression tests ──────────────────────────────────────
@@ -513,39 +586,67 @@ fn linear_regression_feature_importance() {
 #[test]
 fn logistic_regression_binary() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("logr", features, target).unwrap();
 
-    let mut lr = LogisticRegression::new().with_learning_rate(1.0).with_max_iter(500);
+    let mut lr = LogisticRegression::new()
+        .with_learning_rate(1.0)
+        .with_max_iter(500);
     let model = lr.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
 
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.8, "Logistic regression should classify separable data well, got {acc}");
+    assert!(
+        acc >= 0.8,
+        "Logistic regression should classify separable data well, got {acc}"
+    );
 }
 
 #[test]
 fn logistic_regression_multiclass() {
     // 3 classes, each in a different quadrant-ish region
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.0, 0.1],
-        [1.0, 0.0], [1.1, 0.1], [1.0, 0.1],
-        [0.0, 1.0], [0.1, 1.1], [0.0, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.0, 0.1],
+        [1.0, 0.0],
+        [1.1, 0.1],
+        [1.0, 0.1],
+        [0.0, 1.0],
+        [0.1, 1.1],
+        [0.0, 1.1]
     ];
     let target = vec![0, 0, 0, 1, 1, 1, 2, 2, 2];
     let task = ClassificationTask::new("multi", features, target).unwrap();
 
-    let mut lr = LogisticRegression::new().with_learning_rate(1.0).with_max_iter(1000);
+    let mut lr = LogisticRegression::new()
+        .with_learning_rate(1.0)
+        .with_max_iter(1000);
     let model = lr.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
 
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.66, "Multiclass OVR should do better than random, got {acc}");
+    assert!(
+        acc >= 0.66,
+        "Multiclass OVR should do better than random, got {acc}"
+    );
 }
 
 #[test]
@@ -563,10 +664,22 @@ fn logistic_regression_rejects_regression() {
 #[test]
 fn benchmark_classif_cv() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("bench", features, target).unwrap();
@@ -574,9 +687,7 @@ fn benchmark_classif_cv() {
     let cv = CrossValidation::new(4).with_seed(42);
     let mut tree = DecisionTree::new().with_max_depth(3);
 
-    let result = benchmark::resample_classif(
-        &mut tree, &task, &cv, &[&Accuracy],
-    ).unwrap();
+    let result = benchmark::resample_classif(&mut tree, &task, &cv, &[&Accuracy]).unwrap();
 
     assert_eq!(result.scores.len(), 4); // 4 folds
     assert_eq!(result.measure_ids, vec!["classif.accuracy"]);
@@ -589,8 +700,16 @@ fn benchmark_classif_cv() {
 #[test]
 fn benchmark_regress_holdout() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("bench", features, target).unwrap();
@@ -598,9 +717,7 @@ fn benchmark_regress_holdout() {
     let ho = Holdout::new(0.8).with_seed(42);
     let mut tree = DecisionTree::default();
 
-    let result = benchmark::resample_regress(
-        &mut tree, &task, &ho, &[&Rmse, &Mae],
-    ).unwrap();
+    let result = benchmark::resample_regress(&mut tree, &task, &ho, &[&Rmse, &Mae]).unwrap();
 
     assert_eq!(result.scores.len(), 1); // holdout = 1 split
     assert_eq!(result.measure_ids, vec!["regr.rmse", "regr.mae"]);
@@ -608,19 +725,14 @@ fn benchmark_regress_holdout() {
 
 #[test]
 fn benchmark_multiple_measures() {
-    let features = array![
-        [0.0], [0.1], [0.2], [0.3],
-        [1.0], [1.1], [1.2], [1.3]
-    ];
+    let features = array![[0.0], [0.1], [0.2], [0.3], [1.0], [1.1], [1.2], [1.3]];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("mm", features, target).unwrap();
 
     let cv = CrossValidation::new(2).with_seed(42);
     let mut knn = KNearestNeighbors::new(3);
 
-    let result = benchmark::resample_classif(
-        &mut knn, &task, &cv, &[&Accuracy],
-    ).unwrap();
+    let result = benchmark::resample_classif(&mut knn, &task, &cv, &[&Accuracy]).unwrap();
 
     assert_eq!(result.learner_id, "knn");
     assert_eq!(result.scores.len(), 2);
@@ -631,33 +743,45 @@ fn benchmark_multiple_measures() {
 #[test]
 fn random_forest_classif_separable() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.1, 0.2], [0.0, 0.1],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.1, 0.2],
+        [0.0, 0.1],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("rf", features, target).unwrap();
 
     let mut rf = RandomForest::new().with_n_estimators(20).with_seed(42);
     let model = rf.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
 
     let acc = Accuracy.score(&pred).unwrap();
-    assert_eq!(acc, 1.0, "RF should perfectly separate linearly separable data");
+    assert_eq!(
+        acc, 1.0,
+        "RF should perfectly separate linearly separable data"
+    );
 }
 
 #[test]
 fn random_forest_regress_step() {
-    let features = array![
-        [1.0], [2.0], [3.0], [4.0],
-        [6.0], [7.0], [8.0], [9.0]
-    ];
+    let features = array![[1.0], [2.0], [3.0], [4.0], [6.0], [7.0], [8.0], [9.0]];
     let target = vec![0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0];
     let task = RegressionTask::new("rf_step", features, target).unwrap();
 
     let mut rf = RandomForest::new().with_n_estimators(20).with_seed(42);
     let model = rf.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
 
     let rmse = Rmse.score(&pred).unwrap();
@@ -667,8 +791,12 @@ fn random_forest_regress_step() {
 #[test]
 fn random_forest_feature_importance() {
     let features = array![
-        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0],
-        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0]
+        [0.0, 42.0],
+        [0.1, 13.0],
+        [0.2, 99.0],
+        [1.0, 42.0],
+        [1.1, 13.0],
+        [1.2, 99.0]
     ];
     let target = vec![0, 0, 0, 1, 1, 1];
     let task = ClassificationTask::new("rf_imp", features, target).unwrap();
@@ -695,8 +823,10 @@ fn random_forest_deterministic() {
     let pred2 = model2.predict(task.features()).unwrap();
 
     match (&pred1, &pred2) {
-        (Prediction::Classification { predicted: p1, .. },
-         Prediction::Classification { predicted: p2, .. }) => {
+        (
+            Prediction::Classification { predicted: p1, .. },
+            Prediction::Classification { predicted: p2, .. },
+        ) => {
             assert_eq!(p1, p2, "same seed should produce same predictions");
         }
         _ => panic!("expected classification predictions"),
@@ -713,7 +843,9 @@ fn gradient_boosting_regress_constant() {
 
     let mut gb = GradientBoosting::new().with_n_estimators(10);
     let model = gb.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
 
     let rmse = Rmse.score(&pred).unwrap();
@@ -723,8 +855,16 @@ fn gradient_boosting_regress_constant() {
 #[test]
 fn gradient_boosting_regress_linear() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("gb_lin", features, target).unwrap();
@@ -734,7 +874,9 @@ fn gradient_boosting_regress_linear() {
         .with_learning_rate(0.1)
         .with_max_depth(2);
     let model = gb.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
 
     let rmse = Rmse.score(&pred).unwrap();
@@ -744,8 +886,16 @@ fn gradient_boosting_regress_linear() {
 #[test]
 fn gradient_boosting_classif_binary() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("gb_bin", features, target).unwrap();
@@ -754,19 +904,30 @@ fn gradient_boosting_classif_binary() {
         .with_n_estimators(50)
         .with_learning_rate(0.3);
     let model = gb.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
 
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.9, "GB binary should classify separable data, got {acc}");
+    assert!(
+        acc >= 0.9,
+        "GB binary should classify separable data, got {acc}"
+    );
 }
 
 #[test]
 fn gradient_boosting_classif_multiclass() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.0, 0.1],
-        [1.0, 0.0], [1.1, 0.1], [1.0, 0.1],
-        [0.0, 1.0], [0.1, 1.1], [0.0, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.0, 0.1],
+        [1.0, 0.0],
+        [1.1, 0.1],
+        [1.0, 0.1],
+        [0.0, 1.0],
+        [0.1, 1.1],
+        [0.0, 1.1]
     ];
     let target = vec![0, 0, 0, 1, 1, 1, 2, 2, 2];
     let task = ClassificationTask::new("gb_multi", features, target).unwrap();
@@ -775,18 +936,27 @@ fn gradient_boosting_classif_multiclass() {
         .with_n_estimators(100)
         .with_learning_rate(0.3);
     let model = gb.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
 
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.66, "GB multiclass should do better than random, got {acc}");
+    assert!(
+        acc >= 0.66,
+        "GB multiclass should do better than random, got {acc}"
+    );
 }
 
 #[test]
 fn gradient_boosting_feature_importance() {
     let features = array![
-        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0],
-        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0]
+        [0.0, 42.0],
+        [0.1, 13.0],
+        [0.2, 99.0],
+        [1.0, 42.0],
+        [1.1, 13.0],
+        [1.2, 99.0]
     ];
     let target = vec![0, 0, 0, 1, 1, 1];
     let task = ClassificationTask::new("gb_imp", features, target).unwrap();
@@ -803,8 +973,16 @@ fn gradient_boosting_feature_importance() {
 #[test]
 fn bagging_decision_tree_classif() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.1, 0.2], [0.0, 0.1],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.1, 0.2],
+        [0.0, 0.1],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("bag", features, target).unwrap();
@@ -813,18 +991,27 @@ fn bagging_decision_tree_classif() {
         .with_n_estimators(10)
         .with_seed(42);
     let model = bag.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
 
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.8, "Bagged DT should classify separable data, got {acc}");
+    assert!(
+        acc >= 0.8,
+        "Bagged DT should classify separable data, got {acc}"
+    );
 }
 
 #[test]
 fn bagging_knn_classif() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1]
     ];
     let target = vec![0, 0, 0, 1, 1, 1];
     let task = ClassificationTask::new("bag_knn", features, target).unwrap();
@@ -839,10 +1026,7 @@ fn bagging_knn_classif() {
 
 #[test]
 fn bagging_decision_tree_regress() {
-    let features = array![
-        [1.0], [2.0], [3.0], [4.0],
-        [6.0], [7.0], [8.0], [9.0]
-    ];
+    let features = array![[1.0], [2.0], [3.0], [4.0], [6.0], [7.0], [8.0], [9.0]];
     let target = vec![0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0];
     let task = RegressionTask::new("bag_reg", features, target).unwrap();
 
@@ -850,11 +1034,16 @@ fn bagging_decision_tree_regress() {
         .with_n_estimators(10)
         .with_seed(42);
     let model = bag.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
 
     let rmse = Rmse.score(&pred).unwrap();
-    assert!(rmse < 2.0, "Bagged DT should learn step function, got RMSE={rmse}");
+    assert!(
+        rmse < 2.0,
+        "Bagged DT should learn step function, got RMSE={rmse}"
+    );
 }
 
 #[test]
@@ -864,16 +1053,28 @@ fn bagging_deterministic() {
     let task = ClassificationTask::new("det", features, target).unwrap();
 
     let mut b1 = Bagging::new(|| Box::new(DecisionTree::default()))
-        .with_n_estimators(5).with_seed(99);
-    let p1 = b1.train_classif(&task).unwrap().predict(task.features()).unwrap();
+        .with_n_estimators(5)
+        .with_seed(99);
+    let p1 = b1
+        .train_classif(&task)
+        .unwrap()
+        .predict(task.features())
+        .unwrap();
 
     let mut b2 = Bagging::new(|| Box::new(DecisionTree::default()))
-        .with_n_estimators(5).with_seed(99);
-    let p2 = b2.train_classif(&task).unwrap().predict(task.features()).unwrap();
+        .with_n_estimators(5)
+        .with_seed(99);
+    let p2 = b2
+        .train_classif(&task)
+        .unwrap()
+        .predict(task.features())
+        .unwrap();
 
     match (&p1, &p2) {
-        (Prediction::Classification { predicted: a, .. },
-         Prediction::Classification { predicted: b, .. }) => assert_eq!(a, b),
+        (
+            Prediction::Classification { predicted: a, .. },
+            Prediction::Classification { predicted: b, .. },
+        ) => assert_eq!(a, b),
         _ => panic!("expected classification"),
     }
 }
@@ -881,14 +1082,19 @@ fn bagging_deterministic() {
 #[test]
 fn bagging_feature_importance() {
     let features = array![
-        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0],
-        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0]
+        [0.0, 42.0],
+        [0.1, 13.0],
+        [0.2, 99.0],
+        [1.0, 42.0],
+        [1.1, 13.0],
+        [1.2, 99.0]
     ];
     let target = vec![0, 0, 0, 1, 1, 1];
     let task = ClassificationTask::new("bag_imp", features, target).unwrap();
 
     let mut bag = Bagging::new(|| Box::new(DecisionTree::default()))
-        .with_n_estimators(10).with_seed(42);
+        .with_n_estimators(10)
+        .with_seed(42);
     let model = bag.train_classif(&task).unwrap();
     let imp = model.feature_importance();
     assert!(imp.is_some(), "bagged DT should provide feature importance");
@@ -899,10 +1105,22 @@ fn bagging_feature_importance() {
 #[test]
 fn benchmark_random_forest_cv() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("bench_rf", features, target).unwrap();
@@ -918,8 +1136,16 @@ fn benchmark_random_forest_cv() {
 #[test]
 fn benchmark_gradient_boosting_holdout() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("bench_gb", features, target).unwrap();
@@ -1112,8 +1338,12 @@ fn pipeline_passthrough() {
 #[test]
 fn pipeline_single_transformer() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
-        [100.0, 100.0], [100.1, 99.9], [99.9, 100.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [100.0, 100.0],
+        [100.1, 99.9],
+        [99.9, 100.1]
     ];
     let target = vec![0, 0, 0, 1, 1, 1];
     let task = ClassificationTask::new("scaled", features, target).unwrap();
@@ -1123,7 +1353,9 @@ fn pipeline_single_transformer() {
         Box::new(DecisionTree::default()),
     );
     let model = pipe.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
 
     let acc = Accuracy.score(&pred).unwrap();
@@ -1137,7 +1369,10 @@ fn pipeline_multiple_transformers() {
     let task = ClassificationTask::new("multi", features, target).unwrap();
 
     let mut pipe = Pipeline::new(
-        vec![Box::new(MinMaxScaler::new()), Box::new(StandardScaler::new())],
+        vec![
+            Box::new(MinMaxScaler::new()),
+            Box::new(StandardScaler::new()),
+        ],
         Box::new(DecisionTree::default()),
     );
     let model = pipe.train_classif(&task).unwrap();
@@ -1148,10 +1383,22 @@ fn pipeline_multiple_transformers() {
 #[test]
 fn pipeline_in_benchmark_cv() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("pipe_cv", features, target).unwrap();
@@ -1165,14 +1412,25 @@ fn pipeline_in_benchmark_cv() {
     let result = benchmark::resample_classif(&mut pipe, &task, &cv, &[&Accuracy]).unwrap();
     assert_eq!(result.scores.len(), 4);
     let mean = result.mean_scores()[0];
-    assert!(mean >= 0.5, "pipeline CV accuracy should be reasonable, got {mean}");
+    assert!(
+        mean >= 0.5,
+        "pipeline CV accuracy should be reasonable, got {mean}"
+    );
 }
 
 #[test]
 fn pipeline_regression() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("pipe_reg", features, target).unwrap();
@@ -1190,8 +1448,12 @@ fn pipeline_regression() {
 #[test]
 fn pipeline_nested_in_bagging() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1]
     ];
     let target = vec![0, 0, 0, 1, 1, 1];
     let task = ClassificationTask::new("bag_pipe", features, target).unwrap();
@@ -1217,10 +1479,22 @@ fn grid_search_classif_finds_best() {
     use smelt_ml::tuning::ParamGrid;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("gs", features, target).unwrap();
@@ -1229,8 +1503,7 @@ fn grid_search_classif_finds_best() {
     grid.insert("max_depth".into(), vec![1.0, 3.0, 5.0]);
 
     let gs = GridSearch::new(
-        |params| Box::new(DecisionTree::new()
-            .with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
         grid,
     );
     let cv = CrossValidation::new(4).with_seed(42);
@@ -1248,8 +1521,16 @@ fn grid_search_regress() {
     use smelt_ml::tuning::ParamGrid;
 
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("gs_reg", features, target).unwrap();
@@ -1258,8 +1539,7 @@ fn grid_search_regress() {
     grid.insert("max_depth".into(), vec![1.0, 3.0, 5.0]);
 
     let gs = GridSearch::new(
-        |params| Box::new(DecisionTree::new()
-            .with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
         grid,
     );
     let ho = Holdout::new(0.8).with_seed(42);
@@ -1277,8 +1557,14 @@ fn grid_search_multi_param() {
     use smelt_ml::tuning::ParamGrid;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("gs_multi", features, target).unwrap();
@@ -1288,9 +1574,13 @@ fn grid_search_multi_param() {
     grid.insert("min_samples_split".into(), vec![2.0, 4.0]);
 
     let gs = GridSearch::new(
-        |params| Box::new(DecisionTree::new()
-            .with_max_depth(params["max_depth"] as usize)
-            .with_min_samples_split(params["min_samples_split"] as usize)),
+        |params| {
+            Box::new(
+                DecisionTree::new()
+                    .with_max_depth(params["max_depth"] as usize)
+                    .with_min_samples_split(params["min_samples_split"] as usize),
+            )
+        },
         grid,
     );
     let cv = CrossValidation::new(2).with_seed(42);
@@ -1306,22 +1596,38 @@ fn random_search_classif() {
     use smelt_ml::tuning::ParamSpace;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("rs", features, target).unwrap();
 
     let mut space = ParamSpace::new();
-    space.insert("max_depth".into(), ParamDistribution::Choice(vec![1.0, 3.0, 5.0, 10.0]));
+    space.insert(
+        "max_depth".into(),
+        ParamDistribution::Choice(vec![1.0, 3.0, 5.0, 10.0]),
+    );
 
     let rs = RandomSearch::new(
-        |params| Box::new(DecisionTree::new()
-            .with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
         space,
-    ).with_n_iter(5).with_seed(42);
+    )
+    .with_n_iter(5)
+    .with_seed(42);
 
     let cv = CrossValidation::new(4).with_seed(42);
     let result = rs.tune_classif(&task, &cv, &Accuracy).unwrap();
@@ -1335,8 +1641,16 @@ fn random_search_uniform() {
     use smelt_ml::tuning::ParamSpace;
 
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("rs_uni", features, target).unwrap();
@@ -1345,10 +1659,11 @@ fn random_search_uniform() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 10.0));
 
     let rs = RandomSearch::new(
-        |params| Box::new(DecisionTree::new()
-            .with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
         space,
-    ).with_n_iter(8).with_seed(42);
+    )
+    .with_n_iter(8)
+    .with_seed(42);
 
     let ho = Holdout::new(0.8).with_seed(42);
     let result = rs.tune_regress(&task, &ho, &Rmse).unwrap();
@@ -1369,20 +1684,27 @@ fn random_search_deterministic() {
     let task = ClassificationTask::new("det", features, target).unwrap();
 
     let mut space = ParamSpace::new();
-    space.insert("max_depth".into(), ParamDistribution::Choice(vec![1.0, 2.0, 3.0, 4.0, 5.0]));
+    space.insert(
+        "max_depth".into(),
+        ParamDistribution::Choice(vec![1.0, 2.0, 3.0, 4.0, 5.0]),
+    );
 
     let cv = CrossValidation::new(2).with_seed(42);
 
     let rs1 = RandomSearch::new(
         |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"] as usize)),
         space.clone(),
-    ).with_n_iter(3).with_seed(123);
+    )
+    .with_n_iter(3)
+    .with_seed(123);
     let r1 = rs1.tune_classif(&task, &cv, &Accuracy).unwrap();
 
     let rs2 = RandomSearch::new(
         |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"] as usize)),
         space,
-    ).with_n_iter(3).with_seed(123);
+    )
+    .with_n_iter(3)
+    .with_seed(123);
     let r2 = rs2.tune_classif(&task, &cv, &Accuracy).unwrap();
 
     assert_eq!(r1.best_params, r2.best_params);
@@ -1394,21 +1716,36 @@ fn random_search_log_uniform() {
     use smelt_ml::tuning::ParamSpace;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("log", features, target).unwrap();
 
     let mut space = ParamSpace::new();
-    space.insert("learning_rate".into(), ParamDistribution::LogUniform(0.001, 1.0));
+    space.insert(
+        "learning_rate".into(),
+        ParamDistribution::LogUniform(0.001, 1.0),
+    );
 
     let rs = RandomSearch::new(
-        |params| Box::new(LogisticRegression::new()
-            .with_learning_rate(params["learning_rate"])
-            .with_max_iter(500)),
+        |params| {
+            Box::new(
+                LogisticRegression::new()
+                    .with_learning_rate(params["learning_rate"])
+                    .with_max_iter(500),
+            )
+        },
         space,
-    ).with_n_iter(5).with_seed(42);
+    )
+    .with_n_iter(5)
+    .with_seed(42);
 
     let cv = CrossValidation::new(2).with_seed(42);
     let result = rs.tune_classif(&task, &cv, &Accuracy).unwrap();
@@ -1424,38 +1761,59 @@ fn random_search_log_uniform() {
 #[test]
 fn importance_informative_feature() {
     let features = array![
-        [0.0, 99.0], [0.1, 42.0], [0.2, 13.0], [0.0, 77.0],
-        [1.0, 99.0], [1.1, 42.0], [1.2, 13.0], [1.0, 77.0]
+        [0.0, 99.0],
+        [0.1, 42.0],
+        [0.2, 13.0],
+        [0.0, 77.0],
+        [1.0, 99.0],
+        [1.1, 42.0],
+        [1.2, 13.0],
+        [1.0, 77.0]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
-    let task = ClassificationTask::new("imp", features.clone(), target.clone()).unwrap()
-        .with_feature_names(vec!["signal".into(), "noise".into()]).unwrap();
+    let task = ClassificationTask::new("imp", features.clone(), target.clone())
+        .unwrap()
+        .with_feature_names(vec!["signal".into(), "noise".into()])
+        .unwrap();
 
     let mut tree = DecisionTree::default();
     let model = tree.train_classif(&task).unwrap();
 
     let imp = permutation_importance_classif(&*model, &task, &Accuracy, 5, 42).unwrap();
     assert_eq!(imp.len(), 2);
-    assert!(imp[0].importance >= imp[1].importance,
-        "signal should be more important than noise");
+    assert!(
+        imp[0].importance >= imp[1].importance,
+        "signal should be more important than noise"
+    );
 }
 
 #[test]
 fn importance_regression() {
     let features = array![
-        [1.0, 99.0], [2.0, 42.0], [3.0, 13.0], [4.0, 77.0],
-        [5.0, 99.0], [6.0, 42.0], [7.0, 13.0], [8.0, 77.0]
+        [1.0, 99.0],
+        [2.0, 42.0],
+        [3.0, 13.0],
+        [4.0, 77.0],
+        [5.0, 99.0],
+        [6.0, 42.0],
+        [7.0, 13.0],
+        [8.0, 77.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
-    let task = RegressionTask::new("imp_r", features, target).unwrap()
-        .with_feature_names(vec!["x".into(), "noise".into()]).unwrap();
+    let task = RegressionTask::new("imp_r", features, target)
+        .unwrap()
+        .with_feature_names(vec!["x".into(), "noise".into()])
+        .unwrap();
 
     let mut tree = DecisionTree::default();
     let model = tree.train_regress(&task).unwrap();
 
     let imp = permutation_importance_regress(&*model, &task, &Rmse, 5, 42).unwrap();
     assert_eq!(imp.len(), 2);
-    assert!(imp[0].importance > 0.0, "informative feature should have positive importance");
+    assert!(
+        imp[0].importance > 0.0,
+        "informative feature should have positive importance"
+    );
 }
 
 #[test]
@@ -1517,7 +1875,10 @@ fn spatial_block_spatial_separation() {
         let in_cluster2 = test.iter().filter(|&&i| i >= 10).count();
         in_cluster1 == 0 || in_cluster2 == 0
     });
-    assert!(has_separated, "spatial block should separate clusters into different folds");
+    assert!(
+        has_separated,
+        "spatial block should separate clusters into different folds"
+    );
 }
 
 #[test]
@@ -1533,7 +1894,10 @@ fn spatial_buffer_removes_nearby() {
             // Train should not contain nearby cluster points
             let nearby_in_train = train.iter().filter(|&&i| i < 3).count();
             // The buffer should remove at least some nearby points
-            assert!(nearby_in_train < 3, "buffer should remove nearby train samples");
+            assert!(
+                nearby_in_train < 3,
+                "buffer should remove nearby train samples"
+            );
         }
     }
 }
@@ -1546,7 +1910,10 @@ fn load_csv_classification() {
     let path = dir.path().join("test.csv");
     std::fs::write(&path, "x1,x2,label\n1.0,2.0,0\n3.0,4.0,1\n5.0,6.0,1\n").unwrap();
 
-    let task = CsvLoader::from_path(&path).target("label").load_classif().unwrap();
+    let task = CsvLoader::from_path(&path)
+        .target("label")
+        .load_classif()
+        .unwrap();
     assert_eq!(task.n_samples(), 3);
     assert_eq!(task.n_features(), 2);
     assert_eq!(task.target(), &[0, 1, 1]);
@@ -1559,7 +1926,10 @@ fn load_csv_regression() {
     let path = dir.path().join("test.csv");
     std::fs::write(&path, "x,y\n1.0,2.0\n3.0,6.0\n5.0,10.0\n").unwrap();
 
-    let task = CsvLoader::from_path(&path).target("y").load_regress().unwrap();
+    let task = CsvLoader::from_path(&path)
+        .target("y")
+        .load_regress()
+        .unwrap();
     assert_eq!(task.n_samples(), 3);
     assert_eq!(task.n_features(), 1);
     assert_eq!(task.target(), &[2.0, 6.0, 10.0]);
@@ -1571,7 +1941,10 @@ fn load_csv_string_target() {
     let path = dir.path().join("test.csv");
     std::fs::write(&path, "x,species\n1.0,cat\n2.0,dog\n3.0,cat\n").unwrap();
 
-    let task = CsvLoader::from_path(&path).target("species").load_classif().unwrap();
+    let task = CsvLoader::from_path(&path)
+        .target("species")
+        .load_classif()
+        .unwrap();
     assert_eq!(task.n_classes(), 2); // cat=0, dog=1
     assert_eq!(task.target(), &[0, 1, 0]);
 }
@@ -1703,7 +2076,10 @@ fn logloss_perfect() {
         probabilities: Some(vec![vec![1.0, 0.0], vec![0.0, 1.0]]),
     };
     let ll = LogLoss.score(&pred).unwrap();
-    assert!(ll < 1e-10, "perfect predictions should have near-zero logloss, got {ll}");
+    assert!(
+        ll < 1e-10,
+        "perfect predictions should have near-zero logloss, got {ll}"
+    );
 }
 
 #[test]
@@ -1738,12 +2114,17 @@ fn auc_perfect_binary() {
         predicted: vec![0, 0, 1, 1],
         truth: Some(vec![0, 0, 1, 1]),
         probabilities: Some(vec![
-            vec![1.0, 0.0], vec![0.9, 0.1],
-            vec![0.1, 0.9], vec![0.0, 1.0],
+            vec![1.0, 0.0],
+            vec![0.9, 0.1],
+            vec![0.1, 0.9],
+            vec![0.0, 1.0],
         ]),
     };
     let auc = AucRoc.score(&pred).unwrap();
-    assert!((auc - 1.0).abs() < 1e-10, "perfect separation should give AUC=1.0, got {auc}");
+    assert!(
+        (auc - 1.0).abs() < 1e-10,
+        "perfect separation should give AUC=1.0, got {auc}"
+    );
 }
 
 #[test]
@@ -1753,12 +2134,17 @@ fn auc_random_binary() {
         predicted: vec![0, 1, 0, 1],
         truth: Some(vec![0, 0, 1, 1]),
         probabilities: Some(vec![
-            vec![0.5, 0.5], vec![0.5, 0.5],
-            vec![0.5, 0.5], vec![0.5, 0.5],
+            vec![0.5, 0.5],
+            vec![0.5, 0.5],
+            vec![0.5, 0.5],
+            vec![0.5, 0.5],
         ]),
     };
     let auc = AucRoc.score(&pred).unwrap();
-    assert!((auc - 0.5).abs() < 1e-10, "random predictions should give AUC≈0.5, got {auc}");
+    assert!(
+        (auc - 0.5).abs() < 1e-10,
+        "random predictions should give AUC≈0.5, got {auc}"
+    );
 }
 
 #[test]
@@ -1786,7 +2172,10 @@ fn rsquared_mean_prediction() {
     // Predicting the mean always gives R²=0
     let pred = Prediction::regression_with_truth(vec![2.0, 2.0, 2.0], vec![1.0, 2.0, 3.0]);
     let r2 = RSquared.score(&pred).unwrap();
-    assert!(r2.abs() < 1e-10, "predicting mean should give R²=0, got {r2}");
+    assert!(
+        r2.abs() < 1e-10,
+        "predicting mean should give R²=0, got {r2}"
+    );
 }
 
 #[test]
@@ -1816,7 +2205,10 @@ fn mape_known_value() {
     // errors: |1-2|/|2|=0.5, |3-4|/|4|=0.25 → mean = 0.375
     let pred = Prediction::regression_with_truth(vec![1.0, 3.0], vec![2.0, 4.0]);
     let mape = Mape.score(&pred).unwrap();
-    assert!((mape - 0.375).abs() < 1e-10, "expected MAPE=0.375, got {mape}");
+    assert!(
+        (mape - 0.375).abs() < 1e-10,
+        "expected MAPE=0.375, got {mape}"
+    );
 }
 
 #[test]
@@ -1829,15 +2221,25 @@ fn mape_direction() {
 #[test]
 fn extra_trees_classif_separable() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.1, 0.2], [0.0, 0.1],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.1, 0.2],
+        [0.0, 0.1],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("et", features, target).unwrap();
 
     let mut et = ExtraTrees::new().with_n_estimators(20).with_seed(42);
     let model = et.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
     assert_eq!(acc, 1.0);
@@ -1851,7 +2253,9 @@ fn extra_trees_regress() {
 
     let mut et = ExtraTrees::new().with_n_estimators(20).with_seed(42);
     let model = et.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
     let rmse = Rmse.score(&pred).unwrap();
     assert!(rmse < 1.0, "ET should learn step function, got RMSE={rmse}");
@@ -1862,15 +2266,23 @@ fn extra_trees_regress() {
 #[test]
 fn naive_bayes_separable() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [5.0, 5.0], [5.1, 4.9], [4.9, 5.1], [5.0, 4.8]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [5.0, 5.0],
+        [5.1, 4.9],
+        [4.9, 5.1],
+        [5.0, 4.8]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("nb", features, target).unwrap();
 
     let mut nb = GaussianNB::new();
     let model = nb.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
     assert_eq!(acc, 1.0, "NB should separate widely spaced clusters");
@@ -1886,7 +2298,11 @@ fn naive_bayes_produces_probabilities() {
     let model = nb.train_classif(&task).unwrap();
     let pred = model.predict(task.features()).unwrap();
 
-    if let Prediction::Classification { probabilities: Some(probs), .. } = &pred {
+    if let Prediction::Classification {
+        probabilities: Some(probs),
+        ..
+    } = &pred
+    {
         for p in probs {
             let sum: f64 = p.iter().sum();
             assert!((sum - 1.0).abs() < 1e-10, "probabilities should sum to 1");
@@ -1915,10 +2331,15 @@ fn ridge_fits_linear() {
 
     let mut ridge = Ridge::new(0.01); // small regularization
     let model = ridge.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
     let rmse = Rmse.score(&pred).unwrap();
-    assert!(rmse < 0.5, "Ridge with small alpha should fit linear, got RMSE={rmse}");
+    assert!(
+        rmse < 0.5,
+        "Ridge with small alpha should fit linear, got RMSE={rmse}"
+    );
 }
 
 #[test]
@@ -1949,7 +2370,9 @@ fn lasso_fits_linear() {
 
     let mut lasso = Lasso::new(0.01);
     let model = lasso.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
     let rmse = Rmse.score(&pred).unwrap();
     assert!(rmse < 1.0, "Lasso should fit linear, got RMSE={rmse}");
@@ -1959,8 +2382,12 @@ fn lasso_fits_linear() {
 fn lasso_sparsity() {
     // x0 is informative, x1 is noise
     let features = array![
-        [1.0, 0.0], [2.0, 0.0], [3.0, 0.0],
-        [1.0, 1.0], [2.0, 1.0], [3.0, 1.0]
+        [1.0, 0.0],
+        [2.0, 0.0],
+        [3.0, 0.0],
+        [1.0, 1.0],
+        [2.0, 1.0],
+        [3.0, 1.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 2.0, 4.0, 6.0];
     let task = RegressionTask::new("lasso_sp", features, target).unwrap();
@@ -1968,7 +2395,10 @@ fn lasso_sparsity() {
     let mut lasso = Lasso::new(0.1);
     let model = lasso.train_regress(&task).unwrap();
     let imp = model.feature_importance().unwrap();
-    assert!(imp[0].1 > imp[1].1, "Lasso should assign more importance to informative feature");
+    assert!(
+        imp[0].1 > imp[1].1,
+        "Lasso should assign more importance to informative feature"
+    );
 }
 
 // ── Elastic Net tests ──────────────────────────────────────────────
@@ -1981,7 +2411,9 @@ fn elastic_net_fits_linear() {
 
     let mut enet = ElasticNet::new(0.01, 0.5);
     let model = enet.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
     let rmse = Rmse.score(&pred).unwrap();
     assert!(rmse < 1.0, "ElasticNet should fit linear, got RMSE={rmse}");
@@ -1991,19 +2423,21 @@ fn elastic_net_fits_linear() {
 
 #[test]
 fn adaboost_separable() {
-    let features = array![
-        [0.0], [0.5], [1.0], [1.5],
-        [3.0], [3.5], [4.0], [4.5]
-    ];
+    let features = array![[0.0], [0.5], [1.0], [1.5], [3.0], [3.5], [4.0], [4.5]];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("ada", features, target).unwrap();
 
     let mut ada = AdaBoost::new().with_n_estimators(20);
     let model = ada.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.75, "AdaBoost should learn separable data, got {acc}");
+    assert!(
+        acc >= 0.75,
+        "AdaBoost should learn separable data, got {acc}"
+    );
 }
 
 #[test]
@@ -2016,7 +2450,11 @@ fn adaboost_produces_probabilities() {
     let model = ada.train_classif(&task).unwrap();
     let pred = model.predict(task.features()).unwrap();
 
-    if let Prediction::Classification { probabilities: Some(probs), .. } = &pred {
+    if let Prediction::Classification {
+        probabilities: Some(probs),
+        ..
+    } = &pred
+    {
         for p in probs {
             let sum: f64 = p.iter().sum();
             assert!((sum - 1.0).abs() < 1e-10, "probabilities should sum to 1");
@@ -2040,15 +2478,28 @@ fn adaboost_rejects_regression() {
 #[test]
 fn linear_svm_separable() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("svm", features, target).unwrap();
 
-    let mut svm = LinearSVM::new().with_max_iter(2000).with_c(10.0).with_learning_rate(0.1);
+    let mut svm = LinearSVM::new()
+        .with_max_iter(2000)
+        .with_c(10.0)
+        .with_learning_rate(0.1);
     let model = svm.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
     assert!(acc >= 0.8, "SVM should classify separable data, got {acc}");
@@ -2057,8 +2508,12 @@ fn linear_svm_separable() {
 #[test]
 fn linear_svm_feature_importance() {
     let features = array![
-        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0],
-        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0]
+        [0.0, 42.0],
+        [0.1, 13.0],
+        [0.2, 99.0],
+        [1.0, 42.0],
+        [1.1, 13.0],
+        [1.2, 99.0]
     ];
     let target = vec![0, 0, 0, 1, 1, 1];
     let task = ClassificationTask::new("svm_imp", features, target).unwrap();
@@ -2083,10 +2538,22 @@ fn linear_svm_rejects_regression() {
 #[test]
 fn benchmark_new_learners_cv() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("bench_new", features, target).unwrap();
@@ -2111,8 +2578,16 @@ fn benchmark_new_learners_cv() {
 #[test]
 fn xgboost_classif_binary() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("xgb_bin", features, target).unwrap();
@@ -2122,18 +2597,29 @@ fn xgboost_classif_binary() {
         .with_max_depth(3)
         .with_learning_rate(0.3);
     let model = xgb.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.9, "XGBoost should classify separable data, got {acc}");
+    assert!(
+        acc >= 0.9,
+        "XGBoost should classify separable data, got {acc}"
+    );
 }
 
 #[test]
 fn xgboost_classif_multiclass() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.0, 0.1],
-        [1.0, 0.0], [1.1, 0.1], [1.0, 0.1],
-        [0.0, 1.0], [0.1, 1.1], [0.0, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.0, 0.1],
+        [1.0, 0.0],
+        [1.1, 0.1],
+        [1.0, 0.1],
+        [0.0, 1.0],
+        [0.1, 1.1],
+        [0.0, 1.1]
     ];
     let target = vec![0, 0, 0, 1, 1, 1, 2, 2, 2];
     let task = ClassificationTask::new("xgb_mc", features, target).unwrap();
@@ -2145,17 +2631,30 @@ fn xgboost_classif_multiclass() {
         .with_lambda(0.01)
         .with_min_child_weight(0.1);
     let model = xgb.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.66, "XGBoost multiclass should do better than random, got {acc}");
+    assert!(
+        acc >= 0.66,
+        "XGBoost multiclass should do better than random, got {acc}"
+    );
 }
 
 #[test]
 fn xgboost_regress() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("xgb_reg", features, target).unwrap();
@@ -2165,10 +2664,15 @@ fn xgboost_regress() {
         .with_max_depth(3)
         .with_learning_rate(0.3);
     let model = xgb.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
     let rmse = Rmse.score(&pred).unwrap();
-    assert!(rmse < 1.0, "XGBoost should learn linear trend, got RMSE={rmse}");
+    assert!(
+        rmse < 1.0,
+        "XGBoost should learn linear trend, got RMSE={rmse}"
+    );
 }
 
 #[test]
@@ -2190,8 +2694,16 @@ fn xgboost_regularization() {
 #[test]
 fn xgboost_feature_importance() {
     let features = array![
-        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0], [0.0, 55.0], [0.15, 30.0],
-        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0], [1.0, 55.0], [1.15, 30.0]
+        [0.0, 42.0],
+        [0.1, 13.0],
+        [0.2, 99.0],
+        [0.0, 55.0],
+        [0.15, 30.0],
+        [1.0, 42.0],
+        [1.1, 13.0],
+        [1.2, 99.0],
+        [1.0, 55.0],
+        [1.15, 30.0]
     ];
     let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("xgb_imp", features, target).unwrap();
@@ -2208,10 +2720,22 @@ fn xgboost_feature_importance() {
 #[test]
 fn xgboost_subsample() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("xgb_sub", features, target).unwrap();
@@ -2222,19 +2746,36 @@ fn xgboost_subsample() {
         .with_colsample_bytree(0.8)
         .with_seed(42);
     let model = xgb.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.5, "XGBoost with subsampling should work, got {acc}");
+    assert!(
+        acc >= 0.5,
+        "XGBoost with subsampling should work, got {acc}"
+    );
 }
 
 #[test]
 fn xgboost_in_benchmark() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("xgb_bench", features, target).unwrap();
@@ -2250,8 +2791,14 @@ fn xgboost_in_benchmark() {
 fn xgboost_handles_nan() {
     // Features with NaN — XGBoost should handle them natively
     let features = array![
-        [0.0, f64::NAN], [0.1, 0.1], [f64::NAN, 0.0], [0.0, 0.2],
-        [1.0, 1.0], [1.1, f64::NAN], [0.9, 1.1], [f64::NAN, 0.9]
+        [0.0, f64::NAN],
+        [0.1, 0.1],
+        [f64::NAN, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, f64::NAN],
+        [0.9, 1.1],
+        [f64::NAN, 0.9]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("xgb_nan", features, target).unwrap();
@@ -2261,7 +2808,9 @@ fn xgboost_handles_nan() {
         .with_max_depth(3)
         .with_learning_rate(0.3);
     let model = xgb.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
     assert!(acc >= 0.75, "XGBoost should handle NaN, got acc={acc}");
@@ -2271,8 +2820,12 @@ fn xgboost_handles_nan() {
 fn xgboost_nan_in_prediction() {
     // Train on clean data, predict with NaN
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1]
     ];
     let target = vec![0, 0, 0, 1, 1, 1];
     let task = ClassificationTask::new("xgb_nan_pred", features, target).unwrap();
@@ -2290,8 +2843,16 @@ fn xgboost_nan_in_prediction() {
 fn xgboost_exact_greedy_small_dataset() {
     // With only 10 samples and n_bins=256, exact greedy should activate
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("xgb_exact", features, target).unwrap();
@@ -2301,19 +2862,32 @@ fn xgboost_exact_greedy_small_dataset() {
         .with_max_depth(3)
         .with_learning_rate(0.3);
     let model = xgb.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
 
     let rmse = Rmse.score(&pred).unwrap();
     // Exact greedy should give much better RMSE than histogram on small data
-    assert!(rmse < 0.1, "exact greedy should fit small data precisely, got RMSE={rmse}");
+    assert!(
+        rmse < 0.1,
+        "exact greedy should fit small data precisely, got RMSE={rmse}"
+    );
 }
 
 #[test]
 fn xgboost_early_stopping_regress() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("xgb_es", features.clone(), target.clone()).unwrap();
@@ -2332,24 +2906,46 @@ fn xgboost_early_stopping_regress() {
     let model_full = xgb_full.train_regress(&task).unwrap();
 
     // Both should produce good predictions
-    let pred_es = model_es.predict(&features).unwrap()
+    let pred_es = model_es
+        .predict(&features)
+        .unwrap()
         .with_truth_regress(target.clone());
-    let pred_full = model_full.predict(&features).unwrap()
+    let pred_full = model_full
+        .predict(&features)
+        .unwrap()
         .with_truth_regress(target);
     let rmse_es = Rmse.score(&pred_es).unwrap();
     let rmse_full = Rmse.score(&pred_full).unwrap();
 
-    assert!(rmse_es < 1.0, "early stopped model should be accurate, got {rmse_es}");
-    assert!(rmse_full < 1.0, "full model should be accurate, got {rmse_full}");
+    assert!(
+        rmse_es < 1.0,
+        "early stopped model should be accurate, got {rmse_es}"
+    );
+    assert!(
+        rmse_full < 1.0,
+        "full model should be accurate, got {rmse_full}"
+    );
 }
 
 #[test]
 fn xgboost_early_stopping_classif() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("xgb_es_c", features, target).unwrap();
@@ -2359,10 +2955,15 @@ fn xgboost_early_stopping_classif() {
         .with_learning_rate(0.3)
         .with_early_stopping_rounds(5);
     let model = xgb.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.9, "early stopped classifier should work, got {acc}");
+    assert!(
+        acc >= 0.9,
+        "early stopped classifier should work, got {acc}"
+    );
 }
 
 // ── Conformal Prediction tests ─────────────────────────────────────
@@ -2394,9 +2995,7 @@ fn conformal_regression_coverage() {
 fn conformal_classification_sets() {
     use smelt_ml::conformal::ConformalClassifier;
 
-    let features = array![
-        [0.0], [0.5], [1.0], [1.5], [2.0], [2.5], [3.0], [3.5]
-    ];
+    let features = array![[0.0], [0.5], [1.0], [1.5], [2.0], [2.5], [3.0], [3.5]];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("cf_c", features, target).unwrap();
 
@@ -2421,10 +3020,22 @@ fn conformal_classification_sets() {
 #[test]
 fn stacking_classif() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("stack", features, target).unwrap();
@@ -2435,20 +3046,34 @@ fn stacking_classif() {
             Box::new(|| Box::new(KNearestNeighbors::new(3)) as Box<dyn Learner>),
         ],
         || Box::new(LogisticRegression::new().with_max_iter(500)),
-    ).with_cv_folds(2);
+    )
+    .with_cv_folds(2);
 
     let model = stack.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.75, "Stacking should classify separable data, got {acc}");
+    assert!(
+        acc >= 0.75,
+        "Stacking should classify separable data, got {acc}"
+    );
 }
 
 #[test]
 fn stacking_regress() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("stack_r", features, target).unwrap();
@@ -2459,7 +3084,8 @@ fn stacking_regress() {
             Box::new(|| Box::new(LinearRegression::default()) as Box<dyn Learner>),
         ],
         || Box::new(Ridge::new(0.1)),
-    ).with_cv_folds(2);
+    )
+    .with_cv_folds(2);
 
     let model = stack.train_regress(&task).unwrap();
     let pred = model.predict(task.features()).unwrap();
@@ -2474,12 +3100,16 @@ fn quantile_gb_median() {
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0];
     let task = RegressionTask::new("qgb", features.clone(), target.clone()).unwrap();
 
-    let mut qgb = QuantileGB::new(0.5).with_n_estimators(100).with_learning_rate(0.1);
+    let mut qgb = QuantileGB::new(0.5)
+        .with_n_estimators(100)
+        .with_learning_rate(0.1);
     let model = qgb.train_regress(&task).unwrap();
-    let pred = model.predict(&features).unwrap()
-        .with_truth_regress(target);
+    let pred = model.predict(&features).unwrap().with_truth_regress(target);
     let rmse = Rmse.score(&pred).unwrap();
-    assert!(rmse < 2.0, "median quantile should approximate well, got RMSE={rmse}");
+    assert!(
+        rmse < 2.0,
+        "median quantile should approximate well, got RMSE={rmse}"
+    );
 }
 
 #[test]
@@ -2497,10 +3127,17 @@ fn quantile_gb_interval() {
     let pred_lo = model_lo.predict(&features).unwrap();
     let pred_hi = model_hi.predict(&features).unwrap();
 
-    if let (Prediction::Regression { predicted: lo, .. }, Prediction::Regression { predicted: hi, .. }) = (&pred_lo, &pred_hi) {
+    if let (
+        Prediction::Regression { predicted: lo, .. },
+        Prediction::Regression { predicted: hi, .. },
+    ) = (&pred_lo, &pred_hi)
+    {
         // Upper quantile should generally be >= lower quantile
         let violations = lo.iter().zip(hi).filter(|(l, h)| l > h).count();
-        assert!(violations <= 1, "upper quantile should be >= lower in most cases");
+        assert!(
+            violations <= 1,
+            "upper quantile should be >= lower in most cases"
+        );
     }
 }
 
@@ -2509,15 +3146,23 @@ fn quantile_gb_interval() {
 #[test]
 fn ebm_classif() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("ebm", features, target).unwrap();
 
     let mut ebm = EBM::new().with_n_rounds(50).with_learning_rate(0.05);
     let model = ebm.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
     assert!(acc >= 0.75, "EBM should classify separable data, got {acc}");
@@ -2531,7 +3176,9 @@ fn ebm_regress() {
 
     let mut ebm = EBM::new().with_n_rounds(100).with_learning_rate(0.05);
     let model = ebm.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
     let rmse = Rmse.score(&pred).unwrap();
     assert!(rmse < 3.0, "EBM should learn linear trend, got RMSE={rmse}");
@@ -2540,8 +3187,14 @@ fn ebm_regress() {
 #[test]
 fn ebm_feature_importance() {
     let features = array![
-        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0], [0.0, 55.0],
-        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0], [1.0, 55.0]
+        [0.0, 42.0],
+        [0.1, 13.0],
+        [0.2, 99.0],
+        [0.0, 55.0],
+        [1.0, 42.0],
+        [1.1, 13.0],
+        [1.2, 99.0],
+        [1.0, 55.0]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("ebm_imp", features, target).unwrap();
@@ -2557,7 +3210,11 @@ fn ebm_feature_importance() {
 #[test]
 fn smote_balances_classes() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
         [1.0, 1.0],
     ];
     let target = vec![0, 0, 0, 0, 0, 1]; // 5 vs 1
@@ -2587,9 +3244,15 @@ fn smote_already_balanced() {
 #[test]
 fn smote_then_train() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
-        [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0],  // minority: 1 sample
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0], // minority: 1 sample
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1];
     let task = ClassificationTask::new("smote_train", features, target).unwrap();
@@ -2609,8 +3272,16 @@ fn smote_then_train() {
 fn geo_xgboost_basic_regression() {
     // Spatially varying relationship: target depends on position
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     // Target varies spatially: low values on left, high on right
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
@@ -2622,11 +3293,13 @@ fn geo_xgboost_basic_regression() {
         .with_n_estimators(50)
         .with_max_depth(3);
     let model = gxgb.train_regress(&task).unwrap();
-    let pred = model.predict(&features).unwrap()
-        .with_truth_regress(target);
+    let pred = model.predict(&features).unwrap().with_truth_regress(target);
 
     let rmse = Rmse.score(&pred).unwrap();
-    assert!(rmse < 5.0, "G-XGBoost should learn spatial pattern, got RMSE={rmse}");
+    assert!(
+        rmse < 5.0,
+        "G-XGBoost should learn spatial pattern, got RMSE={rmse}"
+    );
 }
 
 #[test]
@@ -2634,16 +3307,32 @@ fn geo_xgboost_spatial_heterogeneity() {
     // Two spatial clusters with different relationships
     // Left cluster: y = x, Right cluster: y = -x + 20
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],       // left cluster
-        [1.0], [2.0], [3.0], [4.0], [5.0]         // right cluster (same x, different y)
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0], // left cluster
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0] // right cluster (same x, different y)
     ];
     let target = vec![
-        1.0, 2.0, 3.0, 4.0, 5.0,     // y = x
-        19.0, 18.0, 17.0, 16.0, 15.0  // y = -x + 20
+        1.0, 2.0, 3.0, 4.0, 5.0, // y = x
+        19.0, 18.0, 17.0, 16.0, 15.0, // y = -x + 20
     ];
     let coords: Vec<(f64, f64)> = vec![
-        (0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0),
-        (100.0, 0.0), (101.0, 0.0), (102.0, 0.0), (103.0, 0.0), (104.0, 0.0),
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (2.0, 0.0),
+        (3.0, 0.0),
+        (4.0, 0.0),
+        (100.0, 0.0),
+        (101.0, 0.0),
+        (102.0, 0.0),
+        (103.0, 0.0),
+        (104.0, 0.0),
     ];
     let task = RegressionTask::new("hetero", features.clone(), target.clone()).unwrap();
 
@@ -2652,27 +3341,39 @@ fn geo_xgboost_spatial_heterogeneity() {
         .with_bandwidth(4)
         .with_n_estimators(50);
     let model = gxgb.train_regress(&task).unwrap();
-    let pred = model.predict(&features).unwrap()
+    let pred = model
+        .predict(&features)
+        .unwrap()
         .with_truth_regress(target.clone());
     let gxgb_rmse = Rmse.score(&pred).unwrap();
 
     // Compare with global XGBoost
     let mut xgb = XGBoost::new().with_n_estimators(50);
     let global_model = xgb.train_regress(&task).unwrap();
-    let global_pred = global_model.predict(&features).unwrap()
+    let global_pred = global_model
+        .predict(&features)
+        .unwrap()
         .with_truth_regress(target);
     let global_rmse = Rmse.score(&global_pred).unwrap();
 
     // G-XGBoost should perform at least as well as global
-    assert!(gxgb_rmse <= global_rmse + 1.0,
-        "G-XGBoost ({gxgb_rmse:.2}) should be competitive with global XGBoost ({global_rmse:.2})");
+    assert!(
+        gxgb_rmse <= global_rmse + 1.0,
+        "G-XGBoost ({gxgb_rmse:.2}) should be competitive with global XGBoost ({global_rmse:.2})"
+    );
 }
 
 #[test]
 fn geo_xgboost_feature_importance() {
     let features = array![
-        [0.0, 99.0], [1.0, 42.0], [2.0, 13.0], [3.0, 77.0],
-        [4.0, 99.0], [5.0, 42.0], [6.0, 13.0], [7.0, 77.0]
+        [0.0, 99.0],
+        [1.0, 42.0],
+        [2.0, 13.0],
+        [3.0, 77.0],
+        [4.0, 99.0],
+        [5.0, 42.0],
+        [6.0, 13.0],
+        [7.0, 77.0]
     ];
     let target = vec![0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0];
     let coords: Vec<(f64, f64)> = (0..8).map(|i| (i as f64, 0.0)).collect();
@@ -2714,11 +3415,17 @@ fn geo_xgboost_fixed_alpha() {
     let task = RegressionTask::new("alpha", features.clone(), target.clone()).unwrap();
 
     // alpha=0 should be pure global, alpha=1 pure local
-    let mut g0 = GeoXGBoost::new(coords.clone()).with_alpha(0.0).with_n_estimators(30).with_bandwidth(3);
+    let mut g0 = GeoXGBoost::new(coords.clone())
+        .with_alpha(0.0)
+        .with_n_estimators(30)
+        .with_bandwidth(3);
     let m0 = g0.train_regress(&task).unwrap();
     let p0 = m0.predict(&features).unwrap();
 
-    let mut g1 = GeoXGBoost::new(coords).with_alpha(1.0).with_n_estimators(30).with_bandwidth(3);
+    let mut g1 = GeoXGBoost::new(coords)
+        .with_alpha(1.0)
+        .with_n_estimators(30)
+        .with_bandwidth(3);
     let m1 = g1.train_regress(&task).unwrap();
     let p1 = m1.predict(&features).unwrap();
 
@@ -2734,10 +3441,22 @@ fn bayesian_optimizer_classif() {
     use smelt_ml::tuning::ParamSpace;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("bo", features, target).unwrap();
@@ -2746,10 +3465,12 @@ fn bayesian_optimizer_classif() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 10.0));
 
     let bo = BayesianOptimizer::new(
-        |params| Box::new(DecisionTree::new()
-            .with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
         space,
-    ).with_n_iter(15).with_n_initial(5).with_seed(42);
+    )
+    .with_n_iter(15)
+    .with_n_initial(5)
+    .with_seed(42);
 
     let cv = CrossValidation::new(3).with_seed(42);
     let result = bo.tune_classif(&task, &cv, &Accuracy).unwrap();
@@ -2764,8 +3485,16 @@ fn bayesian_optimizer_regress() {
     use smelt_ml::tuning::ParamSpace;
 
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("bo_r", features, target).unwrap();
@@ -2774,10 +3503,11 @@ fn bayesian_optimizer_regress() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 8.0));
 
     let bo = BayesianOptimizer::new(
-        |params| Box::new(DecisionTree::new()
-            .with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
         space,
-    ).with_n_iter(12).with_seed(42);
+    )
+    .with_n_iter(12)
+    .with_seed(42);
 
     let ho = Holdout::new(0.8).with_seed(42);
     let result = bo.tune_regress(&task, &ho, &Rmse).unwrap();
@@ -2791,23 +3521,41 @@ fn bayesian_optimizer_multi_param() {
     use smelt_ml::tuning::ParamSpace;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("bo_mp", features, target).unwrap();
 
     let mut space = ParamSpace::new();
-    space.insert("max_depth".into(), ParamDistribution::Choice(vec![1.0, 3.0, 5.0, 7.0]));
-    space.insert("n_estimators".into(), ParamDistribution::Uniform(10.0, 100.0));
+    space.insert(
+        "max_depth".into(),
+        ParamDistribution::Choice(vec![1.0, 3.0, 5.0, 7.0]),
+    );
+    space.insert(
+        "n_estimators".into(),
+        ParamDistribution::Uniform(10.0, 100.0),
+    );
 
     let bo = BayesianOptimizer::new(
-        |params| Box::new(RandomForest::new()
-            .with_n_estimators(params["n_estimators"] as usize)
-            .with_max_depth(params["max_depth"] as usize)
-            .with_seed(42)),
+        |params| {
+            Box::new(
+                RandomForest::new()
+                    .with_n_estimators(params["n_estimators"] as usize)
+                    .with_max_depth(params["max_depth"] as usize)
+                    .with_seed(42),
+            )
+        },
         space,
-    ).with_n_iter(10).with_seed(42);
+    )
+    .with_n_iter(10)
+    .with_seed(42);
 
     let cv = CrossValidation::new(2).with_seed(42);
     let result = bo.tune_classif(&task, &cv, &Accuracy).unwrap();
@@ -2822,21 +3570,36 @@ fn bayesian_optimizer_log_uniform() {
     use smelt_ml::tuning::ParamSpace;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("bo_lu", features, target).unwrap();
 
     let mut space = ParamSpace::new();
-    space.insert("learning_rate".into(), ParamDistribution::LogUniform(0.001, 1.0));
+    space.insert(
+        "learning_rate".into(),
+        ParamDistribution::LogUniform(0.001, 1.0),
+    );
 
     let bo = BayesianOptimizer::new(
-        |params| Box::new(LogisticRegression::new()
-            .with_learning_rate(params["learning_rate"])
-            .with_max_iter(500)),
+        |params| {
+            Box::new(
+                LogisticRegression::new()
+                    .with_learning_rate(params["learning_rate"])
+                    .with_max_iter(500),
+            )
+        },
         space,
-    ).with_n_iter(10).with_seed(42);
+    )
+    .with_n_iter(10)
+    .with_seed(42);
 
     let cv = CrossValidation::new(2).with_seed(42);
     let result = bo.tune_classif(&task, &cv, &Accuracy).unwrap();
@@ -2853,10 +3616,22 @@ fn bayesian_optimizer_beats_random() {
     use smelt_ml::tuning::{ParamSpace, RandomSearch};
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("bo_vs", features, target).unwrap();
@@ -2870,20 +3645,27 @@ fn bayesian_optimizer_beats_random() {
     let bo = BayesianOptimizer::new(
         |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"] as usize)),
         space.clone(),
-    ).with_n_iter(15).with_seed(42);
+    )
+    .with_n_iter(15)
+    .with_seed(42);
     let bo_result = bo.tune_classif(&task, &cv, &Accuracy).unwrap();
 
     // Random with same budget
     let rs = RandomSearch::new(
         |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"] as usize)),
         space,
-    ).with_n_iter(15).with_seed(42);
+    )
+    .with_n_iter(15)
+    .with_seed(42);
     let rs_result = rs.tune_classif(&task, &cv, &Accuracy).unwrap();
 
     // BO should be at least as good as random (on average it's better)
-    assert!(bo_result.best_score >= rs_result.best_score - 0.1,
+    assert!(
+        bo_result.best_score >= rs_result.best_score - 0.1,
         "BO ({:.4}) should be competitive with Random ({:.4})",
-        bo_result.best_score, rs_result.best_score);
+        bo_result.best_score,
+        rs_result.best_score
+    );
 }
 
 // ── Oblique Tree / Forest tests ────────────────────────────────────
@@ -2891,36 +3673,58 @@ fn bayesian_optimizer_beats_random() {
 #[test]
 fn oblique_tree_classif_separable() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("obl", features, target).unwrap();
 
     let mut tree = ObliqueTree::new().with_seed(42).with_n_projections(20);
     let model = tree.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.75, "ObliqueTree should classify separable data, got {acc}");
+    assert!(
+        acc >= 0.75,
+        "ObliqueTree should classify separable data, got {acc}"
+    );
 }
 
 #[test]
 fn oblique_tree_xor_pattern() {
     // XOR: axis-aligned trees struggle, oblique should do better
     let features = array![
-        [0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0],
-        [0.1, 0.1], [0.1, 0.9], [0.9, 0.1], [0.9, 0.9]
+        [0.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 0.0],
+        [1.0, 1.0],
+        [0.1, 0.1],
+        [0.1, 0.9],
+        [0.9, 0.1],
+        [0.9, 0.9]
     ];
     let target = vec![0, 1, 1, 0, 0, 1, 1, 0]; // XOR
     let task = ClassificationTask::new("xor", features, target).unwrap();
 
     let mut tree = ObliqueTree::new().with_seed(42).with_n_projections(30);
     let model = tree.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.5, "ObliqueTree on XOR should do at least random, got {acc}");
+    assert!(
+        acc >= 0.5,
+        "ObliqueTree on XOR should do at least random, got {acc}"
+    );
 }
 
 #[test]
@@ -2938,44 +3742,69 @@ fn oblique_tree_regress() {
 #[test]
 fn oblique_forest_classif() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("sporf", features, target).unwrap();
 
     let mut forest = ObliqueForest::new().with_n_estimators(20).with_seed(42);
     let model = forest.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert_eq!(acc, 1.0, "ObliqueForest should perfectly separate this data");
+    assert_eq!(
+        acc, 1.0,
+        "ObliqueForest should perfectly separate this data"
+    );
 }
 
 #[test]
 fn oblique_forest_regress() {
-    let features = array![
-        [1.0], [2.0], [3.0], [4.0],
-        [6.0], [7.0], [8.0], [9.0]
-    ];
+    let features = array![[1.0], [2.0], [3.0], [4.0], [6.0], [7.0], [8.0], [9.0]];
     let target = vec![0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0];
     let task = RegressionTask::new("sporf_r", features, target).unwrap();
 
     let mut forest = ObliqueForest::new().with_n_estimators(20).with_seed(42);
     let model = forest.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
     let rmse = Rmse.score(&pred).unwrap();
-    assert!(rmse < 2.0, "ObliqueForest should learn step function, got RMSE={rmse}");
+    assert!(
+        rmse < 2.0,
+        "ObliqueForest should learn step function, got RMSE={rmse}"
+    );
 }
 
 #[test]
 fn oblique_forest_feature_importance() {
     let features = array![
-        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0], [0.0, 55.0],
-        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0], [1.0, 55.0]
+        [0.0, 42.0],
+        [0.1, 13.0],
+        [0.2, 99.0],
+        [0.0, 55.0],
+        [1.0, 42.0],
+        [1.1, 13.0],
+        [1.2, 99.0],
+        [1.0, 55.0]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("sporf_imp", features, target).unwrap();
@@ -2983,16 +3812,31 @@ fn oblique_forest_feature_importance() {
     let mut forest = ObliqueForest::new().with_n_estimators(30).with_seed(42);
     let model = forest.train_classif(&task).unwrap();
     let imp = model.feature_importance();
-    assert!(imp.is_some(), "ObliqueForest should provide feature importance");
+    assert!(
+        imp.is_some(),
+        "ObliqueForest should provide feature importance"
+    );
 }
 
 #[test]
 fn oblique_forest_in_benchmark() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("sporf_bench", features, target).unwrap();
@@ -3012,8 +3856,16 @@ fn causal_forest_basic_ate() {
 
     // Treatment adds 3 to outcome
     let features = array![
-        [25.0], [30.0], [35.0], [40.0], [45.0],
-        [25.0], [30.0], [35.0], [40.0], [45.0],
+        [25.0],
+        [30.0],
+        [35.0],
+        [40.0],
+        [45.0],
+        [25.0],
+        [30.0],
+        [35.0],
+        [40.0],
+        [45.0],
     ];
     let treatment = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let outcome = vec![5.0, 6.0, 7.0, 8.0, 9.0, 8.0, 9.0, 10.0, 11.0, 12.0];
@@ -3024,10 +3876,16 @@ fn causal_forest_basic_ate() {
         .with_min_samples_leaf(2)
         .with_seed(42);
 
-    let result = cf.estimate(&features, &treatment, &outcome, &names).unwrap();
+    let result = cf
+        .estimate(&features, &treatment, &outcome, &names)
+        .unwrap();
 
     // ATE should be around 3.0
-    assert!(result.ate > 0.0, "ATE should be positive, got {}", result.ate);
+    assert!(
+        result.ate > 0.0,
+        "ATE should be positive, got {}",
+        result.ate
+    );
     assert_eq!(result.effects.len(), 10);
     assert!(!result.feature_importance.is_empty());
 }
@@ -3038,20 +3896,32 @@ fn causal_forest_heterogeneous_effect() {
 
     // Treatment effect varies: young people benefit more
     let features = array![
-        [20.0], [20.0], [20.0], [20.0],
-        [50.0], [50.0], [50.0], [50.0],
-        [20.0], [20.0], [20.0], [20.0],
-        [50.0], [50.0], [50.0], [50.0],
+        [20.0],
+        [20.0],
+        [20.0],
+        [20.0],
+        [50.0],
+        [50.0],
+        [50.0],
+        [50.0],
+        [20.0],
+        [20.0],
+        [20.0],
+        [20.0],
+        [50.0],
+        [50.0],
+        [50.0],
+        [50.0],
     ];
     let treatment = vec![
-        0, 0, 0, 0,  // young control
-        0, 0, 0, 0,  // old control
-        1, 1, 1, 1,  // young treated
-        1, 1, 1, 1,  // old treated
+        0, 0, 0, 0, // young control
+        0, 0, 0, 0, // old control
+        1, 1, 1, 1, // young treated
+        1, 1, 1, 1, // old treated
     ];
     let outcome = vec![
-        5.0, 5.0, 5.0, 5.0,   // young control: baseline 5
-        8.0, 8.0, 8.0, 8.0,   // old control: baseline 8
+        5.0, 5.0, 5.0, 5.0, // young control: baseline 5
+        8.0, 8.0, 8.0, 8.0, // old control: baseline 8
         15.0, 15.0, 15.0, 15.0, // young treated: +10
         10.0, 10.0, 10.0, 10.0, // old treated: +2
     ];
@@ -3062,7 +3932,9 @@ fn causal_forest_heterogeneous_effect() {
         .with_min_samples_leaf(2)
         .with_seed(42);
 
-    let result = cf.estimate(&features, &treatment, &outcome, &names).unwrap();
+    let result = cf
+        .estimate(&features, &treatment, &outcome, &names)
+        .unwrap();
 
     // Effects should differ between young and old
     let young_effects: Vec<f64> = result.effects[..4].iter().map(|e| e.estimate).collect();
@@ -3072,9 +3944,11 @@ fn causal_forest_heterogeneous_effect() {
 
     // With small data, at least the overall ATE should be positive
     // (treatment has a positive effect in both groups)
-    assert!(result.ate > 0.0,
+    assert!(
+        result.ate > 0.0,
         "ATE should be positive, got {:.2}. Young={young_avg:.2}, Old={old_avg:.2}",
-        result.ate);
+        result.ate
+    );
 }
 
 #[test]
@@ -3082,15 +3956,25 @@ fn causal_forest_confidence_intervals() {
     use smelt_ml::causal::CausalForest;
 
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [1.0], [2.0], [3.0], [4.0], [5.0],
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
     ];
     let treatment = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let outcome = vec![1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 5.0, 6.0, 7.0, 8.0];
     let names = vec!["x".to_string()];
 
     let cf = CausalForest::new().with_n_estimators(50).with_seed(42);
-    let result = cf.estimate(&features, &treatment, &outcome, &names).unwrap();
+    let result = cf
+        .estimate(&features, &treatment, &outcome, &names)
+        .unwrap();
 
     for effect in &result.effects {
         assert!(effect.ci_lower <= effect.estimate);
@@ -3108,7 +3992,10 @@ fn causal_forest_dimension_mismatch() {
     let outcome = vec![1.0, 2.0, 3.0];
 
     let cf = CausalForest::new();
-    assert!(cf.estimate(&features, &treatment, &outcome, &["x".into()]).is_err());
+    assert!(
+        cf.estimate(&features, &treatment, &outcome, &["x".into()])
+            .is_err()
+    );
 }
 
 // ── Feature Selection Filter tests ─────────────────────────────────
@@ -3118,7 +4005,7 @@ fn filter_variance_selects_non_constant() {
     use smelt_ml::preprocess::filter::FilterSelector;
 
     let features = array![
-        [1.0, 5.0, 0.0],  // col 0: varies, col 1: varies more, col 2: constant
+        [1.0, 5.0, 0.0], // col 0: varies, col 1: varies more, col 2: constant
         [2.0, 5.0, 0.0],
         [3.0, 5.0, 0.0],
         [4.0, 5.0, 0.0],
@@ -3127,10 +4014,7 @@ fn filter_variance_selects_non_constant() {
     let task = RegressionTask::new("var", features.clone(), target).unwrap();
 
     let mut selector = FilterSelector::variance(2); // keep top 2
-    let pipe = Pipeline::new(
-        vec![Box::new(selector)],
-        Box::new(DecisionTree::default()),
-    );
+    let pipe = Pipeline::new(vec![Box::new(selector)], Box::new(DecisionTree::default()));
     // The constant column should be dropped
     // Just verify it compiles and runs
     let mut pipe = Pipeline::new(
@@ -3138,7 +4022,9 @@ fn filter_variance_selects_non_constant() {
         Box::new(DecisionTree::default()),
     );
     let model = pipe.train_regress(&task).unwrap();
-    let pred = model.predict(&features.select(ndarray::Axis(1), &[0, 1])).unwrap();
+    let pred = model
+        .predict(&features.select(ndarray::Axis(1), &[0, 1]))
+        .unwrap();
     assert_eq!(pred.n_samples(), 4);
 }
 
@@ -3148,8 +4034,14 @@ fn filter_correlation_selects_informative() {
 
     // col 0: correlated with target, col 1: random noise
     let features = array![
-        [1.0, 42.0], [2.0, 13.0], [3.0, 99.0], [4.0, 55.0],
-        [5.0, 42.0], [6.0, 13.0], [7.0, 99.0], [8.0, 55.0],
+        [1.0, 42.0],
+        [2.0, 13.0],
+        [3.0, 99.0],
+        [4.0, 55.0],
+        [5.0, 42.0],
+        [6.0, 13.0],
+        [7.0, 99.0],
+        [8.0, 55.0],
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0]; // y = 2x
 
@@ -3158,7 +4050,10 @@ fn filter_correlation_selects_informative() {
 
     let selected = selector.selected_indices().unwrap();
     assert_eq!(selected.len(), 1);
-    assert_eq!(selected[0], 0, "should select feature 0 (correlated with target)");
+    assert_eq!(
+        selected[0], 0,
+        "should select feature 0 (correlated with target)"
+    );
 }
 
 #[test]
@@ -3167,8 +4062,14 @@ fn filter_anova_classif() {
 
     // col 0: separates classes, col 1: noise
     let features = array![
-        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0], [0.0, 55.0],
-        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0], [1.0, 55.0],
+        [0.0, 42.0],
+        [0.1, 13.0],
+        [0.2, 99.0],
+        [0.0, 55.0],
+        [1.0, 42.0],
+        [1.1, 13.0],
+        [1.2, 99.0],
+        [1.0, 55.0],
     ];
     let target = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
 
@@ -3184,8 +4085,14 @@ fn filter_information_gain_classif() {
     use smelt_ml::preprocess::filter::FilterSelector;
 
     let features = array![
-        [0.0, 42.0], [0.1, 13.0], [0.2, 99.0], [0.0, 55.0],
-        [1.0, 42.0], [1.1, 13.0], [1.2, 99.0], [1.0, 55.0],
+        [0.0, 42.0],
+        [0.1, 13.0],
+        [0.2, 99.0],
+        [0.0, 55.0],
+        [1.0, 42.0],
+        [1.1, 13.0],
+        [1.2, 99.0],
+        [1.0, 55.0],
     ];
     let target = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
 
@@ -3201,10 +4108,22 @@ fn filter_in_pipeline_with_cv() {
     use smelt_ml::preprocess::filter::FilterSelector;
 
     let features = array![
-        [0.0, 42.0, 99.0], [0.1, 13.0, 55.0], [0.2, 99.0, 42.0], [0.0, 55.0, 13.0],
-        [0.1, 42.0, 99.0], [0.2, 13.0, 55.0], [0.0, 99.0, 42.0], [0.1, 55.0, 13.0],
-        [1.0, 42.0, 99.0], [1.1, 13.0, 55.0], [1.2, 99.0, 42.0], [1.0, 55.0, 13.0],
-        [1.1, 42.0, 99.0], [1.2, 13.0, 55.0], [1.0, 99.0, 42.0], [1.1, 55.0, 13.0],
+        [0.0, 42.0, 99.0],
+        [0.1, 13.0, 55.0],
+        [0.2, 99.0, 42.0],
+        [0.0, 55.0, 13.0],
+        [0.1, 42.0, 99.0],
+        [0.2, 13.0, 55.0],
+        [0.0, 99.0, 42.0],
+        [0.1, 55.0, 13.0],
+        [1.0, 42.0, 99.0],
+        [1.1, 13.0, 55.0],
+        [1.2, 99.0, 42.0],
+        [1.0, 55.0, 13.0],
+        [1.1, 42.0, 99.0],
+        [1.2, 13.0, 55.0],
+        [1.0, 99.0, 42.0],
+        [1.1, 55.0, 13.0],
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("filter_cv", features, target).unwrap();
@@ -3220,7 +4139,10 @@ fn filter_in_pipeline_with_cv() {
 
     assert_eq!(result.scores.len(), 4);
     let mean_acc = result.mean_scores()[0];
-    assert!(mean_acc >= 0.5, "filtered pipeline should work, got {mean_acc}");
+    assert!(
+        mean_acc >= 0.5,
+        "filtered pipeline should work, got {mean_acc}"
+    );
 }
 
 #[test]
@@ -3228,8 +4150,14 @@ fn filter_mutual_info_regression() {
     use smelt_ml::preprocess::filter::FilterSelector;
 
     let features = array![
-        [1.0, 42.0], [2.0, 13.0], [3.0, 99.0], [4.0, 55.0],
-        [5.0, 42.0], [6.0, 13.0], [7.0, 99.0], [8.0, 55.0],
+        [1.0, 42.0],
+        [2.0, 13.0],
+        [3.0, 99.0],
+        [4.0, 55.0],
+        [5.0, 42.0],
+        [6.0, 13.0],
+        [7.0, 99.0],
+        [8.0, 55.0],
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
 
@@ -3247,7 +4175,14 @@ fn filter_mutual_info_regression() {
 #[test]
 fn kmeans_two_clusters() {
     use smelt_ml::cluster::KMeans;
-    let data = array![[0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [5.0, 5.0], [5.1, 4.9], [4.9, 5.1]];
+    let data = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [5.0, 5.0],
+        [5.1, 4.9],
+        [4.9, 5.1]
+    ];
     let result = KMeans::new(2).fit(&data).unwrap();
     assert_eq!(result.n_clusters, 2);
     // First 3 samples should be in one cluster, last 3 in another
@@ -3262,7 +4197,10 @@ fn kmeans_silhouette() {
     let data = array![[0.0, 0.0], [0.1, 0.1], [5.0, 5.0], [5.1, 5.1]];
     let result = KMeans::new(2).fit(&data).unwrap();
     let sil = result.silhouette_score(&data);
-    assert!(sil > 0.5, "well-separated clusters should have high silhouette, got {sil}");
+    assert!(
+        sil > 0.5,
+        "well-separated clusters should have high silhouette, got {sil}"
+    );
 }
 
 // ── DBSCAN tests ───────────────────────────────────────────────────
@@ -3288,7 +4226,12 @@ fn dbscan_noise_detection() {
 
 #[test]
 fn pca_reduces_dimensions() {
-    let data = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0], [10.0, 11.0, 12.0]];
+    let data = array![
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0],
+        [7.0, 8.0, 9.0],
+        [10.0, 11.0, 12.0]
+    ];
     let mut pca = PCA::new(2);
     let reduced = pca.fit_transform(&data).unwrap();
     assert_eq!(reduced.ncols(), 2);
@@ -3298,8 +4241,14 @@ fn pca_reduces_dimensions() {
 #[test]
 fn pca_in_pipeline() {
     let features = array![
-        [0.0, 0.0, 0.0], [0.1, 0.1, 0.1], [0.2, 0.0, 0.2], [0.0, 0.2, 0.1],
-        [1.0, 1.0, 1.0], [1.1, 0.9, 1.1], [0.9, 1.1, 0.9], [1.0, 0.9, 1.0]
+        [0.0, 0.0, 0.0],
+        [0.1, 0.1, 0.1],
+        [0.2, 0.0, 0.2],
+        [0.0, 0.2, 0.1],
+        [1.0, 1.0, 1.0],
+        [1.1, 0.9, 1.1],
+        [0.9, 1.1, 0.9],
+        [1.0, 0.9, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("pca_pipe", features, target).unwrap();
@@ -3320,8 +4269,14 @@ fn pca_in_pipeline() {
 #[test]
 fn rfe_selects_features() {
     let features = array![
-        [0.0, 42.0, 99.0], [0.1, 13.0, 55.0], [0.2, 99.0, 42.0], [0.0, 55.0, 13.0],
-        [1.0, 42.0, 99.0], [1.1, 13.0, 55.0], [1.2, 99.0, 42.0], [1.0, 55.0, 13.0],
+        [0.0, 42.0, 99.0],
+        [0.1, 13.0, 55.0],
+        [0.2, 99.0, 42.0],
+        [0.0, 55.0, 13.0],
+        [1.0, 42.0, 99.0],
+        [1.1, 13.0, 55.0],
+        [1.2, 99.0, 42.0],
+        [1.0, 55.0, 13.0],
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("rfe", features, target).unwrap();
@@ -3341,8 +4296,14 @@ fn benchmark_design_multi_learner() {
     use smelt_ml::benchmark_design::benchmark_classif;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("bd", features, target).unwrap();
@@ -3368,13 +4329,25 @@ fn benchmark_design_multi_learner() {
 
 #[test]
 fn hyperband_classif() {
-    use smelt_ml::tuning::{Hyperband, ParamSpace, ParamDistribution};
+    use smelt_ml::tuning::{Hyperband, ParamDistribution, ParamSpace};
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("hb", features, target).unwrap();
@@ -3383,10 +4356,11 @@ fn hyperband_classif() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 8.0));
 
     let hb = Hyperband::new(
-        |params| Box::new(DecisionTree::new()
-            .with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
         space,
-    ).with_max_folds(4).with_seed(42);
+    )
+    .with_max_folds(4)
+    .with_seed(42);
 
     let result = hb.tune_classif(&task, &Accuracy).unwrap();
     assert!(result.best_score >= 0.5);
@@ -3399,9 +4373,15 @@ fn hyperband_classif() {
 fn isolation_forest_detects_outlier() {
     use smelt_ml::cluster::IsolationForest;
     let data = array![
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 1.0],
-        [0.9, 0.9], [1.1, 1.1], [1.0, 0.9], [0.9, 1.0],
-        [50.0, 50.0],  // clear outlier
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 1.0],
+        [0.9, 0.9],
+        [1.1, 1.1],
+        [1.0, 0.9],
+        [0.9, 1.0],
+        [50.0, 50.0], // clear outlier
     ];
 
     let iforest = IsolationForest::new()
@@ -3412,8 +4392,13 @@ fn isolation_forest_detects_outlier() {
 
     assert_eq!(result.scores.len(), 9);
     // Outlier (index 8) should have the highest anomaly score
-    let max_idx = result.scores.iter().enumerate()
-        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap().0;
+    let max_idx = result
+        .scores
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        .unwrap()
+        .0;
     assert_eq!(max_idx, 8, "outlier at index 8 should have highest score");
     assert_eq!(result.labels[8], 1, "outlier should be labeled as anomaly");
 }
@@ -3421,19 +4406,20 @@ fn isolation_forest_detects_outlier() {
 #[test]
 fn isolation_forest_all_normal() {
     use smelt_ml::cluster::IsolationForest;
-    let data = array![
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 1.0],
-    ];
+    let data = array![[1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 1.0],];
     let iforest = IsolationForest::new()
         .with_n_estimators(50)
-        .with_contamination(0.0)  // no contamination expected
+        .with_contamination(0.0) // no contamination expected
         .with_seed(42);
     let result = iforest.fit_predict(&data).unwrap();
 
     // All scores should be relatively similar (no clear outlier)
     let mean_score = result.scores.iter().sum::<f64>() / result.scores.len() as f64;
     for &s in &result.scores {
-        assert!((s - mean_score).abs() < 0.3, "scores should be similar for uniform data");
+        assert!(
+            (s - mean_score).abs() < 0.3,
+            "scores should be similar for uniform data"
+        );
     }
 }
 
@@ -3441,9 +4427,13 @@ fn isolation_forest_all_normal() {
 fn isolation_forest_two_clusters_with_outlier() {
     use smelt_ml::cluster::IsolationForest;
     let data = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
-        [5.0, 5.0], [5.1, 4.9], [4.9, 5.1],
-        [100.0, 100.0],  // outlier far from both clusters
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [5.0, 5.0],
+        [5.1, 4.9],
+        [4.9, 5.1],
+        [100.0, 100.0], // outlier far from both clusters
     ];
     let iforest = IsolationForest::new()
         .with_n_estimators(100)
@@ -3451,7 +4441,10 @@ fn isolation_forest_two_clusters_with_outlier() {
         .with_seed(42);
     let result = iforest.fit_predict(&data).unwrap();
 
-    assert!(result.scores[6] > result.scores[0], "outlier should score higher than cluster point");
+    assert!(
+        result.scores[6] > result.scores[0],
+        "outlier should score higher than cluster point"
+    );
     assert!(result.n_anomalies >= 1, "should detect at least 1 anomaly");
 }
 
@@ -3462,12 +4455,24 @@ fn classifier_chain_basic() {
     use smelt_ml::multilabel::ClassifierChain;
 
     let features = array![
-        [1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0],
-        [1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0],
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0],
+        [0.0, 0.0],
     ];
     let labels = vec![
-        vec![1, 0, 1], vec![0, 1, 0], vec![1, 1, 1], vec![0, 0, 0],
-        vec![1, 0, 1], vec![0, 1, 0], vec![1, 1, 1], vec![0, 0, 0],
+        vec![1, 0, 1],
+        vec![0, 1, 0],
+        vec![1, 1, 1],
+        vec![0, 0, 0],
+        vec![1, 0, 1],
+        vec![0, 1, 0],
+        vec![1, 1, 1],
+        vec![0, 0, 0],
     ];
 
     let cc = ClassifierChain::new(|| Box::new(DecisionTree::default()));
@@ -3478,7 +4483,9 @@ fn classifier_chain_basic() {
     assert_eq!(pred.n_labels, 3);
     for row in &pred.labels {
         assert_eq!(row.len(), 3);
-        for &v in row { assert!(v <= 1, "labels should be 0 or 1"); }
+        for &v in row {
+            assert!(v <= 1, "labels should be 0 or 1");
+        }
     }
 }
 
@@ -3487,12 +4494,24 @@ fn classifier_chain_accuracy_metrics() {
     use smelt_ml::multilabel::ClassifierChain;
 
     let features = array![
-        [1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0],
-        [1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0],
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0],
+        [0.0, 0.0],
     ];
     let labels = vec![
-        vec![1, 0], vec![0, 1], vec![1, 1], vec![0, 0],
-        vec![1, 0], vec![0, 1], vec![1, 1], vec![0, 0],
+        vec![1, 0],
+        vec![0, 1],
+        vec![1, 1],
+        vec![0, 0],
+        vec![1, 0],
+        vec![0, 1],
+        vec![1, 1],
+        vec![0, 0],
     ];
 
     let cc = ClassifierChain::new(|| Box::new(DecisionTree::default()));
@@ -3504,7 +4523,10 @@ fn classifier_chain_accuracy_metrics() {
 
     assert!(subset_acc >= 0.0 && subset_acc <= 1.0);
     assert!(hamming >= 0.0 && hamming <= 1.0);
-    assert!(hamming >= subset_acc, "hamming score should be >= subset accuracy");
+    assert!(
+        hamming >= subset_acc,
+        "hamming score should be >= subset accuracy"
+    );
 }
 
 #[test]
@@ -3512,15 +4534,28 @@ fn classifier_chain_with_rf() {
     use smelt_ml::multilabel::ClassifierChain;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [1.0, 1.0], [1.1, 0.9],
-        [0.0, 0.0], [0.1, 0.1], [1.0, 1.0], [1.1, 0.9],
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [1.0, 1.0],
+        [1.1, 0.9],
     ];
     let labels = vec![
-        vec![0, 1], vec![0, 1], vec![1, 0], vec![1, 0],
-        vec![0, 1], vec![0, 1], vec![1, 0], vec![1, 0],
+        vec![0, 1],
+        vec![0, 1],
+        vec![1, 0],
+        vec![1, 0],
+        vec![0, 1],
+        vec![0, 1],
+        vec![1, 0],
+        vec![1, 0],
     ];
 
-    let cc = ClassifierChain::new(|| Box::new(RandomForest::new().with_n_estimators(10).with_seed(42)));
+    let cc =
+        ClassifierChain::new(|| Box::new(RandomForest::new().with_n_estimators(10).with_seed(42)));
     let model = cc.fit(&features, &labels).unwrap();
     let pred = model.predict(&features).unwrap();
 
@@ -3537,10 +4572,12 @@ fn qrf_predicts_median() {
 
     let mut qrf = QuantileForest::new().with_n_estimators(50).with_seed(42);
     let model = qrf.train_regress(&task).unwrap();
-    let pred = model.predict(&features).unwrap()
-        .with_truth_regress(target);
+    let pred = model.predict(&features).unwrap().with_truth_regress(target);
     let rmse = Rmse.score(&pred).unwrap();
-    assert!(rmse < 5.0, "QRF median should approximate well, got RMSE={rmse}");
+    assert!(
+        rmse < 5.0,
+        "QRF median should approximate well, got RMSE={rmse}"
+    );
 }
 
 #[test]
@@ -3563,8 +4600,16 @@ fn qrf_quantile_ordering() {
 #[test]
 fn qrf_in_benchmark() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("qrf_b", features, target).unwrap();
@@ -3580,7 +4625,11 @@ fn qrf_in_benchmark() {
 #[test]
 fn adasyn_balances_classes() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
         [1.0, 1.0],
     ];
     let target = vec![0, 0, 0, 0, 0, 1];
@@ -3592,7 +4641,10 @@ fn adasyn_balances_classes() {
     let n0 = balanced.target().iter().filter(|&&t| t == 0).count();
     let n1 = balanced.target().iter().filter(|&&t| t == 1).count();
     // ADASYN should approximately balance (may not be exact due to rounding)
-    assert!(n1 >= 3, "minority should have more samples after ADASYN: {n1}");
+    assert!(
+        n1 >= 3,
+        "minority should have more samples after ADASYN: {n1}"
+    );
     assert!(balanced.n_samples() > 6);
 }
 
@@ -3600,9 +4652,11 @@ fn adasyn_balances_classes() {
 fn adasyn_focuses_on_boundary() {
     // Minority samples near majority boundary should get more synthetic samples
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
-        [0.3, 0.3],  // minority NEAR majority (harder)
-        [5.0, 5.0],  // minority FAR from majority (easier)
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.3, 0.3], // minority NEAR majority (harder)
+        [5.0, 5.0], // minority FAR from majority (easier)
     ];
     let target = vec![0, 0, 0, 1, 1];
     let task = ClassificationTask::new("ada_bound", features, target).unwrap();
@@ -3620,8 +4674,12 @@ fn regressor_chain_basic() {
 
     let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]];
     let targets = vec![
-        vec![2.0, 10.0], vec![4.0, 20.0], vec![6.0, 30.0],
-        vec![8.0, 40.0], vec![10.0, 50.0], vec![12.0, 60.0],
+        vec![2.0, 10.0],
+        vec![4.0, 20.0],
+        vec![6.0, 30.0],
+        vec![8.0, 40.0],
+        vec![10.0, 50.0],
+        vec![12.0, 60.0],
     ];
 
     let rc = RegressorChain::new(|| Box::new(DecisionTree::default()));
@@ -3641,8 +4699,12 @@ fn regressor_chain_rmse() {
 
     let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]];
     let targets = vec![
-        vec![2.0, 1.0], vec![4.0, 4.0], vec![6.0, 9.0],
-        vec![8.0, 16.0], vec![10.0, 25.0], vec![12.0, 36.0],
+        vec![2.0, 1.0],
+        vec![4.0, 4.0],
+        vec![6.0, 9.0],
+        vec![8.0, 16.0],
+        vec![10.0, 25.0],
+        vec![12.0, 36.0],
     ];
 
     let rc = RegressorChain::new(|| Box::new(DecisionTree::default()));
@@ -3660,15 +4722,27 @@ fn cqr_adaptive_intervals() {
     use smelt_ml::conformal::cqr::CQR;
 
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0],
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0],
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("cqr", features.clone(), target.clone()).unwrap();
 
     // Train lower (0.1) and upper (0.9) quantile models
-    let mut lower_gb = QuantileGB::new(0.1).with_n_estimators(50).with_learning_rate(0.1);
-    let mut upper_gb = QuantileGB::new(0.9).with_n_estimators(50).with_learning_rate(0.1);
+    let mut lower_gb = QuantileGB::new(0.1)
+        .with_n_estimators(50)
+        .with_learning_rate(0.1);
+    let mut upper_gb = QuantileGB::new(0.9)
+        .with_n_estimators(50)
+        .with_learning_rate(0.1);
 
     let lower_model = lower_gb.train_regress(&task).unwrap();
     let upper_model = upper_gb.train_regress(&task).unwrap();
@@ -3677,7 +4751,14 @@ fn cqr_adaptive_intervals() {
     let cal_features = array![[7.0], [8.0], [9.0], [10.0]];
     let cal_targets = vec![14.0, 16.0, 18.0, 20.0];
 
-    let cqr = CQR::calibrate(&*lower_model, &*upper_model, &cal_features, &cal_targets, 0.1).unwrap();
+    let cqr = CQR::calibrate(
+        &*lower_model,
+        &*upper_model,
+        &cal_features,
+        &cal_targets,
+        0.1,
+    )
+    .unwrap();
     let intervals = cqr.predict(&array![[3.0], [6.0]]).unwrap();
 
     assert_eq!(intervals.len(), 2);
@@ -3692,8 +4773,16 @@ fn cqr_adaptive_intervals() {
 #[test]
 fn lightgbm_classif_binary() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("lgbm", features, target).unwrap();
@@ -3703,17 +4792,30 @@ fn lightgbm_classif_binary() {
         .with_num_leaves(8)
         .with_learning_rate(0.1);
     let model = lgbm.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.5, "LightGBM should classify separable data, got {acc}");
+    assert!(
+        acc >= 0.5,
+        "LightGBM should classify separable data, got {acc}"
+    );
 }
 
 #[test]
 fn lightgbm_regress() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("lgbm_r", features, target).unwrap();
@@ -3722,19 +4824,36 @@ fn lightgbm_regress() {
         .with_n_estimators(100)
         .with_learning_rate(0.1);
     let model = lgbm.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
     let rmse = Rmse.score(&pred).unwrap();
-    assert!(rmse < 2.0, "LightGBM should learn linear trend, got RMSE={rmse}");
+    assert!(
+        rmse < 2.0,
+        "LightGBM should learn linear trend, got RMSE={rmse}"
+    );
 }
 
 #[test]
 fn lightgbm_in_benchmark() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("lgbm_b", features, target).unwrap();
@@ -3748,16 +4867,29 @@ fn lightgbm_in_benchmark() {
 #[test]
 fn lightgbm_multiclass() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.0, 0.1], [0.1, 0.0],
-        [1.0, 0.0], [1.1, 0.1], [1.0, 0.1], [1.1, 0.0],
-        [0.0, 1.0], [0.1, 1.1], [0.0, 1.1], [0.1, 1.0]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.0],
+        [1.0, 0.0],
+        [1.1, 0.1],
+        [1.0, 0.1],
+        [1.1, 0.0],
+        [0.0, 1.0],
+        [0.1, 1.1],
+        [0.0, 1.1],
+        [0.1, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2];
     let task = ClassificationTask::new("lgbm_mc", features, target).unwrap();
 
-    let mut lgbm = LightGBM::new().with_n_estimators(50).with_learning_rate(0.1);
+    let mut lgbm = LightGBM::new()
+        .with_n_estimators(50)
+        .with_learning_rate(0.1);
     let model = lgbm.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
     assert!(acc >= 0.33, "LightGBM multiclass should work, got {acc}");
@@ -3768,15 +4900,28 @@ fn lightgbm_multiclass() {
 #[test]
 fn catboost_classif_binary() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.1, 1.0]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("cb", features, target).unwrap();
 
-    let mut cb = CatBoost::new().with_n_estimators(50).with_depth(3).with_learning_rate(0.1);
+    let mut cb = CatBoost::new()
+        .with_n_estimators(50)
+        .with_depth(3)
+        .with_learning_rate(0.1);
     let model = cb.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
     assert!(acc >= 0.5, "CatBoost should classify, got {acc}");
@@ -3785,15 +4930,25 @@ fn catboost_classif_binary() {
 #[test]
 fn catboost_regress() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("cb_r", features, target).unwrap();
 
     let mut cb = CatBoost::new().with_n_estimators(100).with_depth(3);
     let model = cb.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
     let rmse = Rmse.score(&pred).unwrap();
     assert!(rmse < 3.0, "CatBoost should learn linear, got RMSE={rmse}");
@@ -3803,8 +4958,14 @@ fn catboost_regress() {
 fn catboost_with_categoricals() {
     // Feature 1 is categorical: 0.0=cat_A, 1.0=cat_B
     let features = array![
-        [0.5, 0.0], [0.6, 0.0], [0.7, 0.0], [0.8, 0.0],
-        [0.5, 1.0], [0.6, 1.0], [0.7, 1.0], [0.8, 1.0]
+        [0.5, 0.0],
+        [0.6, 0.0],
+        [0.7, 0.0],
+        [0.8, 0.0],
+        [0.5, 1.0],
+        [0.6, 1.0],
+        [0.7, 1.0],
+        [0.8, 1.0]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("cb_cat", features, target).unwrap();
@@ -3814,19 +4975,36 @@ fn catboost_with_categoricals() {
         .with_depth(3)
         .with_cat_features(vec![1]); // mark feature 1 as categorical
     let model = cb.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.5, "CatBoost with categoricals should work, got {acc}");
+    assert!(
+        acc >= 0.5,
+        "CatBoost with categoricals should work, got {acc}"
+    );
 }
 
 #[test]
 fn catboost_in_benchmark() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("cb_b", features, target).unwrap();
@@ -3844,21 +5022,53 @@ fn rsf_basic_prediction() {
     use smelt_ml::survival::{RandomSurvivalForest, SurvivalEvent};
 
     let features = array![
-        [25.0, 0.0], [30.0, 1.0], [35.0, 0.0], [40.0, 1.0],
-        [50.0, 0.0], [55.0, 1.0], [60.0, 0.0], [65.0, 1.0],
+        [25.0, 0.0],
+        [30.0, 1.0],
+        [35.0, 0.0],
+        [40.0, 1.0],
+        [50.0, 0.0],
+        [55.0, 1.0],
+        [60.0, 0.0],
+        [65.0, 1.0],
     ];
     let events = vec![
-        SurvivalEvent { time: 10.0, event: true },
-        SurvivalEvent { time: 15.0, event: false },
-        SurvivalEvent { time: 8.0, event: true },
-        SurvivalEvent { time: 20.0, event: false },
-        SurvivalEvent { time: 5.0, event: true },
-        SurvivalEvent { time: 12.0, event: true },
-        SurvivalEvent { time: 3.0, event: true },
-        SurvivalEvent { time: 7.0, event: false },
+        SurvivalEvent {
+            time: 10.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 15.0,
+            event: false,
+        },
+        SurvivalEvent {
+            time: 8.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 20.0,
+            event: false,
+        },
+        SurvivalEvent {
+            time: 5.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 12.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 3.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 7.0,
+            event: false,
+        },
     ];
 
-    let rsf = RandomSurvivalForest::new().with_n_estimators(50).with_seed(42);
+    let rsf = RandomSurvivalForest::new()
+        .with_n_estimators(50)
+        .with_seed(42);
     let predictions = rsf.fit_predict(&features, &events).unwrap();
 
     assert_eq!(predictions.len(), 8);
@@ -3867,7 +5077,12 @@ fn rsf_basic_prediction() {
         assert!(!pred.survival.is_empty());
         // Survival should be monotonically non-increasing
         for w in pred.survival.windows(2) {
-            assert!(w[0] >= w[1] - 1e-10, "survival should decrease: {} >= {}", w[0], w[1]);
+            assert!(
+                w[0] >= w[1] - 1e-10,
+                "survival should decrease: {} >= {}",
+                w[0],
+                w[1]
+            );
         }
     }
 }
@@ -3876,28 +5091,55 @@ fn rsf_basic_prediction() {
 fn rsf_concordance_index() {
     use smelt_ml::survival::{RandomSurvivalForest, SurvivalEvent, concordance_index};
 
-    let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0],
-    ];
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0],];
     // Higher feature value = shorter survival (clear signal)
     let events = vec![
-        SurvivalEvent { time: 100.0, event: true },
-        SurvivalEvent { time: 80.0, event: true },
-        SurvivalEvent { time: 60.0, event: true },
-        SurvivalEvent { time: 50.0, event: true },
-        SurvivalEvent { time: 40.0, event: true },
-        SurvivalEvent { time: 30.0, event: true },
-        SurvivalEvent { time: 20.0, event: true },
-        SurvivalEvent { time: 10.0, event: true },
+        SurvivalEvent {
+            time: 100.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 80.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 60.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 50.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 40.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 30.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 20.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 10.0,
+            event: true,
+        },
     ];
 
-    let rsf = RandomSurvivalForest::new().with_n_estimators(50).with_seed(42);
+    let rsf = RandomSurvivalForest::new()
+        .with_n_estimators(50)
+        .with_seed(42);
     let predictions = rsf.fit_predict(&features, &events).unwrap();
 
     let c_idx = concordance_index(&predictions, &events);
     assert!(c_idx >= 0.0 && c_idx <= 1.0);
     // With a clear monotonic relationship, C-index should be reasonable
-    assert!(c_idx >= 0.4, "C-index should be above random (0.5), got {c_idx}");
+    assert!(
+        c_idx >= 0.4,
+        "C-index should be above random (0.5), got {c_idx}"
+    );
 }
 
 #[test]
@@ -3906,15 +5148,35 @@ fn rsf_survival_at_time() {
 
     let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]];
     let events = vec![
-        SurvivalEvent { time: 5.0, event: true },
-        SurvivalEvent { time: 10.0, event: true },
-        SurvivalEvent { time: 15.0, event: false },
-        SurvivalEvent { time: 20.0, event: true },
-        SurvivalEvent { time: 25.0, event: true },
-        SurvivalEvent { time: 30.0, event: false },
+        SurvivalEvent {
+            time: 5.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 10.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 15.0,
+            event: false,
+        },
+        SurvivalEvent {
+            time: 20.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 25.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 30.0,
+            event: false,
+        },
     ];
 
-    let rsf = RandomSurvivalForest::new().with_n_estimators(30).with_seed(42);
+    let rsf = RandomSurvivalForest::new()
+        .with_n_estimators(30)
+        .with_seed(42);
     let preds = rsf.fit_predict(&features, &events).unwrap();
 
     // Survival at time 0 should be ~1.0, and decrease over time
@@ -3932,8 +5194,14 @@ fn shap_regress_basic() {
     use smelt_ml::importance::shap::tree_shap_regress;
 
     let features = array![
-        [0.0, 99.0], [1.0, 42.0], [2.0, 13.0], [3.0, 77.0],
-        [4.0, 99.0], [5.0, 42.0], [6.0, 13.0], [7.0, 77.0],
+        [0.0, 99.0],
+        [1.0, 42.0],
+        [2.0, 13.0],
+        [3.0, 77.0],
+        [4.0, 99.0],
+        [5.0, 42.0],
+        [6.0, 13.0],
+        [7.0, 77.0],
     ];
     let target = vec![0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0];
     let task = RegressionTask::new("shap", features, target).unwrap();
@@ -3949,8 +5217,12 @@ fn shap_regress_basic() {
         // prediction should approximately equal base_value + sum(shap)
         let reconstructed = exp.base_value + exp.values.iter().sum::<f64>();
         // Allow some tolerance due to sampling approximation
-        assert!((reconstructed - exp.prediction).abs() < 15.0,
-            "pred={:.2}, reconstructed={:.2}", exp.prediction, reconstructed);
+        assert!(
+            (reconstructed - exp.prediction).abs() < 15.0,
+            "pred={:.2}, reconstructed={:.2}",
+            exp.prediction,
+            reconstructed
+        );
     }
 
     // Global importance should exist
@@ -3962,8 +5234,14 @@ fn shap_classif_basic() {
     use smelt_ml::importance::shap::tree_shap_classif;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("shap_c", features, target).unwrap();
@@ -3975,12 +5253,18 @@ fn shap_classif_basic() {
 
     assert_eq!(result.explanations.len(), 8);
     // Class 1 samples should have positive total SHAP, class 0 negative
-    let class1_shap: f64 = result.explanations[4..8].iter()
-        .map(|e| e.values.iter().sum::<f64>()).sum();
-    let class0_shap: f64 = result.explanations[0..4].iter()
-        .map(|e| e.values.iter().sum::<f64>()).sum();
-    assert!(class1_shap >= class0_shap - 0.5,
-        "class 1 should have higher SHAP sum: c1={class1_shap:.2}, c0={class0_shap:.2}");
+    let class1_shap: f64 = result.explanations[4..8]
+        .iter()
+        .map(|e| e.values.iter().sum::<f64>())
+        .sum();
+    let class0_shap: f64 = result.explanations[0..4]
+        .iter()
+        .map(|e| e.values.iter().sum::<f64>())
+        .sum();
+    assert!(
+        class1_shap >= class0_shap - 0.5,
+        "class 1 should have higher SHAP sum: c1={class1_shap:.2}, c0={class0_shap:.2}"
+    );
 }
 
 #[test]
@@ -3989,12 +5273,20 @@ fn shap_global_importance_order() {
 
     // Feature 0 is informative, feature 1 is noise
     let features = array![
-        [0.0, 42.0], [1.0, 13.0], [2.0, 99.0], [3.0, 55.0],
-        [4.0, 42.0], [5.0, 13.0], [6.0, 99.0], [7.0, 55.0],
+        [0.0, 42.0],
+        [1.0, 13.0],
+        [2.0, 99.0],
+        [3.0, 55.0],
+        [4.0, 42.0],
+        [5.0, 13.0],
+        [6.0, 99.0],
+        [7.0, 55.0],
     ];
     let target = vec![0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0];
-    let task = RegressionTask::new("shap_gi", features, target).unwrap()
-        .with_feature_names(vec!["signal".into(), "noise".into()]).unwrap();
+    let task = RegressionTask::new("shap_gi", features, target)
+        .unwrap()
+        .with_feature_names(vec!["signal".into(), "noise".into()])
+        .unwrap();
 
     let mut dt = DecisionTree::default();
     let model = dt.train_regress(&task).unwrap();
@@ -4002,12 +5294,22 @@ fn shap_global_importance_order() {
     let result = tree_shap_regress(&*model, &task, 8).unwrap();
 
     // Signal feature should have higher global importance
-    let signal_imp = result.global_importance.iter()
-        .find(|(n, _)| n == "signal").unwrap().1;
-    let noise_imp = result.global_importance.iter()
-        .find(|(n, _)| n == "noise").unwrap().1;
-    assert!(signal_imp >= noise_imp,
-        "signal ({signal_imp:.4}) should be >= noise ({noise_imp:.4})");
+    let signal_imp = result
+        .global_importance
+        .iter()
+        .find(|(n, _)| n == "signal")
+        .unwrap()
+        .1;
+    let noise_imp = result
+        .global_importance
+        .iter()
+        .find(|(n, _)| n == "noise")
+        .unwrap()
+        .1;
+    assert!(
+        signal_imp >= noise_imp,
+        "signal ({signal_imp:.4}) should be >= noise ({noise_imp:.4})"
+    );
 }
 
 // ── Hoeffding Tree tests ───────────────────────────────────────────
@@ -4015,20 +5317,37 @@ fn shap_global_importance_order() {
 #[test]
 fn hoeffding_tree_classif() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1],
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1],
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("ht", features, target).unwrap();
 
     let mut ht = HoeffdingTree::new().with_grace_period(5).with_delta(1e-3);
     let model = ht.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
-    assert!(acc >= 0.5, "HoeffdingTree should do better than random, got {acc}");
+    assert!(
+        acc >= 0.5,
+        "HoeffdingTree should do better than random, got {acc}"
+    );
 }
 
 #[test]
@@ -4061,10 +5380,22 @@ fn hoeffding_tree_online() {
 #[test]
 fn hoeffding_tree_in_benchmark() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1],
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1],
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("ht_b", features, target).unwrap();
@@ -4082,10 +5413,22 @@ fn des_basic_classif() {
     use smelt_ml::learner::DynamicEnsemble;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("des", features, target).unwrap();
@@ -4094,10 +5437,13 @@ fn des_basic_classif() {
         Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>),
         Box::new(|| Box::new(KNearestNeighbors::new(3)) as Box<dyn Learner>),
         Box::new(|| Box::new(GaussianNB::new()) as Box<dyn Learner>),
-    ]).with_k_neighbors(3);
+    ])
+    .with_k_neighbors(3);
 
     let model = des.train_classif(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_classif(task.target().to_vec());
     let acc = Accuracy.score(&pred).unwrap();
     assert!(acc >= 0.5, "DES should classify, got {acc}");
@@ -4144,7 +5490,10 @@ fn edge_all_same_class() {
     let model = dt.train_classif(&task).unwrap();
     let pred = model.predict(task.features()).unwrap();
     if let Prediction::Classification { predicted, .. } = &pred {
-        assert!(predicted.iter().all(|&p| p == 0), "all predictions should be class 0");
+        assert!(
+            predicted.iter().all(|&p| p == 0),
+            "all predictions should be class 0"
+        );
     }
 }
 
@@ -4156,7 +5505,9 @@ fn edge_all_same_target_regress() {
 
     let mut rf = RandomForest::new().with_n_estimators(10).with_seed(42);
     let model = rf.train_regress(&task).unwrap();
-    let pred = model.predict(task.features()).unwrap()
+    let pred = model
+        .predict(task.features())
+        .unwrap()
         .with_truth_regress(task.target().to_vec());
     let rmse = Rmse.score(&pred).unwrap();
     assert!(rmse < 1.0, "all same target should give near-zero RMSE");
@@ -4166,7 +5517,12 @@ fn edge_all_same_target_regress() {
 
 #[test]
 fn edge_large_values() {
-    let features = array![[1e10, 1e10], [1e10 + 1.0, 1e10 + 1.0], [0.0, 0.0], [1.0, 1.0]];
+    let features = array![
+        [1e10, 1e10],
+        [1e10 + 1.0, 1e10 + 1.0],
+        [0.0, 0.0],
+        [1.0, 1.0]
+    ];
     let target = vec![1, 1, 0, 0];
     let task = ClassificationTask::new("large", features, target).unwrap();
 
@@ -4195,13 +5551,17 @@ fn edge_imbalanced_99_1() {
     // 99 samples class 0, 1 sample class 1
     let mut feat_data = vec![vec![0.0; 2]; 100];
     let mut target = vec![0usize; 100];
-    for i in 0..99 { feat_data[i] = vec![i as f64 * 0.01, 0.0]; }
+    for i in 0..99 {
+        feat_data[i] = vec![i as f64 * 0.01, 0.0];
+    }
     feat_data[99] = vec![5.0, 5.0];
     target[99] = 1;
 
     let mut features = Array2::zeros((100, 2));
     for (i, row) in feat_data.iter().enumerate() {
-        for (j, &v) in row.iter().enumerate() { features[[i, j]] = v; }
+        for (j, &v) in row.iter().enumerate() {
+            features[[i, j]] = v;
+        }
     }
 
     let task = ClassificationTask::new("imb", features, target).unwrap();
@@ -4216,10 +5576,22 @@ fn edge_imbalanced_99_1() {
 #[test]
 fn benchmark_all_learners_cv() {
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [0.1, 0.0], [0.2, 0.1], [0.0, 0.1], [0.1, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9],
-        [1.1, 1.0], [0.9, 1.0], [1.0, 1.1], [1.1, 1.1]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
     ];
     let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("all", features, target).unwrap();
@@ -4227,26 +5599,55 @@ fn benchmark_all_learners_cv() {
 
     // Test each learner that wasn't in previous benchmark tests
     let learners: Vec<(&str, Box<dyn Learner>)> = vec![
-        ("extra_trees", Box::new(ExtraTrees::new().with_n_estimators(10).with_seed(42))),
+        (
+            "extra_trees",
+            Box::new(ExtraTrees::new().with_n_estimators(10).with_seed(42)),
+        ),
         ("gaussian_nb", Box::new(GaussianNB::new())),
         ("ridge_classif_skip", Box::new(DecisionTree::default())), // placeholder
         ("adaboost", Box::new(AdaBoost::new().with_n_estimators(10))),
-        ("linear_svm", Box::new(LinearSVM::new().with_max_iter(500).with_c(10.0).with_learning_rate(0.1))),
-        ("ebm", Box::new(EBM::new().with_n_rounds(20).with_learning_rate(0.05))),
-        ("hoeffding", Box::new(HoeffdingTree::new().with_grace_period(3))),
+        (
+            "linear_svm",
+            Box::new(
+                LinearSVM::new()
+                    .with_max_iter(500)
+                    .with_c(10.0)
+                    .with_learning_rate(0.1),
+            ),
+        ),
+        (
+            "ebm",
+            Box::new(EBM::new().with_n_rounds(20).with_learning_rate(0.05)),
+        ),
+        (
+            "hoeffding",
+            Box::new(HoeffdingTree::new().with_grace_period(3)),
+        ),
     ];
 
     for (name, mut learner) in learners {
         let r = benchmark::resample_classif(&mut *learner, &task, &cv, &[&Accuracy]);
-        assert!(r.is_ok(), "learner {name} failed in benchmark CV: {:?}", r.err());
+        assert!(
+            r.is_ok(),
+            "learner {name} failed in benchmark CV: {:?}",
+            r.err()
+        );
     }
 }
 
 #[test]
 fn benchmark_all_regressors_cv() {
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("all_r", features, target).unwrap();
@@ -4256,13 +5657,23 @@ fn benchmark_all_regressors_cv() {
         ("ridge", Box::new(Ridge::new(0.1))),
         ("lasso", Box::new(Lasso::new(0.01))),
         ("elastic_net", Box::new(ElasticNet::new(0.01, 0.5))),
-        ("quantile_gb", Box::new(QuantileGB::new(0.5).with_n_estimators(20))),
-        ("quantile_forest", Box::new(QuantileForest::new().with_n_estimators(10).with_seed(42))),
+        (
+            "quantile_gb",
+            Box::new(QuantileGB::new(0.5).with_n_estimators(20)),
+        ),
+        (
+            "quantile_forest",
+            Box::new(QuantileForest::new().with_n_estimators(10).with_seed(42)),
+        ),
     ];
 
     for (name, mut learner) in learners {
         let r = benchmark::resample_regress(&mut *learner, &task, &ho, &[&Rmse]);
-        assert!(r.is_ok(), "learner {name} failed in benchmark: {:?}", r.err());
+        assert!(
+            r.is_ok(),
+            "learner {name} failed in benchmark: {:?}",
+            r.err()
+        );
     }
 }
 
@@ -4273,16 +5684,25 @@ fn des_different_base_learners() {
     use smelt_ml::learner::DynamicEnsemble;
 
     let features = array![
-        [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-        [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9]
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9]
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("des2", features, target).unwrap();
 
     let mut des = DynamicEnsemble::new(vec![
         Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>),
-        Box::new(|| Box::new(RandomForest::new().with_n_estimators(5).with_seed(42)) as Box<dyn Learner>),
-    ]).with_k_neighbors(3);
+        Box::new(|| {
+            Box::new(RandomForest::new().with_n_estimators(5).with_seed(42)) as Box<dyn Learner>
+        }),
+    ])
+    .with_k_neighbors(3);
 
     let model = des.train_classif(&task).unwrap();
     let pred = model.predict(task.features()).unwrap();
@@ -4293,11 +5713,19 @@ fn des_different_base_learners() {
 
 #[test]
 fn hyperband_regress() {
-    use smelt_ml::tuning::{Hyperband, ParamSpace, ParamDistribution};
+    use smelt_ml::tuning::{Hyperband, ParamDistribution, ParamSpace};
 
     let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0],
-        [6.0], [7.0], [8.0], [9.0], [10.0]
+        [1.0],
+        [2.0],
+        [3.0],
+        [4.0],
+        [5.0],
+        [6.0],
+        [7.0],
+        [8.0],
+        [9.0],
+        [10.0]
     ];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
     let task = RegressionTask::new("hb_r", features, target).unwrap();
@@ -4308,7 +5736,9 @@ fn hyperband_regress() {
     let hb = Hyperband::new(
         |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
         space,
-    ).with_max_folds(3).with_seed(42);
+    )
+    .with_max_folds(3)
+    .with_seed(42);
 
     let result = hb.tune_regress(&task, &Rmse).unwrap();
     assert!(!result.all_results.is_empty());
@@ -4320,17 +5750,20 @@ fn hyperband_regress() {
 #[test]
 fn rfe_in_pipeline() {
     let features = array![
-        [0.0, 42.0, 99.0], [0.1, 13.0, 55.0], [0.2, 99.0, 42.0], [0.0, 55.0, 13.0],
-        [1.0, 42.0, 99.0], [1.1, 13.0, 55.0], [1.2, 99.0, 42.0], [1.0, 55.0, 13.0],
+        [0.0, 42.0, 99.0],
+        [0.1, 13.0, 55.0],
+        [0.2, 99.0, 42.0],
+        [0.0, 55.0, 13.0],
+        [1.0, 42.0, 99.0],
+        [1.1, 13.0, 55.0],
+        [1.2, 99.0, 42.0],
+        [1.0, 55.0, 13.0],
     ];
     let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
     let task = ClassificationTask::new("rfe_pipe", features, target).unwrap();
 
     let rfe = RFE::classif(|| Box::new(DecisionTree::default()), 2);
-    let mut pipe = Pipeline::new(
-        vec![Box::new(rfe)],
-        Box::new(DecisionTree::default()),
-    );
+    let mut pipe = Pipeline::new(vec![Box::new(rfe)], Box::new(DecisionTree::default()));
     let model = pipe.train_classif(&task).unwrap();
     let pred = model.predict(task.features()).unwrap();
     assert_eq!(pred.n_samples(), 8);
@@ -4356,9 +5789,12 @@ fn conformal_different_alphas() {
     let cf_95 = ConformalRegressor::calibrate(&*model, &cal, &cal_t, 0.05).unwrap();
     let cf_80 = ConformalRegressor::calibrate(&*model, &cal, &cal_t, 0.20).unwrap();
 
-    assert!(cf_95.interval_width() >= cf_80.interval_width(),
+    assert!(
+        cf_95.interval_width() >= cf_80.interval_width(),
         "95% CI should be >= 80% CI: {:.2} vs {:.2}",
-        cf_95.interval_width(), cf_80.interval_width());
+        cf_95.interval_width(),
+        cf_80.interval_width()
+    );
 }
 
 // ── Survival: censoring scenarios ──────────────────────────────────
@@ -4367,27 +5803,53 @@ fn conformal_different_alphas() {
 fn rsf_heavy_censoring() {
     use smelt_ml::survival::{RandomSurvivalForest, SurvivalEvent};
 
-    let features = array![
-        [1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0],
-    ];
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0],];
     // Heavy censoring: only 2 of 8 are events
     let events = vec![
-        SurvivalEvent { time: 10.0, event: false },
-        SurvivalEvent { time: 15.0, event: true },
-        SurvivalEvent { time: 8.0, event: false },
-        SurvivalEvent { time: 20.0, event: false },
-        SurvivalEvent { time: 5.0, event: false },
-        SurvivalEvent { time: 12.0, event: true },
-        SurvivalEvent { time: 3.0, event: false },
-        SurvivalEvent { time: 7.0, event: false },
+        SurvivalEvent {
+            time: 10.0,
+            event: false,
+        },
+        SurvivalEvent {
+            time: 15.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 8.0,
+            event: false,
+        },
+        SurvivalEvent {
+            time: 20.0,
+            event: false,
+        },
+        SurvivalEvent {
+            time: 5.0,
+            event: false,
+        },
+        SurvivalEvent {
+            time: 12.0,
+            event: true,
+        },
+        SurvivalEvent {
+            time: 3.0,
+            event: false,
+        },
+        SurvivalEvent {
+            time: 7.0,
+            event: false,
+        },
     ];
 
-    let rsf = RandomSurvivalForest::new().with_n_estimators(20).with_seed(42);
+    let rsf = RandomSurvivalForest::new()
+        .with_n_estimators(20)
+        .with_seed(42);
     let preds = rsf.fit_predict(&features, &events).unwrap();
     assert_eq!(preds.len(), 8);
     // With heavy censoring, survival probabilities should still be valid
     for p in &preds {
-        for &s in &p.survival { assert!(s >= 0.0 && s <= 1.0 + 1e-10); }
+        for &s in &p.survival {
+            assert!(s >= 0.0 && s <= 1.0 + 1e-10);
+        }
     }
 }
 

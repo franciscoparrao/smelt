@@ -1,14 +1,14 @@
 //! Hyperparameter tuning: grid search, random search.
 
-pub mod grid_search;
-pub mod random_search;
 pub mod bayesian;
+pub mod grid_search;
 pub mod hyperband;
+pub mod random_search;
 
-pub use grid_search::GridSearch;
-pub use random_search::RandomSearch;
 pub use bayesian::BayesianOptimizer;
+pub use grid_search::GridSearch;
 pub use hyperband::Hyperband;
+pub use random_search::RandomSearch;
 
 use std::collections::HashMap;
 
@@ -54,13 +54,27 @@ impl TuneResult {
         maximize: bool,
     ) -> Self {
         let best_idx = if maximize {
-            results.iter().enumerate()
-                .max_by(|a, b| a.1.1.partial_cmp(&b.1.1).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap().0
+            results
+                .iter()
+                .enumerate()
+                .max_by(|a, b| {
+                    a.1.1
+                        .partial_cmp(&b.1.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap()
+                .0
         } else {
-            results.iter().enumerate()
-                .min_by(|a, b| a.1.1.partial_cmp(&b.1.1).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap().0
+            results
+                .iter()
+                .enumerate()
+                .min_by(|a, b| {
+                    a.1.1
+                        .partial_cmp(&b.1.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap()
+                .0
         };
 
         Self {

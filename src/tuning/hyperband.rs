@@ -3,15 +3,15 @@
 //! Evaluates many configurations with few resources (small CV folds),
 //! discards the worst, and allocates more resources to the best.
 
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use crate::task::{ClassificationTask, RegressionTask};
+use super::{ParamDistribution, ParamSet, ParamSpace, TuneResult};
+use crate::Result;
+use crate::benchmark;
 use crate::learner::Learner;
 use crate::measure::Measure;
 use crate::resample::CrossValidation;
-use crate::benchmark;
-use crate::Result;
-use super::{ParamSet, ParamSpace, ParamDistribution, TuneResult};
+use crate::task::{ClassificationTask, RegressionTask};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Hyperband tuner for efficient hyperparameter optimization.
 ///
@@ -70,9 +70,18 @@ impl Hyperband {
         }
     }
 
-    pub fn with_max_folds(mut self, n: usize) -> Self { self.max_folds = n; self }
-    pub fn with_eta(mut self, e: usize) -> Self { self.eta = e; self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn with_max_folds(mut self, n: usize) -> Self {
+        self.max_folds = n;
+        self
+    }
+    pub fn with_eta(mut self, e: usize) -> Self {
+        self.eta = e;
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 
     fn sample_random(&self, rng: &mut StdRng) -> ParamSet {
         use rand::Rng;
@@ -106,9 +115,10 @@ impl Hyperband {
 
         // Successive halving brackets
         for s in (0..=s_max).rev() {
-            let n_configs = ((self.eta.pow(s as u32)) as f64 * (s_max + 1) as f64
-                / (s + 1) as f64).ceil() as usize;
-            let min_folds = (self.max_folds as f64 / self.eta.pow(s as u32) as f64).max(2.0) as usize;
+            let n_configs = ((self.eta.pow(s as u32)) as f64 * (s_max + 1) as f64 / (s + 1) as f64)
+                .ceil() as usize;
+            let min_folds =
+                (self.max_folds as f64 / self.eta.pow(s as u32) as f64).max(2.0) as usize;
 
             // Sample initial configurations
             let mut configs: Vec<ParamSet> = (0..n_configs)
@@ -135,9 +145,11 @@ impl Hyperband {
 
                 // Keep top 1/eta
                 if maximize {
-                    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    scored
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 } else {
-                    scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    scored
+                        .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
                 }
 
                 let keep = (configs.len() / self.eta).max(1);
@@ -147,15 +159,15 @@ impl Hyperband {
             }
         }
 
-        Ok(TuneResult::select_best(all_results, measure.id().to_string(), maximize))
+        Ok(TuneResult::select_best(
+            all_results,
+            measure.id().to_string(),
+            maximize,
+        ))
     }
 
     /// Tune for regression using successive halving.
-    pub fn tune_regress(
-        &self,
-        task: &RegressionTask,
-        measure: &dyn Measure,
-    ) -> Result<TuneResult> {
+    pub fn tune_regress(&self, task: &RegressionTask, measure: &dyn Measure) -> Result<TuneResult> {
         let maximize = measure.maximize();
         let mut rng = StdRng::seed_from_u64(self.seed);
 
@@ -163,9 +175,10 @@ impl Hyperband {
         let mut all_results: Vec<(ParamSet, f64)> = Vec::new();
 
         for s in (0..=s_max).rev() {
-            let n_configs = ((self.eta.pow(s as u32)) as f64 * (s_max + 1) as f64
-                / (s + 1) as f64).ceil() as usize;
-            let min_folds = (self.max_folds as f64 / self.eta.pow(s as u32) as f64).max(2.0) as usize;
+            let n_configs = ((self.eta.pow(s as u32)) as f64 * (s_max + 1) as f64 / (s + 1) as f64)
+                .ceil() as usize;
+            let min_folds =
+                (self.max_folds as f64 / self.eta.pow(s as u32) as f64).max(2.0) as usize;
 
             let mut configs: Vec<ParamSet> = (0..n_configs)
                 .map(|_| self.sample_random(&mut rng))
@@ -187,9 +200,11 @@ impl Hyperband {
                 all_results.extend(scored.iter().cloned());
 
                 if maximize {
-                    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    scored
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 } else {
-                    scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    scored
+                        .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
                 }
 
                 let keep = (configs.len() / self.eta).max(1);
@@ -198,6 +213,10 @@ impl Hyperband {
             }
         }
 
-        Ok(TuneResult::select_best(all_results, measure.id().to_string(), maximize))
+        Ok(TuneResult::select_best(
+            all_results,
+            measure.id().to_string(),
+            maximize,
+        ))
     }
 }

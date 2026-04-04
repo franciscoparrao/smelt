@@ -11,12 +11,12 @@
 //! - Bandwidth optimization via leave-one-out CV
 //! - Local feature importance
 
-use ndarray::Array2;
-use crate::task::{RegressionTask, ClassificationTask, Task};
-use crate::learner::{Learner, TrainedModel};
 use crate::learner::xgboost::XGBoost;
+use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::{SmeltError, Result};
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::{Result, SmeltError};
+use ndarray::Array2;
 
 /// Geographical-XGBoost for spatially local regression.
 ///
@@ -73,13 +73,34 @@ impl GeoXGBoost {
         }
     }
 
-    pub fn with_bandwidth(mut self, bw: usize) -> Self { self.bandwidth = bw; self }
-    pub fn with_n_estimators(mut self, n: usize) -> Self { self.n_estimators = n; self }
-    pub fn with_max_depth(mut self, d: usize) -> Self { self.max_depth = d; self }
-    pub fn with_learning_rate(mut self, lr: f64) -> Self { self.learning_rate = lr; self }
-    pub fn with_lambda(mut self, l: f64) -> Self { self.lambda = l; self }
-    pub fn with_alpha(mut self, a: f64) -> Self { self.alpha = Some(a); self }
-    pub fn with_seed(mut self, s: u64) -> Self { self.seed = s; self }
+    pub fn with_bandwidth(mut self, bw: usize) -> Self {
+        self.bandwidth = bw;
+        self
+    }
+    pub fn with_n_estimators(mut self, n: usize) -> Self {
+        self.n_estimators = n;
+        self
+    }
+    pub fn with_max_depth(mut self, d: usize) -> Self {
+        self.max_depth = d;
+        self
+    }
+    pub fn with_learning_rate(mut self, lr: f64) -> Self {
+        self.learning_rate = lr;
+        self
+    }
+    pub fn with_lambda(mut self, l: f64) -> Self {
+        self.lambda = l;
+        self
+    }
+    pub fn with_alpha(mut self, a: f64) -> Self {
+        self.alpha = Some(a);
+        self
+    }
+    pub fn with_seed(mut self, s: u64) -> Self {
+        self.seed = s;
+        self
+    }
 
     fn make_xgb(&self) -> XGBoost {
         XGBoost::new()
@@ -114,9 +135,7 @@ fn spatial_weights(coords: &[(f64, f64)], center: usize, n_neighbors: usize) -> 
     let ci = coords[center];
 
     // Compute distances to all other points
-    let mut dists: Vec<(usize, f64)> = (0..n)
-        .map(|j| (j, dist(ci, coords[j])))
-        .collect();
+    let mut dists: Vec<(usize, f64)> = (0..n).map(|j| (j, dist(ci, coords[j]))).collect();
     dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // Adaptive bandwidth = distance to the N-th nearest neighbor
@@ -189,30 +208,48 @@ impl TrainedModel for TrainedGeoXGBoost {
 
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
         // Average local importances across all spatial units
-        let valid: Vec<&Vec<(String, f64)>> = self.local_importances.iter()
-            .filter_map(|i| i.as_ref()).collect();
-        if valid.is_empty() { return self.global_model.feature_importance(); }
+        let valid: Vec<&Vec<(String, f64)>> = self
+            .local_importances
+            .iter()
+            .filter_map(|i| i.as_ref())
+            .collect();
+        if valid.is_empty() {
+            return self.global_model.feature_importance();
+        }
 
         let n_features = valid[0].len();
         let mut avg = vec![0.0; n_features];
         let mut names = Vec::new();
         for imp in &valid {
-            if names.is_empty() { names = imp.iter().map(|(n, _)| n.clone()).collect(); }
-            for (j, (_, v)) in imp.iter().enumerate() { avg[j] += v; }
+            if names.is_empty() {
+                names = imp.iter().map(|(n, _)| n.clone()).collect();
+            }
+            for (j, (_, v)) in imp.iter().enumerate() {
+                avg[j] += v;
+            }
         }
         let n_valid = valid.len() as f64;
-        Some(names.into_iter().zip(avg).map(|(n, v)| (n, v / n_valid)).collect())
+        Some(
+            names
+                .into_iter()
+                .zip(avg)
+                .map(|(n, v)| (n, v / n_valid))
+                .collect(),
+        )
     }
 }
-
 
 // ── Learner implementation ──────────────────────────────────────────
 
 impl Learner for GeoXGBoost {
-    fn id(&self) -> &str { "geo_xgboost" }
+    fn id(&self) -> &str {
+        "geo_xgboost"
+    }
 
     fn train_classif(&mut self, _: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other("GeoXGBoost only supports regression".into()))
+        Err(SmeltError::Other(
+            "GeoXGBoost only supports regression".into(),
+        ))
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
@@ -239,7 +276,9 @@ impl Learner for GeoXGBoost {
         };
 
         // Global errors per point
-        let global_errors: Vec<f64> = target.iter().zip(&global_vals)
+        let global_errors: Vec<f64> = target
+            .iter()
+            .zip(&global_vals)
             .map(|(y, p)| (y - p).abs())
             .collect();
 
@@ -252,9 +291,8 @@ impl Learner for GeoXGBoost {
             let ws = spatial_weights(&self.coords, i, bandwidth);
 
             // Create weighted training data: include samples with ws > 0 (excluding center)
-            let weighted_indices: Vec<usize> = (0..n_samples)
-                .filter(|&j| ws[j] > 0.0 && j != i)
-                .collect();
+            let weighted_indices: Vec<usize> =
+                (0..n_samples).filter(|&j| ws[j] > 0.0 && j != i).collect();
 
             if weighted_indices.len() < 3 {
                 // Not enough neighbors: use global model for this point
@@ -291,24 +329,26 @@ impl Learner for GeoXGBoost {
         }
 
         // Step 3: Compute alpha weights (Eq. 19, 20)
-        let alphas: Vec<f64> = (0..n_samples).map(|i| {
-            match self.alpha {
-                Some(a) => a, // fixed alpha
-                None => {
-                    // Adaptive: favor local when it has lower error
-                    let e_local = (target[i] - local_preds[i]).abs();
-                    let e_global = global_errors[i];
-                    if e_local <= e_global {
-                        1.0 // local is better: use 100% local
-                    } else {
-                        // Local is worse: blend based on error ratio
-                        // α = 1 - (e_local - e_global) / e_local.max(1e-10)
-                        let ratio = (e_local - e_global) / e_local.max(1e-10);
-                        (1.0 - ratio).max(0.0)
+        let alphas: Vec<f64> = (0..n_samples)
+            .map(|i| {
+                match self.alpha {
+                    Some(a) => a, // fixed alpha
+                    None => {
+                        // Adaptive: favor local when it has lower error
+                        let e_local = (target[i] - local_preds[i]).abs();
+                        let e_global = global_errors[i];
+                        if e_local <= e_global {
+                            1.0 // local is better: use 100% local
+                        } else {
+                            // Local is worse: blend based on error ratio
+                            // α = 1 - (e_local - e_global) / e_local.max(1e-10)
+                            let ratio = (e_local - e_global) / e_local.max(1e-10);
+                            (1.0 - ratio).max(0.0)
+                        }
                     }
                 }
-            }
-        }).collect();
+            })
+            .collect();
 
         Ok(Box::new(TrainedGeoXGBoost {
             global_model,

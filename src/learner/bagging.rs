@@ -1,14 +1,14 @@
 //! Generic bootstrap aggregating (bagging) wrapper for any Learner.
 
-use ndarray::{Array2, Axis};
-use rand::Rng;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use rayon::prelude::*;
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::Result;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
+use crate::task::{ClassificationTask, RegressionTask, Task};
+use ndarray::{Array2, Axis};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rayon::prelude::*;
 
 /// Generic bagging wrapper that trains multiple copies of a base learner
 /// on bootstrap samples and aggregates their predictions.
@@ -71,7 +71,9 @@ impl TrainedModel for TrainedBagging {
 
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
         // Collect importances from all models that provide them
-        let all_imps: Vec<Vec<(String, f64)>> = self.models.iter()
+        let all_imps: Vec<Vec<(String, f64)>> = self
+            .models
+            .iter()
             .filter_map(|m| m.feature_importance())
             .collect();
         if all_imps.is_empty() {
@@ -94,7 +96,8 @@ impl TrainedModel for TrainedBagging {
             return None;
         }
         Some(
-            names.into_iter()
+            names
+                .into_iter()
                 .zip(avg)
                 .map(|(name, imp)| (name, imp / n_models))
                 .collect(),
@@ -105,15 +108,22 @@ impl TrainedModel for TrainedBagging {
 impl TrainedBagging {
     fn predict_classif(&self, features: &Array2<f64>) -> Result<Prediction> {
         let n_classes = self.n_classes.unwrap();
-        let preds: Vec<Prediction> = self.models.iter()
+        let preds: Vec<Prediction> = self
+            .models
+            .iter()
             .map(|m| m.predict(features))
             .collect::<Result<Vec<_>>>()?;
 
         // Try soft voting (probability averaging) first
-        let has_probs = preds.iter().all(|p| matches!(
-            p,
-            Prediction::Classification { probabilities: Some(_), .. }
-        ));
+        let has_probs = preds.iter().all(|p| {
+            matches!(
+                p,
+                Prediction::Classification {
+                    probabilities: Some(_),
+                    ..
+                }
+            )
+        });
 
         let n_samples = features.nrows();
         let n_models = preds.len() as f64;
@@ -125,7 +135,11 @@ impl TrainedBagging {
             for s in 0..n_samples {
                 let mut avg = vec![0.0; n_classes];
                 for pred in &preds {
-                    if let Prediction::Classification { probabilities: Some(probs), .. } = pred {
+                    if let Prediction::Classification {
+                        probabilities: Some(probs),
+                        ..
+                    } = pred
+                    {
                         for (j, p) in probs[s].iter().enumerate() {
                             avg[j] += p;
                         }
@@ -134,9 +148,12 @@ impl TrainedBagging {
                 for p in &mut avg {
                     *p /= n_models;
                 }
-                let cls = avg.iter().enumerate()
+                let cls = avg
+                    .iter()
+                    .enumerate()
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                    .unwrap().0;
+                    .unwrap()
+                    .0;
                 predicted.push(cls);
                 probabilities.push(avg);
             }
@@ -156,9 +173,7 @@ impl TrainedBagging {
                         votes[p[s]] += 1;
                     }
                 }
-                let cls = votes.iter().enumerate()
-                    .max_by_key(|&(_, &c)| c)
-                    .unwrap().0;
+                let cls = votes.iter().enumerate().max_by_key(|&(_, &c)| c).unwrap().0;
                 predicted.push(cls);
             }
             Ok(Prediction::classification(predicted))
@@ -166,7 +181,9 @@ impl TrainedBagging {
     }
 
     fn predict_regress(&self, features: &Array2<f64>) -> Result<Prediction> {
-        let preds: Vec<Prediction> = self.models.iter()
+        let preds: Vec<Prediction> = self
+            .models
+            .iter()
             .map(|m| m.predict(features))
             .collect::<Result<Vec<_>>>()?;
 
@@ -190,7 +207,9 @@ impl TrainedBagging {
 }
 
 impl Learner for Bagging {
-    fn id(&self) -> &str { "bagging" }
+    fn id(&self) -> &str {
+        "bagging"
+    }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();

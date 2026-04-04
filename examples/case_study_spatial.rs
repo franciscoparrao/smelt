@@ -12,9 +12,9 @@
 //! Run with: cargo run --release --example case_study_spatial
 
 use ndarray::Axis;
-use smelt_ml::prelude::*;
 use smelt_ml::conformal::ConformalRegressor;
 use smelt_ml::data::CsvLoader;
+use smelt_ml::prelude::*;
 
 fn main() {
     println!("=================================================================");
@@ -29,7 +29,11 @@ fn main() {
         .load_regress()
         .expect("Failed to load Meuse dataset");
 
-    println!("Loaded: {} samples, {} features", task.n_samples(), task.features().ncols());
+    println!(
+        "Loaded: {} samples, {} features",
+        task.n_samples(),
+        task.features().ncols()
+    );
 
     // Extract coordinates (first two columns: x, y)
     let feature_names = task.feature_names();
@@ -47,8 +51,8 @@ fn main() {
     let features_no_coords = task.features().select(Axis(1), &feature_cols);
     let target = task.target().to_vec();
 
-    let task_no_coords = RegressionTask::new("meuse", features_no_coords.to_owned(), target.clone())
-        .unwrap();
+    let task_no_coords =
+        RegressionTask::new("meuse", features_no_coords.to_owned(), target.clone()).unwrap();
 
     // ── Step 2: Train/Test split (80/20) ───────────────────────────────────
 
@@ -63,10 +67,14 @@ fn main() {
     let test_features = features_no_coords.select(Axis(0), test_idx).to_owned();
     let test_target: Vec<f64> = test_idx.iter().map(|&i| target[i]).collect();
 
-    let train_task = RegressionTask::new("train", train_features.clone(), train_target.clone())
-        .unwrap();
+    let train_task =
+        RegressionTask::new("train", train_features.clone(), train_target.clone()).unwrap();
 
-    println!("Split: {} train, {} test\n", train_idx.len(), test_idx.len());
+    println!(
+        "Split: {} train, {} test\n",
+        train_idx.len(),
+        test_idx.len()
+    );
 
     // ── Step 3: XGBoost vs GeoXGBoost ──────────────────────────────────────
 
@@ -76,13 +84,17 @@ fn main() {
     let mut dt = DecisionTree::default();
     let dt_model = dt.train_regress(&train_task).unwrap();
     let dt_pred = dt_model.predict(&test_features).unwrap();
-    let dt_rmse = Rmse.score(&dt_pred.with_truth_regress(test_target.clone())).unwrap();
+    let dt_rmse = Rmse
+        .score(&dt_pred.with_truth_regress(test_target.clone()))
+        .unwrap();
 
     // Random Forest
     let mut rf = RandomForest::new().with_n_estimators(100).with_seed(42);
     let rf_model = rf.train_regress(&train_task).unwrap();
     let rf_pred = rf_model.predict(&test_features).unwrap();
-    let rf_rmse = Rmse.score(&rf_pred.with_truth_regress(test_target.clone())).unwrap();
+    let rf_rmse = Rmse
+        .score(&rf_pred.with_truth_regress(test_target.clone()))
+        .unwrap();
 
     // XGBoost
     let mut xgb = XGBoost::new()
@@ -91,7 +103,9 @@ fn main() {
         .with_learning_rate(0.1);
     let xgb_model = xgb.train_regress(&train_task).unwrap();
     let xgb_pred = xgb_model.predict(&test_features).unwrap();
-    let xgb_rmse = Rmse.score(&xgb_pred.with_truth_regress(test_target.clone())).unwrap();
+    let xgb_rmse = Rmse
+        .score(&xgb_pred.with_truth_regress(test_target.clone()))
+        .unwrap();
 
     // GeoXGBoost
     let mut gxgb = GeoXGBoost::new(train_coords.clone())
@@ -101,7 +115,9 @@ fn main() {
         .with_learning_rate(0.1);
     let gxgb_model = gxgb.train_regress(&train_task).unwrap();
     let gxgb_pred = gxgb_model.predict(&test_features).unwrap();
-    let gxgb_rmse = Rmse.score(&gxgb_pred.with_truth_regress(test_target.clone())).unwrap();
+    let gxgb_rmse = Rmse
+        .score(&gxgb_pred.with_truth_regress(test_target.clone()))
+        .unwrap();
 
     println!("  Decision Tree   RMSE: {:.4}", dt_rmse);
     println!("  Random Forest   RMSE: {:.4}", rf_rmse);
@@ -124,7 +140,10 @@ fn main() {
         let te_tgt: Vec<f64> = te.iter().map(|&i| target[i]).collect();
 
         let tr_task = RegressionTask::new("fold", tr_feat, tr_tgt).unwrap();
-        let mut xgb = XGBoost::new().with_n_estimators(100).with_max_depth(4).with_learning_rate(0.1);
+        let mut xgb = XGBoost::new()
+            .with_n_estimators(100)
+            .with_max_depth(4)
+            .with_learning_rate(0.1);
         let model = xgb.train_regress(&tr_task).unwrap();
         let pred = model.predict(&te_feat).unwrap();
         random_rmses.push(Rmse.score(&pred.with_truth_regress(te_tgt)).unwrap());
@@ -136,22 +155,33 @@ fn main() {
     let spatial_splits = spatial_cv.splits(task_no_coords.n_samples());
     let mut spatial_rmses = Vec::new();
     for (tr, te) in &spatial_splits {
-        if tr.is_empty() || te.is_empty() { continue; }
+        if tr.is_empty() || te.is_empty() {
+            continue;
+        }
         let tr_feat = features_no_coords.select(Axis(0), tr).to_owned();
         let tr_tgt: Vec<f64> = tr.iter().map(|&i| target[i]).collect();
         let te_feat = features_no_coords.select(Axis(0), te).to_owned();
         let te_tgt: Vec<f64> = te.iter().map(|&i| target[i]).collect();
 
         let tr_task = RegressionTask::new("fold", tr_feat, tr_tgt).unwrap();
-        let mut xgb = XGBoost::new().with_n_estimators(100).with_max_depth(4).with_learning_rate(0.1);
+        let mut xgb = XGBoost::new()
+            .with_n_estimators(100)
+            .with_max_depth(4)
+            .with_learning_rate(0.1);
         let model = xgb.train_regress(&tr_task).unwrap();
         let pred = model.predict(&te_feat).unwrap();
         spatial_rmses.push(Rmse.score(&pred.with_truth_regress(te_tgt)).unwrap());
     }
     let spatial_mean = spatial_rmses.iter().sum::<f64>() / spatial_rmses.len() as f64;
 
-    println!("  Random CV    RMSE: {:.4} (optimistic — spatial leakage)", random_mean);
-    println!("  Spatial CV   RMSE: {:.4} (honest — no spatial leakage)", spatial_mean);
+    println!(
+        "  Random CV    RMSE: {:.4} (optimistic — spatial leakage)",
+        random_mean
+    );
+    println!(
+        "  Spatial CV   RMSE: {:.4} (honest — no spatial leakage)",
+        spatial_mean
+    );
     let leakage = ((spatial_mean - random_mean) / random_mean) * 100.0;
     println!("  → Random CV underestimates error by {:.0}%\n", leakage);
 
@@ -173,34 +203,46 @@ fn main() {
     let cal_target: Vec<f64> = cal_idx.iter().map(|&i| target[i]).collect();
 
     let tr2_task = RegressionTask::new("train2", tr2_features, tr2_target).unwrap();
-    let mut xgb = XGBoost::new().with_n_estimators(100).with_max_depth(4).with_learning_rate(0.1);
+    let mut xgb = XGBoost::new()
+        .with_n_estimators(100)
+        .with_max_depth(4)
+        .with_learning_rate(0.1);
     let model = xgb.train_regress(&tr2_task).unwrap();
 
     // Calibrate conformal predictor (90% coverage)
     let alpha = 0.1;
-    let cf = ConformalRegressor::calibrate(&*model, &cal_features, &cal_target, alpha)
-        .unwrap();
+    let cf = ConformalRegressor::calibrate(&*model, &cal_features, &cal_target, alpha).unwrap();
 
     // Predict on test set with intervals
     let intervals = cf.predict(&test_features).unwrap();
 
     // Check actual coverage
-    let covered = intervals.iter()
+    let covered = intervals
+        .iter()
         .zip(test_target.iter())
         .filter(|&(ref iv, &t)| t >= iv.lower && t <= iv.upper)
         .count();
     let actual_coverage = covered as f64 / test_target.len() as f64;
 
-    let avg_width = intervals.iter()
-        .map(|iv| iv.upper - iv.lower)
-        .sum::<f64>() / intervals.len() as f64;
+    let avg_width =
+        intervals.iter().map(|iv| iv.upper - iv.lower).sum::<f64>() / intervals.len() as f64;
 
     println!("  Target coverage: {:.0}%", (1.0 - alpha) * 100.0);
-    println!("  Actual coverage: {:.0}% ({}/{} samples covered)",
-        actual_coverage * 100.0, covered, test_target.len());
+    println!(
+        "  Actual coverage: {:.0}% ({}/{} samples covered)",
+        actual_coverage * 100.0,
+        covered,
+        test_target.len()
+    );
     println!("  Mean interval width: {:.3} log(zinc)", avg_width);
-    println!("  → Coverage guarantee satisfied: {}\n",
-        if actual_coverage >= 1.0 - alpha { "YES" } else { "NO (small test set variance)" });
+    println!(
+        "  → Coverage guarantee satisfied: {}\n",
+        if actual_coverage >= 1.0 - alpha {
+            "YES"
+        } else {
+            "NO (small test set variance)"
+        }
+    );
 
     // ── Summary ────────────────────────────────────────────────────────────
 
@@ -209,8 +251,14 @@ fn main() {
     println!("=================================================================");
     println!("  1. CsvLoader loaded real geospatial data (Meuse, 153 samples)");
     println!("  2. Four models compared (DT, RF, XGBoost, GeoXGBoost) in one API");
-    println!("  3. SpatialBlockCV revealed {:.0}% optimism in random CV", leakage.abs());
-    println!("  4. Conformal prediction achieved {:.0}% coverage (target: {:.0}%)",
-        actual_coverage * 100.0, (1.0 - alpha) * 100.0);
+    println!(
+        "  3. SpatialBlockCV revealed {:.0}% optimism in random CV",
+        leakage.abs()
+    );
+    println!(
+        "  4. Conformal prediction achieved {:.0}% coverage (target: {:.0}%)",
+        actual_coverage * 100.0,
+        (1.0 - alpha) * 100.0
+    );
     println!("\n  No Python. No R. No external dependencies. Zero unsafe blocks.");
 }

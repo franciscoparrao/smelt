@@ -2,12 +2,12 @@
 //!
 //! Equivalent to mlr3's `benchmark()` function.
 
-use crate::task::{ClassificationTask, RegressionTask};
+use crate::Result;
+use crate::benchmark;
 use crate::learner::Learner;
 use crate::measure::Measure;
 use crate::resample::Resample;
-use crate::benchmark;
-use crate::Result;
+use crate::task::{ClassificationTask, RegressionTask};
 
 /// Result of a benchmark design experiment.
 #[derive(Debug)]
@@ -31,14 +31,18 @@ pub struct BenchmarkEntry {
 impl BenchmarkDesign {
     /// Print a summary table.
     pub fn summary(&self) -> String {
-        if self.entries.is_empty() { return String::from("(empty)"); }
+        if self.entries.is_empty() {
+            return String::from("(empty)");
+        }
 
         let measures = &self.entries[0].measure_ids;
         let mut lines = Vec::new();
 
         // Header
         let mut header = format!("{:<20} {:<15}", "Learner", "Task");
-        for m in measures { header.push_str(&format!(" {:>12}", m)); }
+        for m in measures {
+            header.push_str(&format!(" {:>12}", m));
+        }
         lines.push(header);
         lines.push("-".repeat(35 + measures.len() * 13));
 

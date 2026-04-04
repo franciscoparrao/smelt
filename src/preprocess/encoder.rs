@@ -1,8 +1,8 @@
 //! One-hot encoding for categorical features.
 
-use ndarray::Array2;
-use crate::{SmeltError, Result};
 use super::Transformer;
+use crate::{Result, SmeltError};
+use ndarray::Array2;
 
 /// Encodes specified columns as binary indicator columns.
 ///
@@ -30,12 +30,18 @@ pub struct OneHotEncoder {
 
 impl OneHotEncoder {
     pub fn new(columns: Vec<usize>) -> Self {
-        Self { columns, categories: None, n_features_in: None }
+        Self {
+            columns,
+            categories: None,
+            n_features_in: None,
+        }
     }
 }
 
 impl Transformer for OneHotEncoder {
-    fn id(&self) -> &str { "one_hot_encoder" }
+    fn id(&self) -> &str {
+        "one_hot_encoder"
+    }
 
     fn fit(&mut self, features: &Array2<f64>) -> Result<()> {
         self.n_features_in = Some(features.ncols());
@@ -43,9 +49,11 @@ impl Transformer for OneHotEncoder {
 
         for &col in &self.columns {
             if col >= features.ncols() {
-                return Err(SmeltError::InvalidParameter(
-                    format!("column index {} out of bounds ({})", col, features.ncols()),
-                ));
+                return Err(SmeltError::InvalidParameter(format!(
+                    "column index {} out of bounds ({})",
+                    col,
+                    features.ncols()
+                )));
             }
             let mut unique: Vec<f64> = features.column(col).iter().copied().collect();
             unique.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -127,5 +135,7 @@ impl Transformer for OneHotEncoder {
         Ok(result)
     }
 
-    fn clone_box(&self) -> Box<dyn Transformer> { Box::new(self.clone()) }
+    fn clone_box(&self) -> Box<dyn Transformer> {
+        Box::new(self.clone())
+    }
 }
