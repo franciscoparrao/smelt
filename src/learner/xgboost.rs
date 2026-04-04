@@ -16,6 +16,7 @@ use crate::prediction::Prediction;
 use crate::Result;
 
 use super::histogram::{HistBins, NAN_BIN};
+use super::hist_pool::HistPool;
 
 /// XGBoost learner (eXtreme Gradient Boosting).
 ///
@@ -136,6 +137,7 @@ struct XGBTreeBuilder<'a> {
     col_indices: Vec<usize>,
     use_exact: bool,
     feature_importances: Vec<f64>,
+    pool: HistPool,
 }
 
 impl<'a> XGBTreeBuilder<'a> {
@@ -154,6 +156,16 @@ impl<'a> XGBTreeBuilder<'a> {
     }
 
     fn build(&mut self, indices: &mut Vec<usize>, start: usize, end: usize, depth: usize) -> XGBNode {
+        if self.use_exact {
+            return self.build_exact(indices, start, end, depth);
+        }
+        self.build_hist_sub(indices, start, end, depth, false)
+    }
+
+    /// Build with histogram subtraction.
+    /// `hist_ready`: pool[depth] already populated from subtraction (skip scan).
+    fn build_hist_sub(&mut self, indices: &mut Vec<usize>, start: usize, end: usize,
+                      depth: usize, hist_ready: bool) -> XGBNode {
         let n = end - start;
         let h_sum: f64 = indices[start..end].iter().map(|&i| self.hess[i]).sum();
         if depth >= self.max_depth || n <= 1 || h_sum < self.min_child_weight {
@@ -161,10 +173,18 @@ impl<'a> XGBTreeBuilder<'a> {
             return XGBNode::Leaf { weight: self.leaf_weight_gh(g_sum, h_sum) };
         }
 
-        let best = if self.use_exact {
-            self.find_best_exact(&indices[start..end])
+        let best = if hist_ready {
+            // Subtracted histogram already in pool — just find best split
+            let r = self.pool.find_best(depth, &self.col_indices, self.bins,
+                self.min_child_weight, self.lambda, self.alpha, self.gamma);
+            r.map(|(feat, thr, gain, nl, sb)| BestSplit {
+                feature: feat, threshold: thr, gain, nan_goes_left: nl, split_bin: sb,
+            })
         } else {
-            self.find_best_histogram(&indices[start..end])
+            // Original par_iter scan+find (fast!) — also capture histograms
+            let (split, hists) = self.find_best_histogram_saving(&indices[start..end]);
+            self.pool.store_hists(depth, &hists);
+            split
         };
 
         let best = match best {
@@ -174,32 +194,18 @@ impl<'a> XGBTreeBuilder<'a> {
                 return XGBNode::Leaf { weight: self.leaf_weight_gh(g_sum, h_sum) };
             }
         };
+        let (feat, threshold, gain, nan_goes_left, split_bin) =
+            (best.feature, best.threshold, best.gain, best.nan_goes_left, best.split_bin);
 
-        self.feature_importances[best.feature] += best.gain;
+        self.feature_importances[feat] += gain;
 
-        // In-place partition
-        let feat = best.feature;
-        let mut left_end = start;
-        let mut i = start;
-
-        if self.use_exact {
-            let thr = best.threshold;
-            let nan_left = best.nan_goes_left;
-            while i < end {
-                let v = self.features[[indices[i], feat]];
-                let goes_left = if v.is_nan() { nan_left } else { v < thr };
-                if goes_left { indices.swap(left_end, i); left_end += 1; }
-                i += 1;
-            }
-        } else {
-            let bin_thr = best.split_bin;
-            let nan_left = best.nan_goes_left;
-            while i < end {
-                let b = self.bins.get_bin(feat, indices[i]);
-                let goes_left = if b == NAN_BIN { nan_left } else { (b as usize) <= bin_thr };
-                if goes_left { indices.swap(left_end, i); left_end += 1; }
-                i += 1;
-            }
+        // Partition
+        let (mut left_end, mut i) = (start, start);
+        while i < end {
+            let b = self.bins.get_bin(feat, indices[i]);
+            let goes_left = if b == NAN_BIN { nan_goes_left } else { (b as usize) <= split_bin };
+            if goes_left { indices.swap(left_end, i); left_end += 1; }
+            i += 1;
         }
 
         if left_end == start || left_end == end {
@@ -207,14 +213,137 @@ impl<'a> XGBTreeBuilder<'a> {
             return XGBNode::Leaf { weight: self.leaf_weight_gh(g_sum, h_sum) };
         }
 
-        let left = self.build(indices, start, left_end, depth + 1);
-        let right = self.build(indices, left_end, end, depth + 1);
+        if depth + 1 >= self.max_depth {
+            // Children are leaves — skip histogram work
+            let lg: f64 = indices[start..left_end].iter().map(|&i| self.grads[i]).sum();
+            let lh: f64 = indices[start..left_end].iter().map(|&i| self.hess[i]).sum();
+            let rg: f64 = indices[left_end..end].iter().map(|&i| self.grads[i]).sum();
+            let rh: f64 = indices[left_end..end].iter().map(|&i| self.hess[i]).sum();
+            let left = XGBNode::Leaf { weight: self.leaf_weight_gh(lg, lh) };
+            let right = XGBNode::Leaf { weight: self.leaf_weight_gh(rg, rh) };
+            return XGBNode::Split { feature: feat, threshold, nan_goes_left,
+                left: Box::new(left), right: Box::new(right) };
+        }
+
+        let left_count = left_end - start;
+        let right_count = end - left_end;
+
+        // Subtraction: scan+save SMALLER, process, subtract → LARGER (skip scan)
+        if left_count <= right_count {
+            let left = self.build_hist_sub(indices, start, left_end, depth + 1, false);
+            self.pool.subtract_in_place(depth, depth + 1);
+            let right = self.build_hist_sub(indices, left_end, end, depth + 1, true);
+            XGBNode::Split { feature: feat, threshold, nan_goes_left,
+                left: Box::new(left), right: Box::new(right) }
+        } else {
+            let right = self.build_hist_sub(indices, left_end, end, depth + 1, false);
+            self.pool.subtract_in_place(depth, depth + 1);
+            let left = self.build_hist_sub(indices, start, left_end, depth + 1, true);
+            XGBNode::Split { feature: feat, threshold, nan_goes_left,
+                left: Box::new(left), right: Box::new(right) }
+        }
+    }
+
+    /// Exact greedy build (unchanged).
+    fn build_exact(&mut self, indices: &mut Vec<usize>, start: usize, end: usize, depth: usize) -> XGBNode {
+        let n = end - start;
+        let h_sum: f64 = indices[start..end].iter().map(|&i| self.hess[i]).sum();
+        if depth >= self.max_depth || n <= 1 || h_sum < self.min_child_weight {
+            let g_sum: f64 = indices[start..end].iter().map(|&i| self.grads[i]).sum();
+            return XGBNode::Leaf { weight: self.leaf_weight_gh(g_sum, h_sum) };
+        }
+        let best = match self.find_best_exact(&indices[start..end]) {
+            Some(b) if b.gain > 0.0 => b,
+            _ => {
+                let g_sum: f64 = indices[start..end].iter().map(|&i| self.grads[i]).sum();
+                return XGBNode::Leaf { weight: self.leaf_weight_gh(g_sum, h_sum) };
+            }
+        };
+        self.feature_importances[best.feature] += best.gain;
+        let feat = best.feature;
+        let (mut left_end, mut i) = (start, start);
+        let (thr, nan_left) = (best.threshold, best.nan_goes_left);
+        while i < end {
+            let v = self.features[[indices[i], feat]];
+            let goes_left = if v.is_nan() { nan_left } else { v < thr };
+            if goes_left { indices.swap(left_end, i); left_end += 1; }
+            i += 1;
+        }
+        if left_end == start || left_end == end {
+            let g_sum: f64 = indices[start..end].iter().map(|&i| self.grads[i]).sum();
+            return XGBNode::Leaf { weight: self.leaf_weight_gh(g_sum, h_sum) };
+        }
+        let left = self.build_exact(indices, start, left_end, depth + 1);
+        let right = self.build_exact(indices, left_end, end, depth + 1);
         XGBNode::Split { feature: feat, threshold: best.threshold,
             nan_goes_left: best.nan_goes_left,
             left: Box::new(left), right: Box::new(right) }
     }
 
+    /// Like find_best_histogram but also returns per-feature histogram data for the pool.
+    fn find_best_histogram_saving(&self, node_indices: &[usize])
+        -> (Option<BestSplit>, Vec<(Vec<f64>, Vec<f64>, f64, f64)>)
+    {
+        let results: Vec<(Option<BestSplit>, (Vec<f64>, Vec<f64>, f64, f64))> =
+            self.col_indices.par_iter().map(|&feat| {
+            let nb = self.bins.n_bins(feat);
+            let mut bin_g = vec![0.0; nb];
+            let mut bin_h = vec![0.0; nb];
+            let mut nan_g = 0.0;
+            let mut nan_h = 0.0;
+
+            for &idx in node_indices {
+                let b = self.bins.get_bin(feat, idx);
+                if b == NAN_BIN { nan_g += self.grads[idx]; nan_h += self.hess[idx]; }
+                else { bin_g[b as usize] += self.grads[idx]; bin_h[b as usize] += self.hess[idx]; }
+            }
+
+            let total_g: f64 = bin_g.iter().sum::<f64>() + nan_g;
+            let total_h: f64 = bin_h.iter().sum::<f64>() + nan_h;
+            let mut best_gain = 0.0;
+            let mut best: Option<(usize, f64, bool)> = None;
+
+            let (mut gl, mut hl) = (0.0, 0.0);
+            for bin in 0..nb.saturating_sub(1) {
+                gl += bin_g[bin]; hl += bin_h[bin];
+                let (gr, hr) = (total_g - gl, total_h - hl);
+                if hl < self.min_child_weight || hr < self.min_child_weight { continue; }
+                let gain = self.split_gain(gl, hl, gr, hr);
+                if gain > best_gain { best_gain = gain; best = Some((bin, gain, false)); }
+            }
+            if nan_h > 0.0 {
+                let (mut gl, mut hl) = (nan_g, nan_h);
+                for bin in 0..nb.saturating_sub(1) {
+                    gl += bin_g[bin]; hl += bin_h[bin];
+                    let (gr, hr) = (total_g - gl, total_h - hl);
+                    if hl < self.min_child_weight || hr < self.min_child_weight { continue; }
+                    let gain = self.split_gain(gl, hl, gr, hr);
+                    if gain > best_gain { best_gain = gain; best = Some((bin, gain, true)); }
+                }
+            }
+
+            let split = best.map(|(bin, gain, nan_left)| BestSplit {
+                feature: feat, threshold: self.bins.bin_threshold(feat, bin),
+                gain, nan_goes_left: nan_left, split_bin: bin,
+            });
+            (split, (bin_g, bin_h, nan_g, nan_h))
+        }).collect();
+
+        let mut hists = Vec::with_capacity(results.len());
+        let mut best_split: Option<BestSplit> = None;
+        for (split, hist) in results {
+            hists.push(hist);
+            if let Some(s) = split {
+                if best_split.as_ref().map_or(true, |b| s.gain > b.gain) {
+                    best_split = Some(s);
+                }
+            }
+        }
+        (best_split, hists)
+    }
+
     /// Histogram split finding — parallel per feature, flat Vec<f64> for cache locality.
+    #[allow(dead_code)]
     fn find_best_histogram(&self, node_indices: &[usize]) -> Option<BestSplit> {
         let results: Vec<Option<BestSplit>> = self.col_indices.par_iter().map(|&feat| {
             let nb = self.bins.n_bins(feat);
@@ -423,12 +552,18 @@ impl XGBoost {
                       indices: &mut Vec<usize>, col_indices: Vec<usize>,
                       n_features: usize) -> (XGBNode, Vec<f64>) {
         let n = indices.len();
+        let use_exact = n <= self.n_bins;
+        let max_bins = if use_exact { 1 } else {
+            bins.boundaries.iter().map(|b| b.len() + 1).max().unwrap_or(256)
+        };
+        let n_col = col_indices.len();
         let mut builder = XGBTreeBuilder {
             features, bins, grads, hess,
             lambda: self.lambda, alpha: self.alpha, gamma: self.gamma,
             max_depth: self.max_depth, min_child_weight: self.min_child_weight,
-            col_indices, use_exact: n <= self.n_bins,
+            col_indices, use_exact,
             feature_importances: vec![0.0; n_features],
+            pool: HistPool::new(self.max_depth, n_col, max_bins),
         };
         let tree = builder.build(indices, 0, n, 0);
         (tree, builder.feature_importances)

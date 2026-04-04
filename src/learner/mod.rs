@@ -4,6 +4,7 @@
 
 pub mod tree;
 pub mod histogram;
+pub(crate) mod hist_pool;
 pub mod knn;
 pub mod linear_regression;
 pub mod logistic_regression;
