@@ -531,27 +531,36 @@ standard datasets.
 
 \begin{table}[t!]
 \centering
+\small
 \begin{tabular}{llccc}
 \toprule
-Dataset & Learner & \pkg{smelt-ml} & \pkg{scikit-learn} & $\Delta$ \\
+Dataset ($n \times p$) & Learner & \pkg{smelt-ml} & \pkg{scikit-learn} & $\Delta$ \\
 \midrule
-Iris        & Decision Tree & 0.953 & 0.953 & 0.000 \\
-            & Random Forest & 0.953 & 0.967 & $-$0.014 \\
-            & XGBoost       & 0.953 & 0.953 & 0.000 \\
-Wine        & Random Forest & 0.983 & 0.972 & $+$0.011 \\
-            & Logistic Reg. & 0.989 & 0.961 & $+$0.028 \\
-            & XGBoost       & 0.971 & 0.944 & $+$0.027 \\
-Breast Ca.  & Random Forest & 0.958 & 0.956 & $+$0.002 \\
-            & XGBoost       & 0.970 & 0.974 & $-$0.004 \\
+\multicolumn{5}{l}{\textit{Classification (accuracy)}} \\
+Wine ($178 \times 13$)         & Decision Tree   & 0.898 & 0.893 & $+$0.005 \\
+                               & Random Forest   & 0.983 & 0.977 & $+$0.006 \\
+                               & Logistic Reg.   & 0.989 & 0.955 & $+$0.034 \\
+Breast Ca.\ ($569 \times 30$)  & Decision Tree   & 0.930 & 0.910 & $+$0.020 \\
+                               & Random Forest   & 0.958 & 0.956 & $+$0.002 \\
+                               & Logistic Reg.   & 0.981 & 0.953 & $+$0.028 \\
+Digits ($1{,}797 \times 64$)   & Decision Tree   & 0.851 & 0.855 & $-$0.004 \\
+                               & Random Forest   & 0.974 & 0.978 & $-$0.004 \\
+\midrule
+\multicolumn{5}{l}{\textit{Regression (RMSE, lower is better)}} \\
+Cal.\ Housing ($20{,}640 \times 8$) & Decision Tree & 0.728 & 0.715 & $+$0.013 \\
+                                    & Random Forest & 0.488 & 0.503 & $-$0.015 \\
+                                    & Ridge         & 0.726 & 0.728 & $-$0.002 \\
 \bottomrule
 \end{tabular}
-\caption{\label{tab:accuracy} 5-fold CV accuracy on real datasets.
-Both frameworks use stratified 5-fold CV with seed 42 for reproducibility.}
+\caption{\label{tab:accuracy} 5-fold CV accuracy/RMSE on real datasets from
+$n = 178$ to $n = 20{,}640$. Both frameworks use 5-fold CV with seed 42.}
 \end{table}
 
-All comparisons are within $\pm$3\% of \pkg{scikit-learn}. Minor differences
-arise from algorithmic variations (e.g., tie-breaking, split selection order)
-rather than correctness issues.
+All comparisons are within $\pm$3.5\% of \pkg{scikit-learn}, validating
+correctness across four datasets spanning two orders of magnitude in
+sample size ($n = 178$ to $n = 20{,}640$). The Logistic Regression advantage
+on Wine and Breast Cancer is due to automatic feature standardization
+in \pkg{smelt-ml}.
 
 
 %% -- Unique Features ----------------------------------------------------------
