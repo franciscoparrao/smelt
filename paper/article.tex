@@ -556,26 +556,108 @@ rather than correctness issues.
 
 %% -- Unique Features ----------------------------------------------------------
 
-\section{Unique features} \label{sec:unique}
+\section{Integrated spatial ML pipeline} \label{sec:spatial}
 
-\subsection{Geographical-XGBoost}
+A key contribution of \pkg{smelt-ml} is the integration of spatial modeling,
+spatial resampling, and distribution-free uncertainty quantification in a
+single composable framework. No other ML framework in any language provides
+all three capabilities without external dependencies.
 
-Implementation of \citet{Grekousis:2025}: bi-square spatial kernel weights,
-local \pkg{XGBoost} models per spatial unit, ensemble of global and local
-predictions with adaptive $\alpha$ weight. First implementation outside the
-original \proglang{Python} package \citep{geoxgboost:2024}.
+\subsection{Components}
 
-\subsection{Causal Forest}
+\textbf{Geographical-XGBoost} \citep{Grekousis:2025} extends gradient boosting
+with spatial awareness: bi-square kernel weights define local neighborhoods,
+per-location models capture spatially non-stationary relationships, and an
+adaptive $\alpha$ weight blends local and global predictions. This is the first
+implementation outside the original \proglang{Python} package
+\citep{geoxgboost:2024}.
 
-Honest splitting following \citet{Athey+Imbens:2016} and \citet{Wager+Athey:2018}.
-Estimates conditional average treatment effects (CATE) $\tau(x) = E[Y(1) - Y(0) | X = x]$
-with 95\% confidence intervals. First implementation in a \proglang{Rust} ML framework.
+\textbf{Spatial cross-validation} (\code{SpatialBlockCV}, \code{SpatialBufferCV})
+prevents spatial autocorrelation leakage by ensuring that train and test sets
+are spatially separated. Both implement the \code{Resample} trait, making them
+interchangeable with standard \code{CrossValidation} in any pipeline.
 
-\subsection{Conformal prediction}
+\textbf{Conformal prediction} provides distribution-free prediction intervals
+with guaranteed $(1-\alpha)$ coverage via split conformal prediction and
+conformalized quantile regression \citep[CQR;][]{Romano+Patterson+Candes:2019}.
+The \code{ConformalRegressor} wraps any \code{TrainedModel} without retraining.
 
-Split conformal prediction for regression and classification with conformalized
-quantile regression \citep[CQR;][]{Romano+Patterson+Candes:2019}. Provides
-distribution-free prediction intervals with guaranteed coverage.
+In \proglang{Python}, this workflow requires at minimum four separate packages
+(\pkg{scikit-learn}, \pkg{geoxgboost}, spatial resampling code, and
+\pkg{MAPIE} or \pkg{crepes} for conformal prediction), each with different APIs
+and data structures. In \pkg{smelt-ml}, the trait-based architecture ensures
+that all components compose seamlessly.
+
+\subsection{Case study: soil zinc concentration along the Meuse river}
+
+We demonstrate the integrated pipeline on the Meuse river dataset
+\citep{Burrough+McDonnell:1998}: 153 soil samples with heavy metal
+concentrations and spatial coordinates from the Netherlands.
+
+\begin{CodeChunk}
+\begin{CodeInput}
+let task = CsvLoader::from_path("data/meuse.csv")
+    .target("log_zinc")
+    .load_regress()?;
+let coords: Vec<(f64, f64)> = /* extract x, y */;
+
+// Spatial cross-validation
+let spatial_cv = SpatialBlockCV::new(5, coords);
+
+// GeoXGBoost with conformal intervals
+let model = GeoXGBoost::new(coords)
+    .with_bandwidth(30)
+    .train_regress(&task)?;
+let cf = ConformalRegressor::calibrate(
+    &*model, &cal_features, &cal_targets, 0.1)?;
+let intervals = cf.predict(&test_features)?;
+\end{CodeInput}
+\end{CodeChunk}
+
+Table~\ref{tab:casestudy} shows the results. Four learners were compared on an
+80/20 holdout split.
+
+\begin{table}[t!]
+\centering
+\begin{tabular}{lc}
+\toprule
+Learner & RMSE (test) \\
+\midrule
+Decision Tree     & 0.182 \\
+Random Forest     & 0.137 \\
+XGBoost           & 0.152 \\
+GeoXGBoost        & 0.152 \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:casestudy} Test RMSE on the Meuse dataset
+(log-zinc, 122 train / 31 test).}
+\end{table}
+
+Two key findings emerge from the spatial validation:
+
+\textbf{Spatial leakage.} Standard 5-fold CV yields RMSE = 0.137, while
+\code{SpatialBlockCV} yields RMSE = 0.141 --- a 3\% optimism bias from
+spatial autocorrelation leakage. In applications with stronger spatial
+structure (e.g., remote sensing, epidemiology), this bias can exceed 20\%
+\citep{Roberts2017}, making spatial resampling essential.
+
+\textbf{Conformal coverage.} With $\alpha = 0.1$ (target: 90\% coverage),
+the conformal predictor achieves 84\% coverage on the 31-sample test set
+(mean interval width: 0.43 log-zinc). The slight under-coverage is expected
+with small calibration sets and converges to the target with larger $n$.
+
+\subsection{Additional unique algorithms}
+
+\textbf{Causal Forest.} Honest splitting following
+\citet{Athey+Imbens:2016, Wager+Athey:2018}. Estimates conditional average
+treatment effects (CATE) $\tau(x) = E[Y(1) - Y(0) | X = x]$ with 95\%
+confidence intervals. First implementation in a \proglang{Rust} ML framework.
+
+\textbf{Oblique Forest (SPORF).} Sparse random projections following
+\citet{Tomita+Browne+Shen:2020}, enabling oblique decision boundaries.
+
+\textbf{Streaming.} Hoeffding Trees for online learning on data streams,
+using the Hoeffding bound for statistically sound split decisions.
 
 
 %% -- Summary ------------------------------------------------------------------

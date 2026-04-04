@@ -1,4 +1,4 @@
-\begin{thebibliography}{16}
+\begin{thebibliography}{18}
 \newcommand{\enquote}[1]{``#1''}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
@@ -15,6 +15,12 @@ Athey S, Imbens G (2016).
 \newblock \emph{Proceedings of the National Academy of Sciences},
   \textbf{113}(27), 7353--7360.
 \newblock \doi{10.1073/pnas.1510489113}.
+
+\bibitem[{Burrough and McDonnell(1998)}]{Burrough+McDonnell:1998}
+Burrough PA, McDonnell RA (1998).
+\newblock \emph{Principles of Geographical Information Systems}.
+\newblock Oxford University Press.
+\newblock Meuse river dataset.
 
 \bibitem[{Chen and Guestrin(2016)}]{Chen+Guestrin:2016}
 Chen T, Guestrin C (2016).
@@ -88,6 +94,17 @@ Prokhorenkova L, Gusev G, Vorobev A, Dorogush AV, Gulin A (2018).
 \newblock \enquote{\pkg{CatBoost}: Unbiased Boosting with Categorical
   Features.}
 \newblock In \emph{Advances in Neural Information Processing Systems 31}.
+
+\bibitem[{Roberts \emph{et~al.}(2017)Roberts, Bahn, Ciuti, Boyce, Elith,
+  Guillera-Arroita, Hauenstein, Lahoz-Monfort, Schr{\"o}der, Thuiller, Warton,
+  Wintle, Hartig, and Dormann}]{Roberts2017}
+Roberts DR, Bahn V, Ciuti S, Boyce MS, Elith J, Guillera-Arroita G, Hauenstein
+  S, Lahoz-Monfort JJ, Schr{\"o}der B, Thuiller W, Warton JA, Wintle BA, Hartig
+  F, Dormann CF (2017).
+\newblock \enquote{Cross-Validation Strategies for Data with Temporal, Spatial,
+  Hierarchical, or Phylogenetic Structure.}
+\newblock \emph{Ecography}, \textbf{40}(8), 913--929.
+\newblock \doi{10.1111/ecog.02881}.
 
 \bibitem[{Romano \emph{et~al.}(2019)Romano, Patterson, and
   Cand{\`e}s}]{Romano+Patterson+Candes:2019}

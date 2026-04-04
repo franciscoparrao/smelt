@@ -16,8 +16,8 @@
 \BOOKMARK [2][-]{Subsection.4.1.Training time.2}{\376\377\000T\000r\000a\000i\000n\000i\000n\000g\000\040\000t\000i\000m\000e}{Section.3.Performance evaluation.1}% 16
 \BOOKMARK [2][-]{Subsection.4.2.Scaling analysis.2}{\376\377\000S\000c\000a\000l\000i\000n\000g\000\040\000a\000n\000a\000l\000y\000s\000i\000s}{Section.3.Performance evaluation.1}% 17
 \BOOKMARK [2][-]{Subsection.4.3.Accuracy validation.2}{\376\377\000A\000c\000c\000u\000r\000a\000c\000y\000\040\000v\000a\000l\000i\000d\000a\000t\000i\000o\000n}{Section.3.Performance evaluation.1}% 18
-\BOOKMARK [1][-]{Section.4.Unique features.1}{\376\377\000U\000n\000i\000q\000u\000e\000\040\000f\000e\000a\000t\000u\000r\000e\000s}{}% 19
-\BOOKMARK [2][-]{Subsection.5.0.Geographical-XGBoost.2}{\376\377\000G\000e\000o\000g\000r\000a\000p\000h\000i\000c\000a\000l\000-\000X\000G\000B\000o\000o\000s\000t}{Section.4.Unique features.1}% 20
-\BOOKMARK [2][-]{Subsection.5.1.Causal Forest.2}{\376\377\000C\000a\000u\000s\000a\000l\000\040\000F\000o\000r\000e\000s\000t}{Section.4.Unique features.1}% 21
-\BOOKMARK [2][-]{Subsection.5.2.Conformal prediction.2}{\376\377\000C\000o\000n\000f\000o\000r\000m\000a\000l\000\040\000p\000r\000e\000d\000i\000c\000t\000i\000o\000n}{Section.4.Unique features.1}% 22
+\BOOKMARK [1][-]{Section.4.Integrated spatial ML pipeline.1}{\376\377\000I\000n\000t\000e\000g\000r\000a\000t\000e\000d\000\040\000s\000p\000a\000t\000i\000a\000l\000\040\000M\000L\000\040\000p\000i\000p\000e\000l\000i\000n\000e}{}% 19
+\BOOKMARK [2][-]{Subsection.5.0.Components.2}{\376\377\000C\000o\000m\000p\000o\000n\000e\000n\000t\000s}{Section.4.Integrated spatial ML pipeline.1}% 20
+\BOOKMARK [2][-]{Subsection.5.1.Case study: soil zinc concentration along the Meuse river.2}{\376\377\000C\000a\000s\000e\000\040\000s\000t\000u\000d\000y\000:\000\040\000s\000o\000i\000l\000\040\000z\000i\000n\000c\000\040\000c\000o\000n\000c\000e\000n\000t\000r\000a\000t\000i\000o\000n\000\040\000a\000l\000o\000n\000g\000\040\000t\000h\000e\000\040\000M\000e\000u\000s\000e\000\040\000r\000i\000v\000e\000r}{Section.4.Integrated spatial ML pipeline.1}% 21
+\BOOKMARK [2][-]{Subsection.5.2.Additional unique algorithms.2}{\376\377\000A\000d\000d\000i\000t\000i\000o\000n\000a\000l\000\040\000u\000n\000i\000q\000u\000e\000\040\000a\000l\000g\000o\000r\000i\000t\000h\000m\000s}{Section.4.Integrated spatial ML pipeline.1}% 22
 \BOOKMARK [1][-]{Section.5.Summary and discussion.1}{\376\377\000S\000u\000m\000m\000a\000r\000y\000\040\000a\000n\000d\000\040\000d\000i\000s\000c\000u\000s\000s\000i\000o\000n}{}% 23
