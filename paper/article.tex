@@ -505,12 +505,14 @@ The cache-optimization advantage of column-major storage diminishes as datasets
 exceed the L3 cache capacity (18\,MB on our test hardware).
 
 Memory consumption is substantially lower for \pkg{smelt-ml}: at $n = 10{,}000$,
-peak RSS is 5\,MB (\pkg{XGBoost}) and 8\,MB (\pkg{CatBoost}), compared to
-176\,MB and 220\,MB for the official libraries accessed via \proglang{Python}
-(which includes \proglang{Python} runtime overhead). Even accounting for
-interpreter overhead, the \proglang{Rust} implementation's memory footprint is
-an order of magnitude smaller due to the compact \code{u8} bin representation
-and absence of garbage-collected allocations.
+peak RSS is 5\,MB (\pkg{XGBoost}) and 8\,MB (\pkg{CatBoost}). The official
+libraries consume 208\,MB and 226\,MB total, of which 11\,MB is the
+\proglang{Python} runtime baseline --- the library-specific overhead is
+197\,MB (\pkg{XGBoost}) and 215\,MB (\pkg{CatBoost}). Even after subtracting
+the \proglang{Python} runtime, \pkg{smelt-ml} uses \textbf{25--40$\times$ less
+memory}, attributable to the compact \code{u8} bin representation (1 byte per
+bin vs.\ 4 bytes in the official libraries) and \proglang{Rust}'s deterministic
+memory management without garbage collection.
 
 We note that the official \proglang{C++} libraries use row-major bin storage
 despite the cache disadvantage. We attribute this to two factors: (1) legacy
@@ -518,6 +520,16 @@ design decisions made when GPU backends (which favor row-major for coalesced
 memory access) became the primary optimization target, and (2) the difficulty
 of retrofitting column-major layout into codebases with extensive SIMD
 intrinsics written for row-major memory patterns.
+
+Timing analysis reveals the source of the scaling gap: from $n = 1{,}000$ to
+$n = 100{,}000$, \pkg{smelt-ml}'s \pkg{XGBoost} time grows by a factor of
+$\sim$45$\times$ (consistent with $O(n \log n)$ histogram scanning), while the
+official \proglang{C++} library grows by only $\sim$8$\times$. The
+\proglang{C++} library achieves this sublinear scaling via SIMD-vectorized
+histogram accumulation (processing 4--8 bins per instruction) and the
+histogram subtraction trick (computing sibling node histograms by subtraction
+rather than re-scanning), both of which require architecture-specific intrinsics
+that our pure-\proglang{Rust} implementation does not employ.
 
 The practical implication is that \pkg{smelt-ml}'s gradient boosting is
 best suited for small-to-medium datasets ($n \leq 10{,}000$) typical of
@@ -591,11 +603,51 @@ with guaranteed $(1-\alpha)$ coverage via split conformal prediction and
 conformalized quantile regression \citep[CQR;][]{Romano+Patterson+Candes:2019}.
 The \code{ConformalRegressor} wraps any \code{TrainedModel} without retraining.
 
-In \proglang{Python}, this workflow requires at minimum four separate packages
-(\pkg{scikit-learn}, \pkg{geoxgboost}, spatial resampling code, and
-\pkg{MAPIE} or \pkg{crepes} for conformal prediction), each with different APIs
-and data structures. In \pkg{smelt-ml}, the trait-based architecture ensures
-that all components compose seamlessly.
+\subsection{Why integration matters}
+
+The value of this integration is not merely convenience but
+\textbf{methodological correctness}. In practice, spatial ML workflows are
+error-prone because spatial leakage, a well-documented source of optimism
+bias in geospatial prediction \citep{Roberts2017}, requires that the resampling
+strategy be spatially aware --- yet most ML frameworks treat resampling and
+modeling as independent concerns. When spatial CV is implemented as an
+external script rather than a first-class \code{Resample} trait, it cannot
+be passed to hyperparameter tuning or model comparison functions, forcing
+users to write custom loops that risk subtle data leakage bugs.
+
+In \pkg{smelt-ml}, the trait system enforces correct composition:
+\code{SpatialBlockCV} implements \code{Resample}, so it works with
+\fct{benchmark}, \code{GridSearch}, \code{BayesianOptimizer}, and
+\code{Bagging} without adaptation. Similarly, \code{ConformalRegressor}
+wraps any \code{TrainedModel}, so conformal prediction composes with
+any learner --- including \code{GeoXGBoost}, pipelines with preprocessing,
+or stacked ensembles.
+
+Table~\ref{tab:python_comparison} quantifies the integration gap with
+\proglang{Python}.
+
+\begin{table}[t!]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Capability & \pkg{smelt-ml} & \proglang{Python} equivalent \\
+\midrule
+Spatial regression        & \code{GeoXGBoost}     & \pkg{geoxgboost} \\
+Spatial CV                & \code{SpatialBlockCV}  & custom code or \pkg{spacv} \\
+Conformal prediction      & \code{ConformalRegressor} & \pkg{MAPIE} or \pkg{crepes} \\
+Gradient boosting         & \code{XGBoost}        & \pkg{xgboost} \\
+Preprocessing pipeline    & \code{Pipeline}       & \pkg{scikit-learn} \\
+\midrule
+Packages required         & 1                     & 4--5 \\
+API consistency           & Trait-based, uniform   & Mixed APIs \\
+Data format conversion    & None                  & DataFrame $\leftrightarrow$ array \\
+Thread-safety guarantee   & Compile-time          & Runtime (GIL) \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:python_comparison} Integration comparison for a spatial ML
+workflow with uncertainty quantification.}
+\end{table}
 
 \subsection{Case study: soil zinc concentration along the Meuse river}
 
