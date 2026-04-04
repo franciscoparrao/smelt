@@ -244,6 +244,127 @@ struct LeafCandidate {
 }
 
 #[allow(dead_code)]
+/// Per-feature cached histogram: (bin_g, bin_h, nan_g, nan_h)
+type LeafHist = Vec<(Vec<f64>, Vec<f64>, f64, f64)>;
+
+/// Build histogram for a set of indices (parallel over features).
+fn build_leaf_hist(
+    bins: &Bins,
+    grads: &[f64],
+    hess: &[f64],
+    weights: &[f64],
+    indices: &[usize],
+    col_indices: &[usize],
+) -> LeafHist {
+    col_indices
+        .par_iter()
+        .map(|&feat| {
+            let nb = bins.boundaries[feat].len();
+            let mut bg = vec![0.0; nb];
+            let mut bh = vec![0.0; nb];
+            let mut ng = 0.0;
+            let mut nh = 0.0;
+            for &idx in indices {
+                let b = bins.get_bin(feat, idx);
+                let w = weights[idx];
+                if b == NAN_BIN {
+                    ng += grads[idx] * w;
+                    nh += hess[idx] * w;
+                } else {
+                    bg[b as usize] += grads[idx] * w;
+                    bh[b as usize] += hess[idx] * w;
+                }
+            }
+            (bg, bh, ng, nh)
+        })
+        .collect()
+}
+
+/// Find best split from a cached histogram (no scanning).
+fn find_best_from_cache(
+    bins: &Bins,
+    cached: &LeafHist,
+    col_indices: &[usize],
+    lambda: f64,
+    min_child_weight: f64,
+) -> Option<LeafCandidate> {
+    let results: Vec<Option<LeafCandidate>> = col_indices
+        .par_iter()
+        .enumerate()
+        .map(|(fi, &feat)| {
+            let (bin_g, bin_h, nan_g, nan_h) = &cached[fi];
+            let nb = bin_g.len();
+            let total_g: f64 = bin_g.iter().sum::<f64>() + nan_g;
+            let total_h: f64 = bin_h.iter().sum::<f64>() + nan_h;
+            let mut best_gain = 0.0;
+            let mut best: Option<(usize, f64, bool)> = None;
+
+            let (mut gl, mut hl) = (0.0, 0.0);
+            for bin in 0..nb.saturating_sub(1) {
+                gl += bin_g[bin];
+                hl += bin_h[bin];
+                let (gr, hr) = (total_g - gl, total_h - hl);
+                if hl < min_child_weight || hr < min_child_weight {
+                    continue;
+                }
+                let gain = 0.5
+                    * (gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
+                        - total_g * total_g / (total_h + lambda));
+                if gain > best_gain {
+                    best_gain = gain;
+                    best = Some((bin, gain, false));
+                }
+            }
+            if *nan_h > 0.0 {
+                let (mut gl, mut hl) = (*nan_g, *nan_h);
+                for bin in 0..nb.saturating_sub(1) {
+                    gl += bin_g[bin];
+                    hl += bin_h[bin];
+                    let (gr, hr) = (total_g - gl, total_h - hl);
+                    if hl < min_child_weight || hr < min_child_weight {
+                        continue;
+                    }
+                    let gain = 0.5
+                        * (gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
+                            - total_g * total_g / (total_h + lambda));
+                    if gain > best_gain {
+                        best_gain = gain;
+                        best = Some((bin, gain, true));
+                    }
+                }
+            }
+            best.map(|(bin, gain, nan_left)| LeafCandidate {
+                indices: Vec::new(),
+                depth: 0,
+                gain,
+                feature: feat,
+                threshold: bins.boundaries[feat][bin],
+                nan_left,
+                split_bin: bin,
+            })
+        })
+        .collect();
+
+    results.into_iter().flatten().max_by(|a, b| {
+        a.gain
+            .partial_cmp(&b.gain)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
+}
+
+/// Subtract: result[fi] = parent[fi] - child[fi]
+fn subtract_leaf_hists(parent: &LeafHist, child: &LeafHist) -> LeafHist {
+    parent
+        .iter()
+        .zip(child)
+        .map(|((pg, ph, png, pnh), (cg, ch, cng, cnh))| {
+            let bg: Vec<f64> = pg.iter().zip(cg).map(|(p, c)| p - c).collect();
+            let bh: Vec<f64> = ph.iter().zip(ch).map(|(p, c)| p - c).collect();
+            (bg, bh, png - cng, pnh - cnh)
+        })
+        .collect()
+}
+
 fn build_leaf_wise_tree(
     bins: &Bins,
     grads: &[f64],
@@ -257,16 +378,16 @@ fn build_leaf_wise_tree(
     min_child_weight: f64,
     feature_importances: &mut Vec<f64>,
 ) -> LGBNode {
-    // Start: single leaf with all indices
-    let mut leaves: Vec<(Vec<usize>, usize)> = vec![(indices, 0)]; // (indices, depth)
-    let _tree_nodes: Vec<Option<LGBNode>> = vec![None]; // placeholder
+    // Each leaf: (indices, depth, cached histogram)
+    let root_hist = build_leaf_hist(bins, grads, hess, weights, &indices, col_indices);
+    let mut leaves: Vec<(Vec<usize>, usize, LeafHist)> = vec![(indices, 0, root_hist)];
 
     while leaves.len() < num_leaves {
-        // Find the leaf with the best potential split
+        // Find best split from CACHED histograms (no re-scanning!)
         let mut best_leaf_idx = None;
         let mut best_split: Option<LeafCandidate> = None;
 
-        for (li, (leaf_indices, depth)) in leaves.iter().enumerate() {
+        for (li, (leaf_indices, depth, cached)) in leaves.iter().enumerate() {
             if let Some(md) = max_depth
                 && *depth >= md
             {
@@ -281,17 +402,9 @@ fn build_leaf_wise_tree(
                 continue;
             }
 
-            // Find best split for this leaf
-            if let Some(cand) = find_best_split_hist(
-                bins,
-                grads,
-                hess,
-                weights,
-                leaf_indices,
-                col_indices,
-                lambda,
-                min_child_weight,
-            ) {
+            if let Some(cand) =
+                find_best_from_cache(bins, cached, col_indices, lambda, min_child_weight)
+            {
                 let is_better = match &best_split {
                     None => true,
                     Some(prev) => cand.gain > prev.gain,
@@ -307,7 +420,7 @@ fn build_leaf_wise_tree(
             (Some(li), Some(split)) => {
                 feature_importances[split.feature] += split.gain;
 
-                let (leaf_indices, depth) = leaves.remove(li);
+                let (leaf_indices, depth, parent_hist) = leaves.remove(li);
                 let feat = split.feature;
                 let bin_thr = split.split_bin;
                 let nan_left = split.nan_left;
@@ -332,16 +445,33 @@ fn build_leaf_wise_tree(
                     break;
                 }
 
-                leaves.push((left_idx, depth + 1));
-                leaves.push((right_idx, depth + 1));
+                // Histogram subtraction: scan smaller, subtract for larger
+                let (smaller_idx, larger_idx, smaller_is_left) =
+                    if left_idx.len() <= right_idx.len() {
+                        (&left_idx, &right_idx, true)
+                    } else {
+                        (&right_idx, &left_idx, false)
+                    };
+
+                let smaller_hist =
+                    build_leaf_hist(bins, grads, hess, weights, smaller_idx, col_indices);
+                let larger_hist = subtract_leaf_hists(&parent_hist, &smaller_hist);
+
+                if smaller_is_left {
+                    leaves.push((left_idx, depth + 1, smaller_hist));
+                    leaves.push((right_idx, depth + 1, larger_hist));
+                } else {
+                    leaves.push((left_idx, depth + 1, larger_hist));
+                    leaves.push((right_idx, depth + 1, smaller_hist));
+                }
             }
-            _ => break, // no more splits possible
+            _ => break,
         }
     }
 
     // Build tree from final leaves
     if leaves.len() == 1 {
-        let (indices, _) = &leaves[0];
+        let (indices, _, _) = &leaves[0];
         return LGBNode::Leaf {
             weight: leaf_weight(grads, hess, weights, indices, lambda),
         };
@@ -357,7 +487,7 @@ fn build_leaf_wise_tree(
         weights,
         &leaves
             .into_iter()
-            .flat_map(|(idx, _)| idx)
+            .flat_map(|(idx, _, _)| idx)
             .collect::<Vec<_>>(),
         col_indices,
         num_leaves,
