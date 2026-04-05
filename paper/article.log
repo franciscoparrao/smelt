@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.3.9)  3 APR 2026 22:45
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.3.9)  4 APR 2026 23:12
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -855,7 +855,7 @@ Overfull \hbox (5.47499pt too wide) has occurred while \output is active
  []
 
 [3{/usr/share/texmf/fonts/enc/dvips/lm/lm-ts1.enc}]
-Overfull \hbox (17.46855pt too wide) in paragraph at lines 277--280
+Overfull \hbox (17.46855pt too wide) in paragraph at lines 282--285
 []\T1/lmr/m/n/10.95 Our key op-ti-miza-tion stores bin in-dices in \T1/lmr/bx/n
 /10.95 column-major \T1/lmr/m/n/10.95 or-der: \T1/lmtt/m/n/10.95 bin_index[feat
 ure][sample]\T1/lmr/m/n/10.95 .
@@ -872,25 +872,21 @@ Overfull \hbox (5.47499pt too wide) has occurred while \output is active
  []
 
 [5]
-Overfull \hbox (1.06343pt too wide) in paragraph at lines 312--317
+Overfull \hbox (1.06343pt too wide) in paragraph at lines 317--322
 []\T1/lmr/m/n/10.95 Our \T1/lmtt/m/n/10.95 CatBoost \T1/lmr/m/n/10.95 learner i
 m-ple-ments the two defin-ing al-go-rith-mic con-tri-bu-tions of [][]Prokhorenk
 ova
  []
 
 
-Overfull \hbox (20.20352pt too wide) in paragraph at lines 339--347
+Overfull \hbox (20.20352pt too wide) in paragraph at lines 344--352
 []\T1/lmr/m/n/10.95 Our \T1/lmtt/m/n/10.95 LightGBM \T1/lmr/m/n/10.95 learner i
 m-ple-ments \T1/lmr/bx/n/10.95 leaf-wise (best-first) tree growth \T1/lmr/m/n/1
 0.95 con-trolled by \T1/lmtt/m/n/10.95 num_leaves\T1/lmr/m/n/10.95 ,
  []
 
 
-Overfull \hbox (22.23787pt too wide) in paragraph at lines 415--424
-\T1/lmr/m/n/10.95 iso-late al-go-rith-mic ef-fi-ciency from par-al-leliza-tion 
-strat-egy. \T1/lmss/m/n/10.95 Rust \T1/lmr/m/n/10.95 com-piled with \T1/lmtt/m/
-n/10.95 target-cpu=native
- []
+Underfull \vbox (badness 7064) has occurred while \output is active []
 
 
 Overfull \hbox (5.47499pt too wide) has occurred while \output is active
@@ -898,17 +894,11 @@ Overfull \hbox (5.47499pt too wide) has occurred while \output is active
  []
 
 [6]
-Overfull \hbox (22.45679pt too wide) in paragraph at lines 439--454
- [][] 
+Overfull \hbox (22.23787pt too wide) in paragraph at lines 420--429
+\T1/lmr/m/n/10.95 iso-late al-go-rith-mic ef-fi-ciency from par-al-leliza-tion 
+strat-egy. \T1/lmss/m/n/10.95 Rust \T1/lmr/m/n/10.95 com-piled with \T1/lmtt/m/
+n/10.95 target-cpu=native
  []
-
-
-Overfull \hbox (22.45679pt too wide) in paragraph at lines 460--474
- [][] 
- []
-
-
-Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 Overfull \hbox (5.47499pt too wide) has occurred while \output is active
@@ -916,10 +906,19 @@ Overfull \hbox (5.47499pt too wide) has occurred while \output is active
  []
 
 [7]
-<scaling.pdf, id=269, 859.35336pt x 495.52489pt>
+Overfull \hbox (22.45679pt too wide) in paragraph at lines 444--459
+ [][] 
+ []
+
+
+Overfull \hbox (22.45679pt too wide) in paragraph at lines 465--479
+ [][] 
+ []
+
+<scaling.pdf, id=268, 859.35336pt x 495.52489pt>
 File: scaling.pdf Graphic file (type pdf)
 <use scaling.pdf>
-Package pdftex.def Info: scaling.pdf  used on input line 486.
+Package pdftex.def Info: scaling.pdf  used on input line 491.
 (pdftex.def)             Requested size: 442.65375pt x 255.2473pt.
 
 Overfull \hbox (5.47499pt too wide) has occurred while \output is active
@@ -927,7 +926,7 @@ Overfull \hbox (5.47499pt too wide) has occurred while \output is active
  []
 
 [8]
-Underfull \vbox (badness 4229) has occurred while \output is active []
+Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 Overfull \hbox (5.47499pt too wide) has occurred while \output is active
@@ -950,27 +949,26 @@ Overfull \hbox (10.94998pt too wide) has occurred while \output is active
  []
 
 [12] (./article.bbl
-
-LaTeX Font Warning: Font shape `T1/lmr/b/it' in size <10.95> not available
-(Font)              Font shape `T1/lmr/b/sl' tried instead on input line 34.
-
-
 Overfull \hbox (10.94998pt too wide) has occurred while \output is active
 [] \T1/lmr/m/n/10.95 13
  []
 
 [13]
+
+LaTeX Font Warning: Font shape `T1/lmr/b/it' in size <10.95> not available
+(Font)              Font shape `T1/lmr/b/sl' tried instead on input line 34.
+
 LaTeX Font Info:    Font shape `T1/lmss/m/it' in size <10.95> not available
 (Font)              Font shape `T1/lmss/m/sl' tried instead on input line 117.
-)
-LaTeX Font Info:    Font shape `T1/pzc/m/n' in size <13> not available
-(Font)              Font shape `T1/pzc/m/it' tried instead on input line 800.
 
 Overfull \hbox (10.94998pt too wide) has occurred while \output is active
 \T1/lmr/m/n/10.95 14 []
  []
 
-[14]
+[14])
+LaTeX Font Info:    Font shape `T1/pzc/m/n' in size <13> not available
+(Font)              Font shape `T1/pzc/m/it' tried instead on input line 806.
+
 Overfull \hbox (10.94998pt too wide) has occurred while \output is active
 [] \T1/lmr/m/n/10.95 15
  []
@@ -986,11 +984,11 @@ Package rerunfilecheck Info: File `article.out' has not changed.
 Here is how much of TeX's memory you used:
  22284 strings out of 476047
  412775 string characters out of 5792076
- 1950975 words of memory out of 5000000
+ 1949975 words of memory out of 5000000
  43770 multiletter control sequences out of 15000+600000
  658116 words of font info for 100 fonts, out of 8000000 for 9000
  85 hyphenation exceptions out of 8191
- 99i,10n,101p,587b,630s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 99i,10n,101p,655b,626s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texmf/fonts/type1/public/lm/lmb10.pfb></usr/share/texmf/fonts/typ
 e1/public/lm/lmbo10.pfb></usr/share/texmf/fonts/type1/public/lm/lmbx10.pfb></us
 r/share/texmf/fonts/type1/public/lm/lmbx12.pfb></usr/share/texmf/fonts/type1/pu
@@ -1006,7 +1004,7 @@ pe1/public/lm/lmsy7.pfb></usr/share/texmf/fonts/type1/public/lm/lmsy8.pfb></usr
 lic/lm/lmtto10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/s
 ymbols/msam10.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/zapfchan/uzcmi
 8a.pfb>
-Output written on article.pdf (15 pages, 510432 bytes).
+Output written on article.pdf (15 pages, 511366 bytes).
 PDF statistics:
  544 PDF objects out of 1000 (max. 8388607)
  425 compressed objects within 5 object streams

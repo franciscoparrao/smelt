@@ -207,8 +207,11 @@ Random Survival Forest with C-index \citep{Ishwaran+Kogalur+Blackstone:2008}
 (survival analysis); Causal Forest with honest splitting
 \citep{Athey+Imbens:2016, Wager+Athey:2018} (causal inference); Classifier Chains
 and Regressor Chains (multi-label/output); Quantile Regression Forest; Conformal
-Prediction with CQR \citep{Romano+Patterson+Candes:2019}; and SHAP-based feature
-importance.
+Prediction with CQR \citep{Romano+Patterson+Candes:2019}; SHAP-based feature
+importance; and built-in non-parametric statistical tests for model comparison
+(Wilcoxon signed-rank, Friedman with Nemenyi post-hoc, McNemar, bootstrap
+confidence intervals) --- eliminating the need for external statistical packages
+when validating that one model significantly outperforms another.
 
 \subsection{Comparison with existing frameworks}
 
@@ -241,6 +244,7 @@ Geographical-XGBoost           & \checkmark     & ---        & ---            & 
 Spatial cross-validation       & \checkmark     & ---        & ---            & \checkmark$^c$ \\
 SMOTE / ADASYN                 & \checkmark     & ---        & \checkmark$^e$ & \checkmark$^c$ \\
 Bayesian tuning                & \checkmark     & ---        & \checkmark$^f$ & \checkmark \\
+Statistical tests (Wilcoxon, Friedman) & \checkmark & --- & \checkmark$^g$ & \checkmark \\
 \midrule
 Language                       & \proglang{Rust} & \proglang{Rust} & \proglang{Python} & \proglang{R} \\
 Supervised learners            & 27             & 9          & 40+            & 30+$^c$    \\
@@ -250,7 +254,8 @@ Supervised learners            & 27             & 9          & 40+            & 
 \caption{\label{tab:frameworks} Feature comparison across ML frameworks.
 $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM).
 $^c$Via extension packages. $^d$Available in \proglang{R} via \pkg{grf}.
-$^e$Via \pkg{imbalanced-learn}. $^f$Via \pkg{scikit-optimize} or \pkg{Optuna}.}
+$^e$Via \pkg{imbalanced-learn}. $^f$Via \pkg{scikit-optimize} or \pkg{Optuna}.
+$^g$Via \pkg{scipy.stats}.}
 \end{table}
 
 
@@ -638,8 +643,9 @@ Spatial CV                & \code{SpatialBlockCV}  & custom code or \pkg{spacv} 
 Conformal prediction      & \code{ConformalRegressor} & \pkg{MAPIE} or \pkg{crepes} \\
 Gradient boosting         & \code{XGBoost}        & \pkg{xgboost} \\
 Preprocessing pipeline    & \code{Pipeline}       & \pkg{scikit-learn} \\
+Statistical validation    & \code{stats} module    & \pkg{scipy.stats} \\
 \midrule
-Packages required         & 1                     & 4--5 \\
+Packages required         & 1                     & 5--6 \\
 API consistency           & Trait-based, uniform   & Mixed APIs \\
 Data format conversion    & None                  & DataFrame $\leftrightarrow$ array \\
 Thread-safety guarantee   & Compile-time          & Runtime (GIL) \\
