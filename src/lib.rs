@@ -52,6 +52,7 @@ pub mod prediction;
 pub mod preprocess;
 pub mod resample;
 pub mod serialize;
+pub mod stats;
 pub mod survival;
 pub mod task;
 pub mod tuning;
