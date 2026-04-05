@@ -1,15 +1,15 @@
 [package]
 name = "smelt-ml"
-version = "1.2.1"
+version = "1.3.0"
 edition = "2024"
 authors = ["Francisco Parra <francisco.parra.o@usach.cl>"]
-description = "A machine learning framework for Rust, inspired by mlr3"
+description = "Machine learning framework with spatial modeling, conformal prediction, and gradient boosting competitive with C++"
 license = "MIT"
 repository = "https://github.com/franciscoparrao/smelt"
-keywords = ["machine-learning", "classification", "regression", "ml", "data-science"]
+keywords = ["machine-learning", "gradient-boosting", "spatial", "conformal-prediction", "xgboost"]
 categories = ["science", "algorithms"]
 readme = "README.md"
-exclude = ["docs/WOS/", "tests/xgboost_*.py", "tests/real_benchmark.py"]
+exclude = ["docs/WOS/", "tests/xgboost_*.py", "tests/real_benchmark.py", "paper/", "/data/"]
 
 [dependencies]
 ndarray = { version = "0.16", features = ["serde"] }
