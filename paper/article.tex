@@ -540,6 +540,59 @@ best suited for small-to-medium datasets ($n \leq 10{,}000$) typical of
 research workflows, where it provides competitive or superior performance
 without requiring \proglang{C++} toolchains or \proglang{Python} bindings.
 
+\subsection{Statistical significance of performance differences}
+
+Since each benchmark was run 10 times, we apply paired Wilcoxon signed-rank
+tests to determine whether the observed speedups are statistically significant.
+Table~\ref{tab:significance} summarizes the results with bootstrap 95\%
+confidence intervals for the speedup ratio.
+
+\begin{table}[t!]
+\centering
+\small
+\begin{tabular}{llccc}
+\toprule
+Engine & $n$ & Speedup [95\% CI] & $p$-value & Faster \\
+\midrule
+\multicolumn{5}{l}{\textit{Classification}} \\
+\pkg{CatBoost}$^\dagger$ & 500       & 1.33 [1.27, 1.40] & 0.002$^{**}$ & Rust \\
+                          & 1{,}000   & 1.36 [1.32, 1.40] & 0.002$^{**}$ & Rust \\
+                          & 10{,}000  & 1.18 [1.06, 1.32] & 0.020$^{*}$  & Rust \\
+                          & 50{,}000  & 1.18 [1.03, 1.33] & 0.049$^{*}$  & Rust \\
+                          & 100{,}000 & 1.08 [1.01, 1.15] & 0.049$^{*}$  & Rust \\
+\pkg{XGBoost}             & 500       & 1.11 [1.01, 1.21] & 0.106       & --- \\
+                          & 10{,}000  & 0.66 [0.57, 0.77] & 0.004$^{**}$ & C++ \\
+                          & 100{,}000 & 0.50 [0.44, 0.56] & 0.002$^{**}$ & C++ \\
+\midrule
+\multicolumn{5}{l}{\textit{Overall (36 comparisons across 3 engines $\times$ 6 sizes $\times$ 2 tasks)}} \\
+\multicolumn{2}{l}{Rust significantly faster} & \multicolumn{3}{l}{8 / 36 (22\%)} \\
+\multicolumn{2}{l}{C++ significantly faster}  & \multicolumn{3}{l}{17 / 36 (47\%)} \\
+\multicolumn{2}{l}{No significant difference}  & \multicolumn{3}{l}{11 / 36 (31\%)} \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:significance} Statistical significance of performance
+differences (Wilcoxon signed-rank, paired, two-sided). Selected rows shown.
+$^{*}p < 0.05$, $^{**}p < 0.01$. Bootstrap 95\% CI for the speedup ratio
+($>1$ = Rust faster). \pkg{CatBoost} classification is significantly faster
+at 5 of 6 sizes.}
+\end{table}
+
+The \pkg{CatBoost} classification advantage is statistically significant at
+5 of 6 dataset sizes ($p < 0.05$), with the speedup at $n = 500$ and
+$n = 1{,}000$ being highly significant ($p < 0.01$). The
+\pkg{XGBoost} disadvantage at $n \geq 10{,}000$ is also statistically
+significant ($p < 0.01$), confirming that the scaling gap is real and not
+attributable to measurement noise.
+
+A Friedman test across the six dataset sizes confirms that speedup ratios
+vary significantly with $n$ for all three engines ($p < 0.001$), indicating
+that dataset size is a meaningful moderator of relative performance.
+
+This analysis was performed using \pkg{smelt-ml}'s built-in statistical
+testing module (\code{stats::wilcoxon\_signed\_rank},
+\code{stats::bootstrap\_ci}), demonstrating the framework's integrated
+approach to model comparison.
+
 \subsection{Accuracy validation}
 
 Table~\ref{tab:accuracy} validates correctness against \pkg{scikit-learn} on
