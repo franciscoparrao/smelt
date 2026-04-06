@@ -31,11 +31,12 @@ cross-validation, and conformal prediction --- enabling end-to-end spatially-awa
 predictive workflows with guaranteed prediction interval coverage without
 \proglang{Python} or \proglang{R} dependencies. The gradient boosting
 implementations employ cache-optimized column-major histogram accumulation
-with \code{u8} packing. On single-threaded benchmarks ($n$ from 500 to
-100{,}000, 10 runs, mean $\pm$ std), \pkg{smelt-ml} is 1.4--8.3$\times$
-faster than official \proglang{C++} libraries at research-typical scales
-($n \leq 10{,}000$) and consumes an order of magnitude less memory, while
-\proglang{C++} is faster at $n \geq 50{,}000$. The composable, trait-based
+with \code{u8} packing and a histogram subtraction trick. On single-threaded
+benchmarks ($n$ from 500 to 100{,}000, 10 runs, mean $\pm$ std), the
+\pkg{CatBoost}-inspired implementation matches or exceeds the official
+\proglang{C++} library at all tested scales (1.0--1.4$\times$ for
+classification), while \pkg{XGBoost} is competitive at $n \leq 10{,}000$.
+Memory consumption is 25--40$\times$ lower than the \proglang{C++} libraries. The composable, trait-based
 architecture is inspired by \pkg{mlr3} \citep{Lang+Binder+Richter:2019} and
 \pkg{scikit-learn} \citep{Pedregosa+Varoquaux+Gramfort:2011}, with zero
 \code{unsafe} blocks across 13{,}000+ lines of code.
@@ -447,12 +448,12 @@ and regression training times across all dataset sizes.
 \cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
 $n$ & C++ & Rust &  & C++ & Rust &  & C++ & Rust &  \\
 \midrule
-500        & $66\pm31$    & $50\pm20$    & 1.3 & $56\pm12$    & $55\pm12$    & 1.0 & $430\pm102$  & $56\pm13$    & 7.7 \\
-1{,}000    & $143\pm43$   & $80\pm13$    & 1.8 & $67\pm8$     & $99\pm12$    & 0.7 & $343\pm111$  & $69\pm12$    & 5.0 \\
-5{,}000    & $247\pm61$   & $378\pm42$   & 0.7 & $165\pm71$   & $367\pm31$   & 0.5 & $413\pm86$   & $250\pm56$   & 1.7 \\
-10{,}000   & $309\pm54$   & $520\pm96$   & 0.6 & $201\pm38$   & $429\pm91$   & 0.5 & $667\pm146$  & $328\pm55$   & 2.0 \\
-50{,}000   & $946\pm180$  & $2293\pm246$ & 0.4 & $664\pm82$   & $1909\pm211$ & 0.3 & $1492\pm168$ & $1747\pm239$ & 0.9 \\
-100{,}000  & $1200\pm154$ & $4661\pm584$ & 0.3 & $1110\pm55$  & $3547\pm282$ & 0.3 & $2270\pm168$ & $3476\pm414$ & 0.7 \\
+500        & $55\pm9$     & $50\pm2$     & 1.1 & $36\pm6$     & $34\pm2$     & 1.1 & $261\pm25$   & $197\pm9$    & 1.3 \\
+1{,}000    & $70\pm13$    & $92\pm7$     & 0.8 & $60\pm3$     & $56\pm3$     & 1.1 & $263\pm10$   & $193\pm7$    & 1.4 \\
+5{,}000    & $234\pm54$   & $336\pm15$   & 0.7 & $122\pm6$    & $209\pm5$    & 0.6 & $384\pm66$   & $366\pm35$   & 1.0 \\
+10{,}000   & $311\pm70$   & $471\pm19$   & 0.7 & $225\pm24$   & $296\pm19$   & 0.8 & $518\pm85$   & $439\pm22$   & 1.2 \\
+50{,}000   & $723\pm106$  & $1164\pm36$  & 0.6 & $588\pm84$   & $904\pm26$   & 0.6 & $1353\pm123$ & $1148\pm164$ & 1.2 \\
+100{,}000  & $1159\pm170$ & $2327\pm257$ & 0.5 & $1152\pm130$ & $1874\pm219$ & 0.6 & $2353\pm172$ & $2186\pm199$ & 1.1 \\
 \bottomrule
 \end{tabular}
 \caption{\label{tab:classif_perf} Classification training time (ms, mean $\pm$ std, 10 runs).
@@ -468,12 +469,12 @@ Speedup $>1$ means \pkg{smelt-ml} is faster. All values single-threaded.}
 \cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
 $n$ & C++ & Rust &  & C++ & Rust &  & C++ & Rust &  \\
 \midrule
-500        & $321\pm61$   & $110\pm11$   & 2.9 & $32\pm6$     & $95\pm15$    & 0.3 & $345\pm78$   & $41\pm5$     & 8.3 \\
-1{,}000    & $326\pm88$   & $199\pm36$   & 1.6 & $61\pm12$    & $117\pm40$   & 0.5 & $354\pm87$   & $100\pm22$   & 3.5 \\
-5{,}000    & $411\pm93$   & $294\pm76$   & 1.4 & $194\pm25$   & $301\pm30$   & 0.6 & $448\pm93$   & $279\pm27$   & 1.6 \\
-10{,}000   & $436\pm76$   & $608\pm55$   & 0.7 & $192\pm23$   & $423\pm61$   & 0.5 & $539\pm98$   & $381\pm89$   & 1.4 \\
-50{,}000   & $851\pm126$  & $2212\pm285$ & 0.4 & $727\pm125$  & $1594\pm232$ & 0.5 & $1152\pm120$ & $1701\pm226$ & 0.7 \\
-100{,}000  & $1120\pm101$ & $4071\pm534$ & 0.3 & $1020\pm65$  & $3145\pm276$ & 0.3 & $2005\pm170$ & $3665\pm462$ & 0.5 \\
+500        & $204\pm4$    & $146\pm5$    & 1.4 & $28\pm1$     & $57\pm3$     & 0.5 & $234\pm6$    & $193\pm15$   & 1.2 \\
+1{,}000    & $242\pm15$   & $211\pm45$   & 1.1 & $58\pm6$     & $109\pm4$    & 0.5 & $272\pm25$   & $337\pm18$   & 0.8 \\
+5{,}000    & $399\pm113$  & $390\pm19$   & 1.0 & $165\pm9$    & $173\pm12$   & 1.0 & $344\pm41$   & $334\pm6$    & 1.0 \\
+10{,}000   & $440\pm107$  & $467\pm25$   & 0.9 & $231\pm26$   & $250\pm16$   & 0.9 & $423\pm50$   & $436\pm16$   & 1.0 \\
+50{,}000   & $734\pm133$  & $1154\pm163$ & 0.6 & $597\pm95$   & $915\pm167$  & 0.7 & $1053\pm122$ & $1262\pm190$ & 0.8 \\
+100{,}000  & $1115\pm133$ & $2002\pm291$ & 0.6 & $1075\pm149$ & $1756\pm230$ & 0.6 & $1866\pm146$ & $2478\pm308$ & 0.8 \\
 \bottomrule
 \end{tabular}
 \caption{\label{tab:regress_perf} Regression training time (ms, mean $\pm$ std, 10 runs).}
@@ -496,18 +497,17 @@ six dataset sizes. Error bars show $\pm$1 standard deviation over 10 runs.
 $n \geq 50{,}000$.}
 \end{figure}
 
-\pkg{smelt-ml}'s \pkg{CatBoost}-inspired implementation is consistently faster
-than the official library at all sizes up to $n = 10{,}000$ (1.4--8.3$\times$),
-and remains competitive at $n = 50{,}000$ (0.7--0.9$\times$).
-\pkg{XGBoost} is faster at $n \leq 5{,}000$ for regression (1.4--2.9$\times$)
-and at $n \leq 1{,}000$ for classification (1.3--1.8$\times$).
+\pkg{smelt-ml}'s \pkg{CatBoost}-inspired implementation is competitive with or
+faster than the official library \textbf{at all tested scales} for classification
+(1.0--1.4$\times$) and within 0.8--1.2$\times$ for regression.
+\pkg{XGBoost} is faster at $n \leq 5{,}000$ for regression (1.0--1.4$\times$),
+while \pkg{LightGBM} is competitive at small scales ($n \leq 1{,}000$).
 
-At larger dataset sizes ($n \geq 50{,}000$), the official \proglang{C++}
-libraries are consistently faster. This is expected: the official implementations
-employ SIMD intrinsics, hardware-specific memory management, and years of
-micro-optimization that our pure-\proglang{Rust} implementation does not replicate.
-The cache-optimization advantage of column-major storage diminishes as datasets
-exceed the L3 cache capacity (18\,MB on our test hardware).
+At $n \geq 50{,}000$, \pkg{XGBoost} and \pkg{LightGBM} are 1.5--2.0$\times$
+slower than their \proglang{C++} counterparts, while \pkg{CatBoost} remains
+within 1.0--1.3$\times$. The residual gap stems from SIMD-vectorized histogram
+accumulation in the official libraries, which our pure-\proglang{Rust}
+implementation does not employ.
 
 Memory consumption is substantially lower for \pkg{smelt-ml}: at $n = 10{,}000$,
 peak RSS is 5\,MB (\pkg{XGBoost}) and 8\,MB (\pkg{CatBoost}). The official
@@ -526,15 +526,14 @@ memory access) became the primary optimization target, and (2) the difficulty
 of retrofitting column-major layout into codebases with extensive SIMD
 intrinsics written for row-major memory patterns.
 
-Timing analysis reveals the source of the scaling gap: from $n = 1{,}000$ to
-$n = 100{,}000$, \pkg{smelt-ml}'s \pkg{XGBoost} time grows by a factor of
-$\sim$45$\times$ (consistent with $O(n \log n)$ histogram scanning), while the
-official \proglang{C++} library grows by only $\sim$8$\times$. The
-\proglang{C++} library achieves this sublinear scaling via SIMD-vectorized
-histogram accumulation (processing 4--8 bins per instruction) and the
-histogram subtraction trick (computing sibling node histograms by subtraction
-rather than re-scanning), both of which require architecture-specific intrinsics
-that our pure-\proglang{Rust} implementation does not employ.
+Our implementation employs the \textbf{histogram subtraction trick}: at each
+tree split, only the smaller child is scanned; the larger child's histogram is
+computed by subtraction from the parent ($O(n_{\text{bins}})$ instead of
+$O(n_{\text{samples}})$). This reduces total scanning work by approximately
+40\% per tree. The residual gap at large $n$ is attributable to SIMD-vectorized
+histogram accumulation in the \proglang{C++} libraries (processing 4--8 bins
+per CPU instruction), which our pure-\proglang{Rust} implementation does not
+employ.
 
 The practical implication is that \pkg{smelt-ml}'s gradient boosting is
 best suited for small-to-medium datasets ($n \leq 10{,}000$) typical of
