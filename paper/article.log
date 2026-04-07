@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.3.9)  6 APR 2026 18:22
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.3.9)  6 APR 2026 20:44
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -926,12 +926,15 @@ Overfull \hbox (5.47499pt too wide) has occurred while \output is active
  []
 
 [8]
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+
 Overfull \hbox (5.47499pt too wide) has occurred while \output is active
 [] \T1/lmr/m/n/10.95 9
  []
 
 [9 <./scaling.pdf>]
-Overfull \hbox (92.1755pt too wide) in paragraph at lines 591--595
+Overfull \hbox (92.1755pt too wide) in paragraph at lines 592--596
 []\T1/lmr/m/n/10.95 This anal-y-sis was per-formed us-ing \T1/lmr/b/n/10.95 sme
 lt-ml\T1/lmr/m/n/10.95 's built-in sta-tis-ti-cal test-ing mod-ule (\T1/lmtt/m/
 n/10.95 stats::wilcoxon_signed_rank\T1/lmr/m/n/10.95 ,
@@ -958,27 +961,26 @@ Overfull \hbox (10.94998pt too wide) has occurred while \output is active
  []
 
 [13] (./article.bbl
-
-LaTeX Font Warning: Font shape `T1/lmr/b/it' in size <10.95> not available
-(Font)              Font shape `T1/lmr/b/sl' tried instead on input line 34.
-
-
 Overfull \hbox (10.94998pt too wide) has occurred while \output is active
 \T1/lmr/m/n/10.95 14 []
  []
 
 [14]
+
+LaTeX Font Warning: Font shape `T1/lmr/b/it' in size <10.95> not available
+(Font)              Font shape `T1/lmr/b/sl' tried instead on input line 28.
+
 LaTeX Font Info:    Font shape `T1/lmss/m/it' in size <10.95> not available
-(Font)              Font shape `T1/lmss/m/sl' tried instead on input line 117.
-)
-LaTeX Font Info:    Font shape `T1/pzc/m/n' in size <13> not available
-(Font)              Font shape `T1/pzc/m/it' tried instead on input line 858.
+(Font)              Font shape `T1/lmss/m/sl' tried instead on input line 111.
 
 Overfull \hbox (10.94998pt too wide) has occurred while \output is active
 [] \T1/lmr/m/n/10.95 15
  []
 
-[15]
+[15])
+LaTeX Font Info:    Font shape `T1/pzc/m/n' in size <13> not available
+(Font)              Font shape `T1/pzc/m/it' tried instead on input line 874.
+
 Overfull \hbox (10.94998pt too wide) has occurred while \output is active
 \T1/lmr/m/n/10.95 16 []
  []
@@ -989,16 +991,16 @@ LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
 Package rerunfilecheck Info: File `article.out' has not changed.
-(rerunfilecheck)             Checksum: D5A9DEAEB36D67545EEB3D03894AEE8D;6111.
+(rerunfilecheck)             Checksum: 97BA4147B96990BEF6B2B29F1A8DBFB8;6099.
  ) 
 Here is how much of TeX's memory you used:
- 22290 strings out of 476047
- 412971 string characters out of 5792076
+ 22285 strings out of 476047
+ 412820 string characters out of 5792076
  1948975 words of memory out of 5000000
- 43772 multiletter control sequences out of 15000+600000
+ 43768 multiletter control sequences out of 15000+600000
  658116 words of font info for 100 fonts, out of 8000000 for 9000
  85 hyphenation exceptions out of 8191
- 99i,10n,101p,655b,555s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 99i,10n,101p,697b,575s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texmf/fonts/type1/public/lm/lmb10.pfb></usr/share/texmf/fonts/typ
 e1/public/lm/lmbo10.pfb></usr/share/texmf/fonts/type1/public/lm/lmbx10.pfb></us
 r/share/texmf/fonts/type1/public/lm/lmbx12.pfb></usr/share/texmf/fonts/type1/pu
@@ -1014,10 +1016,10 @@ pe1/public/lm/lmsy7.pfb></usr/share/texmf/fonts/type1/public/lm/lmsy8.pfb></usr
 lic/lm/lmtto10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/s
 ymbols/msam10.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/zapfchan/uzcmi
 8a.pfb>
-Output written on article.pdf (16 pages, 515007 bytes).
+Output written on article.pdf (16 pages, 516573 bytes).
 PDF statistics:
- 554 PDF objects out of 1000 (max. 8388607)
- 434 compressed objects within 5 object streams
- 100 named destinations out of 1000 (max. 500000)
+ 551 PDF objects out of 1000 (max. 8388607)
+ 431 compressed objects within 5 object streams
+ 99 named destinations out of 1000 (max. 500000)
  223 words of extra memory for PDF output out of 10000 (max. 10000000)
 

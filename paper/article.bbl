@@ -1,4 +1,4 @@
-\begin{thebibliography}{18}
+\begin{thebibliography}{17}
 \newcommand{\enquote}[1]{``#1''}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
@@ -15,12 +15,6 @@ Athey S, Imbens G (2016).
 \newblock \emph{Proceedings of the National Academy of Sciences},
   \textbf{113}(27), 7353--7360.
 \newblock \doi{10.1073/pnas.1510489113}.
-
-\bibitem[{Burrough and McDonnell(1998)}]{Burrough+McDonnell:1998}
-Burrough PA, McDonnell RA (1998).
-\newblock \emph{Principles of Geographical Information Systems}.
-\newblock Oxford University Press.
-\newblock Meuse river dataset.
 
 \bibitem[{Chen and Guestrin(2016)}]{Chen+Guestrin:2016}
 Chen T, Guestrin C (2016).
