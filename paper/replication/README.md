@@ -23,6 +23,33 @@ Results in the paper were obtained on:
 - Cache: L1 32K, L2 1280K, L3 18432K
 - OS: Linux 6.17.0-19-generic (Ubuntu)
 
+## Profile-Guided Optimization (PGO)
+
+For maximum performance, build with PGO:
+
+```bash
+# 1. Install llvm-tools
+rustup component add llvm-tools
+
+# 2. Build with profiling
+RUSTFLAGS="-C target-cpu=native -Cprofile-generate=/tmp/pgo-data" \
+    cargo build --release --example benchmark_large
+
+# 3. Generate profile data (run typical workloads)
+./target/release/examples/benchmark_large
+
+# 4. Merge profiles
+LLVM_PROFDATA=$(find ~/.rustup -name llvm-profdata | head -1)
+$LLVM_PROFDATA merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data/*.profraw
+
+# 5. Rebuild with PGO
+cargo clean
+RUSTFLAGS="-C target-cpu=native -Cprofile-use=/tmp/pgo-data/merged.profdata" \
+    cargo build --release --example benchmark_large
+```
+
+PGO typically provides 1.3-2.1x additional speedup over LTO alone.
+
 ## Reproducing Tables
 
 Run the master script:
