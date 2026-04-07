@@ -30,6 +30,7 @@ fn load_dataset(prefix: &str, n: usize) -> (Array2<f64>, Vec<f64>) {
 }
 
 #[test]
+#[ignore] // requires Python-generated CSV files
 fn lightgbm_performance_classif() {
     let sizes = [100, 500, 1000, 5000, 10000];
     println!("\n=== smelt-ml LightGBM — Classification Benchmark ===");
@@ -64,6 +65,7 @@ fn lightgbm_performance_classif() {
 }
 
 #[test]
+#[ignore] // requires Python-generated CSV files
 fn lightgbm_performance_regress() {
     let sizes = [100, 500, 1000, 5000, 10000];
     println!("\n=== smelt-ml LightGBM — Regression Benchmark ===");

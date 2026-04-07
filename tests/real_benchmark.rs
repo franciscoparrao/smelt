@@ -37,6 +37,7 @@ fn cv_accuracy(learner: &mut dyn Learner, task: &ClassificationTask) -> f64 {
 }
 
 #[test]
+#[ignore] // requires Python-generated CSV files
 fn benchmark_real_datasets() {
     let datasets = ["iris", "wine", "breast_cancer"];
 

@@ -169,6 +169,7 @@ fn xgb_vs_official_multiclass() {
 // ── Test 4: Synthetic dataset (200 samples) ────────────────────────
 
 #[test]
+#[ignore] // requires Python-generated CSV files
 fn xgb_vs_official_synthetic_dataset() {
     // Load the same synthetic dataset from Python
     let x_str = std::fs::read_to_string("/tmp/xgb_synthetic_X.csv")

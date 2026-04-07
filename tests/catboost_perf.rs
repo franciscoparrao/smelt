@@ -30,6 +30,7 @@ fn load_dataset(prefix: &str, n: usize) -> (Array2<f64>, Vec<f64>) {
 }
 
 #[test]
+#[ignore] // requires Python-generated CSV files
 fn catboost_performance_classif() {
     let sizes = [100, 500, 1000, 5000, 10000];
     println!("\n=== smelt-ml CatBoost — Classification Benchmark ===");
@@ -65,6 +66,7 @@ fn catboost_performance_classif() {
 }
 
 #[test]
+#[ignore] // requires Python-generated CSV files
 fn catboost_performance_regress() {
     let sizes = [100, 500, 1000, 5000, 10000];
     println!("\n=== smelt-ml CatBoost — Regression Benchmark ===");
