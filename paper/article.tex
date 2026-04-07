@@ -83,7 +83,7 @@ practitioners who need spatially-aware prediction with uncertainty
 quantification must currently combine multiple \proglang{Python} or
 \proglang{R} packages with incompatible APIs (e.g., \pkg{scikit-learn} for
 modeling, \pkg{geoxgboost} for spatial regression, \pkg{MAPIE} for conformal
-intervals, and custom spatial resampling code). No existing framework in any
+intervals, and custom spatial resampling code). To our knowledge, no existing framework in any
 language integrates all of these in a single composable pipeline.
 
 In this paper, we present \pkg{smelt-ml}, a comprehensive ML framework in
@@ -499,10 +499,13 @@ $n \geq 50{,}000$.}
 \end{figure}
 
 \pkg{smelt-ml}'s \pkg{CatBoost}-inspired implementation is competitive with or
-faster than the official library \textbf{at all tested scales} for classification
+faster than the official library at all tested scales for classification
 (1.0--1.4$\times$) and within 0.8--1.2$\times$ for regression.
-\pkg{XGBoost} is faster at $n \leq 5{,}000$ for regression (1.0--1.4$\times$),
-while \pkg{LightGBM} is competitive at small scales ($n \leq 1{,}000$).
+\pkg{XGBoost} is competitive at $n \leq 5{,}000$ (1.0--1.4$\times$ for
+regression), while \pkg{LightGBM} is competitive at $n \leq 1{,}000$.
+In summary, \pkg{CatBoost} is competitive at all scales, while \pkg{XGBoost}
+and \pkg{LightGBM} are competitive at research-typical scales
+($n \leq 10{,}000$).
 
 At $n \geq 50{,}000$, \pkg{XGBoost} and \pkg{LightGBM} are 1.5--2.0$\times$
 slower than their \proglang{C++} counterparts, while \pkg{CatBoost} remains
@@ -581,10 +584,17 @@ attributable to measurement noise.
 A Friedman test across the six dataset sizes confirms that speedup ratios
 vary significantly with $n$ for all three engines ($p < 0.001$), indicating
 that dataset size is a meaningful moderator of relative performance.
+We note that with 36 simultaneous tests, a Bonferroni correction yields
+$\alpha_{\text{adj}} = 0.0014$; under this threshold, only the \pkg{CatBoost}
+advantages at $n = 500$ and $n = 1{,}000$ ($p = 0.002$) and the \pkg{XGBoost}
+disadvantages at $n \geq 10{,}000$ ($p \leq 0.004$) remain significant.
+Borderline results ($p \approx 0.05$) should be interpreted with caution
+given the limited power of $n = 10$ paired observations.
 
 This analysis was performed using \pkg{smelt-ml}'s built-in statistical
 testing module (\code{stats::wilcoxon\_signed\_rank},
-\code{stats::bootstrap\_ci}), demonstrating the framework's integrated
+\code{stats::bootstrap\_ci}), verified against \pkg{scipy.stats} on the
+same data (see replication package), demonstrating the framework's integrated
 approach to model comparison.
 
 \subsection{Accuracy validation}
@@ -640,7 +650,7 @@ all three capabilities without external dependencies.
 \textbf{Geographical-XGBoost} \citep{Grekousis:2025} extends gradient boosting
 with spatial awareness: bi-square kernel weights define local neighborhoods,
 per-location models capture spatially non-stationary relationships, and an
-adaptive $\alpha$ weight blends local and global predictions. This is the first
+adaptive $\alpha$ weight blends local and global predictions. To our knowledge, this is the first
 implementation outside the original \proglang{Python} package
 \citep{geoxgboost:2024}.
 
@@ -758,8 +768,10 @@ Interval width        & 1.13 log(\$) & Calibrated uncertainty \\
 
 \textbf{Spatial heterogeneity.} Adding coordinates as features improves
 \pkg{XGBoost} RMSE by 32\%, confirming that housing price drivers vary
-strongly by location --- precisely the scenario where
-Geographical-\pkg{XGBoost}'s local models provide value.
+strongly by location. Geographical-\pkg{XGBoost}'s local models capture
+this non-stationarity through spatially-weighted training rather than
+coordinate memorization, which is preferable when predicting at locations
+outside the training domain (spatial extrapolation).
 
 \textbf{Spatial leakage.} Standard 5-fold CV yields RMSE = 0.324, while
 \code{SpatialBlockCV} yields RMSE = 0.424 --- a \textbf{31\% optimism bias}
@@ -779,7 +791,7 @@ sufficiently large calibration sets.
 \textbf{Causal Forest.} Honest splitting following
 \citet{Athey+Imbens:2016, Wager+Athey:2018}. Estimates conditional average
 treatment effects (CATE) $\tau(x) = E[Y(1) - Y(0) | X = x]$ with 95\%
-confidence intervals. First implementation in a \proglang{Rust} ML framework.
+confidence intervals. To our knowledge, the first implementation in a \proglang{Rust} ML framework.
 
 \textbf{Oblique Forest (SPORF).} Sparse random projections following
 \citet{Tomita+Browne+Shen:2020}, enabling oblique decision boundaries.
@@ -799,32 +811,42 @@ cross-validation, and conformal prediction in a single composable pipeline
 side, our gradient boosting implementations achieve competitive speed with
 the official \proglang{C++} libraries at research-typical scales
 ($n \leq 10{,}000$) while consuming an order of magnitude less memory.
-The performance advantage at small scales stems from \proglang{Rust}'s ownership
-model, which guarantees no aliasing (\code{\&mut} is unique) and enables LLVM to
-apply more aggressive auto-vectorization than is possible with \proglang{C++},
-where pointer aliasing must be assumed unless explicitly annotated.
-We verified this effect empirically: compiling with \code{target-cpu=native}
-(which enables AVX2/SSE4.2 auto-vectorization) yields a 24\% speedup for
-\pkg{XGBoost} at $n = 10{,}000$ (755\,ms $\to$ 575\,ms) compared to the
-generic \code{x86-64} target. This confirms that LLVM auto-vectorization
+\proglang{Rust}'s ownership model guarantees no pointer aliasing
+(\code{\&mut} is unique), which may enable LLVM to apply more aggressive
+optimizations than in \proglang{C++} where aliasing must be assumed unless
+explicitly annotated with \code{restrict}. Separately, compiling with
+\code{target-cpu=native} (enabling AVX2/SSE4.2) yields a 24\% speedup for
+\pkg{XGBoost} at $n = 10{,}000$, confirming that auto-vectorization
 contributes meaningfully to the observed performance.
 
 \pkg{smelt-ml} provides a comprehensive ML toolkit for \proglang{Rust} with
 unique capabilities in spatial ML, causal inference, and uncertainty
 quantification. The framework contains zero \code{unsafe} blocks across
 17{,}000+ lines of code, demonstrating that memory safety and high performance
-are not mutually exclusive. The test suite comprises 324 tests (plus 8 ignored benchmarks requiring
-external datasets)
+are not mutually exclusive. The test suite comprises 324 tests
 covering all learners, preprocessing, resampling, tuning, serialization, and
 edge cases (empty datasets, single-sample inputs, NaN features, multiclass
 targets, convergence checks against \pkg{scikit-learn}).
+
+The primary use cases for \pkg{smelt-ml} over established \proglang{Python}
+alternatives are: (1)~\proglang{Rust} applications requiring embedded ML
+without \proglang{Python} runtime dependencies (e.g., web services, CLI tools,
+edge devices); (2)~spatial ML workflows where the integrated pipeline of
+Geographical-\pkg{XGBoost}, spatial CV, and conformal prediction eliminates
+multi-package orchestration; (3)~safety-critical systems where zero
+\code{unsafe} blocks and compile-time thread safety are requirements; and
+(4)~memory-constrained environments where the 25--40$\times$ memory reduction
+is operationally significant.
 
 Limitations include the performance gap on datasets beyond 10{,}000 samples
 (where \proglang{C++} libraries increasingly outperform \pkg{smelt-ml} due to
 SIMD intrinsics, hardware-specific memory management, and GPU backends;
 see Section~\ref{sec:performance}), the absence of GPU support, and the
 simplified scope of the \pkg{CatBoost} and \pkg{LightGBM} implementations
-(see Sections~\ref{sec:catboost_scope}--\ref{sec:lightgbm_scope}).
+(see Sections~\ref{sec:catboost_scope}--\ref{sec:lightgbm_scope}). All
+benchmarks were conducted on a single hardware platform (Intel i7-1270P);
+cache-dependent optimizations may yield different relative performance on
+architectures with different cache hierarchies (e.g., AMD, Apple Silicon).
 
 Categorical features are handled via three mechanisms: \code{OneHotEncoder} and
 \code{LabelEncoder} as preprocessing transformers (applicable to any learner),
