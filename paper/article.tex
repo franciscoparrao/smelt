@@ -573,6 +573,29 @@ testing module (\code{stats::wilcoxon\_signed\_rank},
 same data (see replication package), demonstrating the framework's integrated
 approach to model comparison.
 
+\subsection{Prediction (inference) time}
+
+Table~\ref{tab:predict} shows prediction time for 1{,}000 new samples
+after training on $n = 10{,}000$. Prediction is parallelized across samples
+via \pkg{rayon}.
+
+\begin{table}[t!]
+\centering
+\begin{tabular}{lccc}
+\toprule
+Learner & \pkg{smelt-ml} ($\mu$s) & \pkg{scikit-learn} ($\mu$s) & Speedup \\
+\midrule
+XGBoost (100 trees)       & 987  & 3{,}638  & 3.7$\times$ \\
+Random Forest (100 trees) & 3{,}619 & 13{,}170 & 3.6$\times$ \\
+Decision Tree             & 116  & 135      & 1.2$\times$ \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:predict} Prediction time for 1{,}000 samples (100 runs,
+classification). \pkg{smelt-ml} is 3.6--3.7$\times$ faster for ensemble
+methods due to parallel tree traversal and absence of \proglang{Python}
+interpreter overhead.}
+\end{table}
+
 \subsection{Accuracy validation}
 
 Table~\ref{tab:accuracy} validates correctness against \pkg{scikit-learn} on

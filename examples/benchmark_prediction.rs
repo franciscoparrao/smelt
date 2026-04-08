@@ -47,7 +47,10 @@ fn main() {
     let task = ClassificationTask::new("bench", train_feat, train_target).unwrap();
 
     println!("============================================================");
-    println!("  Prediction Time Benchmark (train N={}, predict N={})", n_train, n_test);
+    println!(
+        "  Prediction Time Benchmark (train N={}, predict N={})",
+        n_train, n_test
+    );
     println!("  {} runs each, classification", n_runs);
     println!("============================================================\n");
 

@@ -122,32 +122,40 @@ impl TrainedModel for TrainedRandomForest {
         if self.is_classifier {
             let n_classes = self.n_classes.unwrap();
             let n_trees = self.trees.len() as f64;
-            let mut predicted = Vec::with_capacity(features.nrows());
-            let mut probabilities = Vec::with_capacity(features.nrows());
 
-            for row in features.rows() {
-                let mut avg_probs = vec![0.0; n_classes];
-                for tree in &self.trees {
-                    match tree.predict_one(row) {
-                        LeafValue::Class(_, probs) => {
-                            for (j, p) in probs.iter().enumerate() {
-                                avg_probs[j] += p;
+            let results: Vec<(usize, Vec<f64>)> = (0..features.nrows())
+                .into_par_iter()
+                .map(|i| {
+                    let row = features.row(i);
+                    let mut avg_probs = vec![0.0; n_classes];
+                    for tree in &self.trees {
+                        match tree.predict_one(row) {
+                            LeafValue::Class(_, probs) => {
+                                for (j, p) in probs.iter().enumerate() {
+                                    avg_probs[j] += p;
+                                }
                             }
+                            _ => unreachable!(),
                         }
-                        _ => unreachable!(),
                     }
-                }
-                for p in &mut avg_probs {
-                    *p /= n_trees;
-                }
-                let pred_class = avg_probs
-                    .iter()
-                    .enumerate()
-                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                    .unwrap()
-                    .0;
-                predicted.push(pred_class);
-                probabilities.push(avg_probs);
+                    for p in &mut avg_probs {
+                        *p /= n_trees;
+                    }
+                    let pred_class = avg_probs
+                        .iter()
+                        .enumerate()
+                        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap()
+                        .0;
+                    (pred_class, avg_probs)
+                })
+                .collect();
+
+            let mut predicted = Vec::with_capacity(results.len());
+            let mut probabilities = Vec::with_capacity(results.len());
+            for (pred, prob) in results {
+                predicted.push(pred);
+                probabilities.push(prob);
             }
 
             Ok(Prediction::Classification {
@@ -157,10 +165,10 @@ impl TrainedModel for TrainedRandomForest {
             })
         } else {
             let n_trees = self.trees.len() as f64;
-            let predicted: Vec<f64> = features
-                .rows()
-                .into_iter()
-                .map(|row| {
+            let predicted: Vec<f64> = (0..features.nrows())
+                .into_par_iter()
+                .map(|i| {
+                    let row = features.row(i);
                     let sum: f64 = self
                         .trees
                         .iter()

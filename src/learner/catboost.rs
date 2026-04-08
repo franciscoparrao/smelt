@@ -412,10 +412,10 @@ impl TrainedModel for TrainedCatBoost {
 
         match &self.mode {
             CBMode::Regression => {
-                let predicted: Vec<f64> = encoded
-                    .rows()
-                    .into_iter()
-                    .map(|r| {
+                let predicted: Vec<f64> = (0..encoded.nrows())
+                    .into_par_iter()
+                    .map(|i| {
+                        let r = encoded.row(i);
                         let mut v = self.initial[0];
                         for t in &self.trees {
                             v += self.learning_rate * t.predict_one(r);
@@ -426,16 +426,23 @@ impl TrainedModel for TrainedCatBoost {
                 Ok(Prediction::regression(predicted))
             }
             CBMode::BinaryClassif => {
-                let mut predicted = Vec::with_capacity(features.nrows());
-                let mut probabilities = Vec::with_capacity(features.nrows());
-                for r in encoded.rows() {
-                    let mut f = self.initial[0];
-                    for t in &self.trees {
-                        f += self.learning_rate * t.predict_one(r);
-                    }
-                    let p = sigmoid(f);
-                    predicted.push(if p >= 0.5 { 1 } else { 0 });
-                    probabilities.push(vec![1.0 - p, p]);
+                let results: Vec<(usize, Vec<f64>)> = (0..encoded.nrows())
+                    .into_par_iter()
+                    .map(|i| {
+                        let r = encoded.row(i);
+                        let mut f = self.initial[0];
+                        for t in &self.trees {
+                            f += self.learning_rate * t.predict_one(r);
+                        }
+                        let p = sigmoid(f);
+                        (if p >= 0.5 { 1 } else { 0 }, vec![1.0 - p, p])
+                    })
+                    .collect();
+                let mut predicted = Vec::with_capacity(results.len());
+                let mut probabilities = Vec::with_capacity(results.len());
+                for (pred, prob) in results {
+                    predicted.push(pred);
+                    probabilities.push(prob);
                 }
                 Ok(Prediction::Classification {
                     predicted,

@@ -6,16 +6,16 @@ Database file #1: refs.bib
 Reallocated wiz_functions (elt_size=4) to 6000 items from 3000.
 You've used 17 entries,
             3215 wiz_defined-function locations,
-            757 strings with 9385 characters,
-and the built_in function-call counts, 24652 in all, are:
-= -- 2494
+            759 strings with 9435 characters,
+and the built_in function-call counts, 24680 in all, are:
+= -- 2500
 > -- 735
 < -- 9
 + -- 279
 - -- 259
-* -- 1860
-:= -- 2822
-add.period$ -- 73
+* -- 1864
+:= -- 2828
+add.period$ -- 75
 call.type$ -- 17
 change.case$ -- 167
 chr.to.int$ -- 18
@@ -23,13 +23,13 @@ cite$ -- 17
 duplicate$ -- 2600
 empty$ -- 1840
 format.name$ -- 309
-if$ -- 4988
+if$ -- 4994
 int.to.chr$ -- 1
 int.to.str$ -- 1
 missing$ -- 226
-newline$ -- 104
+newline$ -- 106
 num.names$ -- 68
-pop$ -- 1325
+pop$ -- 1323
 preamble$ -- 1
 purify$ -- 154
 quote$ -- 0
@@ -44,4 +44,4 @@ type$ -- 153
 warning$ -- 0
 while$ -- 157
 width$ -- 0
-write$ -- 243
+write$ -- 247
