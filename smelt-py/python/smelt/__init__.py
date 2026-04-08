@@ -16,9 +16,15 @@ from smelt._smelt import (
     # Learners
     XGBoost,
     CatBoost,
+    LightGBM,
     RandomForest,
+    ExtraTrees,
     DecisionTree,
     LogisticRegression,
+    LinearRegression,
+    Ridge,
+    KNearestNeighbors,
+    GaussianNB,
     # Preprocessing
     StandardScaler,
     # Resampling
@@ -37,9 +43,10 @@ from smelt._smelt import (
 
 __version__ = "0.1.0"
 __all__ = [
-    "XGBoost", "CatBoost",
-    "RandomForest", "DecisionTree",
-    "LogisticRegression",
+    "XGBoost", "CatBoost", "LightGBM",
+    "RandomForest", "ExtraTrees", "DecisionTree",
+    "LogisticRegression", "LinearRegression", "Ridge",
+    "KNearestNeighbors", "GaussianNB",
     "StandardScaler",
     "CrossValidation", "SpatialBlockCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",

@@ -523,6 +523,188 @@ fn sign_test(a: Vec<f64>, b: Vec<f64>) -> TestResult {
     }
 }
 
+// ── LightGBM ───────────────────────────────────────────────────────────
+
+#[pyclass]
+struct LightGBM {
+    trained: Option<Box<dyn TrainedModel>>,
+    n_estimators: usize,
+    num_leaves: usize,
+    learning_rate: f64,
+    max_depth: usize,
+    seed: u64,
+}
+
+#[pymethods]
+impl LightGBM {
+    #[new]
+    #[pyo3(signature = (n_estimators=100, num_leaves=31, learning_rate=0.1, max_depth=6, seed=42))]
+    fn new(n_estimators: usize, num_leaves: usize, learning_rate: f64, max_depth: usize, seed: u64) -> Self {
+        Self { trained: None, n_estimators, num_leaves, learning_rate, max_depth, seed }
+    }
+
+    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut learner = smelt_ml::prelude::LightGBM::new()
+            .with_n_estimators(self.n_estimators)
+            .with_num_leaves(self.num_leaves)
+            .with_learning_rate(self.learning_rate)
+            .with_max_depth(self.max_depth)
+            .with_seed(self.seed);
+        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        self.trained = Some(model);
+        Ok(())
+    }
+
+    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+
+    fn predict_proba<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+}
+
+// ── ExtraTrees ─────────────────────────────────────────────────────────
+
+#[pyclass]
+struct ExtraTrees {
+    trained: Option<Box<dyn TrainedModel>>,
+    n_estimators: usize,
+    max_depth: usize,
+    seed: u64,
+}
+
+#[pymethods]
+impl ExtraTrees {
+    #[new]
+    #[pyo3(signature = (n_estimators=100, max_depth=10, seed=42))]
+    fn new(n_estimators: usize, max_depth: usize, seed: u64) -> Self {
+        Self { trained: None, n_estimators, max_depth, seed }
+    }
+
+    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut learner = smelt_ml::prelude::ExtraTrees::new()
+            .with_n_estimators(self.n_estimators)
+            .with_max_depth(self.max_depth)
+            .with_seed(self.seed);
+        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        self.trained = Some(model);
+        Ok(())
+    }
+
+    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+}
+
+// ── KNearestNeighbors ──────────────────────────────────────────────────
+
+#[pyclass]
+struct KNearestNeighbors {
+    trained: Option<Box<dyn TrainedModel>>,
+    k: usize,
+}
+
+#[pymethods]
+impl KNearestNeighbors {
+    #[new]
+    #[pyo3(signature = (k=5))]
+    fn new(k: usize) -> Self {
+        Self { trained: None, k }
+    }
+
+    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut learner = smelt_ml::prelude::KNearestNeighbors::new(self.k);
+        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        self.trained = Some(model);
+        Ok(())
+    }
+
+    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+}
+
+// ── GaussianNB ─────────────────────────────────────────────────────────
+
+#[pyclass]
+struct GaussianNB {
+    trained: Option<Box<dyn TrainedModel>>,
+}
+
+#[pymethods]
+impl GaussianNB {
+    #[new]
+    fn new() -> Self {
+        Self { trained: None }
+    }
+
+    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut learner = smelt_ml::prelude::GaussianNB::new();
+        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        self.trained = Some(model);
+        Ok(())
+    }
+
+    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+}
+
+// ── Ridge ──────────────────────────────────────────────────────────────
+
+#[pyclass]
+struct Ridge {
+    trained: Option<Box<dyn TrainedModel>>,
+    alpha: f64,
+}
+
+#[pymethods]
+impl Ridge {
+    #[new]
+    #[pyo3(signature = (alpha=1.0))]
+    fn new(alpha: f64) -> Self {
+        Self { trained: None, alpha }
+    }
+
+    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut learner = smelt_ml::prelude::Ridge::new(self.alpha);
+        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        self.trained = Some(model);
+        Ok(())
+    }
+
+    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+}
+
+// ── LinearRegression ───────────────────────────────────────────────────
+
+#[pyclass]
+struct LinearRegression {
+    trained: Option<Box<dyn TrainedModel>>,
+}
+
+#[pymethods]
+impl LinearRegression {
+    #[new]
+    fn new() -> Self {
+        Self { trained: None }
+    }
+
+    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut learner = smelt_ml::prelude::LinearRegression::new();
+        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        self.trained = Some(model);
+        Ok(())
+    }
+
+    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+}
+
 // ── Module ─────────────────────────────────────────────────────────────
 
 #[pymodule]
@@ -530,9 +712,15 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Learners
     m.add_class::<XGBoost>()?;
     m.add_class::<CatBoost>()?;
+    m.add_class::<LightGBM>()?;
     m.add_class::<RandomForest>()?;
+    m.add_class::<ExtraTrees>()?;
     m.add_class::<DecisionTree>()?;
     m.add_class::<LogisticRegression>()?;
+    m.add_class::<LinearRegression>()?;
+    m.add_class::<Ridge>()?;
+    m.add_class::<KNearestNeighbors>()?;
+    m.add_class::<GaussianNB>()?;
 
     // Preprocessing
     m.add_class::<StandardScaler>()?;
