@@ -313,51 +313,27 @@ scanning, and parallel feature evaluation via \pkg{rayon}.
 For \pkg{LightGBM}: Gradient-based One-Side Sampling (GOSS) with the same
 column-major histogram infrastructure.
 
-\subsection{Scope of the CatBoost implementation} \label{sec:catboost_scope}
+\subsection{Implementation scope} \label{sec:catboost_scope} \label{sec:lightgbm_scope}
 
-Our \code{CatBoost} learner implements the two defining algorithmic contributions
-of \citet{Prokhorenkova+Gusev+Vorobev:2018}: \textbf{oblivious (symmetric) trees}
---- where all nodes at the same depth share the same split --- and
-\textbf{ordered target statistics} for categorical features, which replace
-na\"ive target encoding with a permutation-based scheme that prevents target leakage.
+Our gradient boosting implementations focus on the core algorithmic
+contributions of each engine while omitting features that require
+hardware-specific code (GPU, SIMD intrinsics) or that would substantially
+increase complexity without proportional benefit for typical research
+workflows. Specifically:
 
-However, the implementation does \emph{not} include the full $O(n^2)$ ordered
-boosting procedure (unbiased gradient estimation via per-sample model
-approximations), which is the theoretical contribution of the original paper.
-Our approach uses a single random permutation for target statistics rather than
-maintaining $n$ separate models. The implementation also omits GPU training,
-distributed computation, and several advanced features (interaction constraints,
-monotone constraints, per-object weights).
+\textbf{CatBoost} implements oblivious (symmetric) trees and ordered target
+statistics \citep{Prokhorenkova+Gusev+Vorobev:2018}, but not the full
+$O(n^2)$ ordered boosting procedure. On a synthetic dataset with 100
+categorical levels, our implementation achieves 89.7\% accuracy vs.\ 89.8\%
+for the official library.
 
-We retain the name \code{CatBoost} for API consistency with the broader ML
-ecosystem (users searching for ``CatBoost in Rust'' should find this
-implementation), but users should be aware that this is a
-\textbf{CatBoost-inspired symmetric GBM with ordered target statistics}, not a
-feature-complete reimplementation of the official library.
+\textbf{LightGBM} implements leaf-wise growth and GOSS sampling
+\citep{Ke+Meng+Finley:2017}, but not Exclusive Feature Bundling (EFB) or
+weighted GOSS histograms.
 
-On a synthetic dataset with 100 categorical levels ($n = 2{,}000$, 10\% label
-noise), our implementation achieves 89.7\% accuracy vs.\ 89.8\% for the official
-\pkg{CatBoost}, confirming that the ordered target statistics produce comparable
-results even without full ordered boosting.
-
-\subsection{Scope of the LightGBM implementation} \label{sec:lightgbm_scope}
-
-Our \code{LightGBM} learner implements \textbf{leaf-wise (best-first) tree
-growth} controlled by \code{num\_leaves}, and \textbf{Gradient-based One-Side
-Sampling} (GOSS) for training efficiency. However, two key optimizations from
-the official library are not included: \textbf{Exclusive Feature Bundling} (EFB),
-which reduces the effective number of features by bundling mutually exclusive
-sparse features, and the \textbf{weighted GOSS histogram pass}, where
-non-selected samples contribute with adjusted weights rather than being
-fully discarded.
-
-As shown in Tables~\ref{tab:classif_perf}--\ref{tab:regress_perf}, our
-implementation does not match the official \pkg{LightGBM}'s performance at
-any scale tested. We include this learner for API completeness and for the
-leaf-wise growth strategy (which is not available in our \pkg{XGBoost} or
-\pkg{CatBoost} implementations), not as a performance competitor to the
-official library. Users requiring maximum \pkg{LightGBM} throughput should
-use the official \proglang{C++} library.
+Table~\ref{tab:features} provides a detailed feature-by-feature comparison.
+Features not implemented in any engine include monotone/interaction
+constraints, custom loss functions, and distributed training.
 
 \subsection{Feature comparison with official libraries} \label{sec:feature_compare}
 

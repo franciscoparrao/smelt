@@ -34,34 +34,35 @@
 \@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces  Feature comparison across ML frameworks. $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM). $^c$Via extension packages. $^d$Available in \textsf  {R} via {\fontseries  {m}\fontseries  {b}\selectfont  grf}. $^e$Via {\fontseries  {m}\fontseries  {b}\selectfont  imbalanced-learn}. $^f$Via {\fontseries  {m}\fontseries  {b}\selectfont  scikit-optimize} or {\fontseries  {m}\fontseries  {b}\selectfont  Optuna}. $^g$Via {\fontseries  {m}\fontseries  {b}\selectfont  scipy.stats}.}}{5}{table.2}\protected@file@percent }
 \newlabel{tab:frameworks}{{2}{5}{Feature comparison across ML frameworks. $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM). $^c$Via extension packages. $^d$Available in \proglang {R} via \pkg {grf}. $^e$Via \pkg {imbalanced-learn}. $^f$Via \pkg {scikit-optimize} or \pkg {Optuna}. $^g$Via \pkg {scipy.stats}}{table.2}{}}
 \citation{Prokhorenkova+Gusev+Vorobev:2018}
+\citation{Ke+Meng+Finley:2017}
 \newlabel{sec:catboost_scope}{{3.4}{6}{}{subsection.3.4}{}}
-\newlabel{sec:lightgbm_scope}{{3.5}{6}{}{subsection.3.5}{}}
-\newlabel{sec:feature_compare}{{3.6}{6}{}{subsection.3.6}{}}
+\newlabel{sec:lightgbm_scope}{{3.4}{6}{}{subsection.3.4}{}}
+\newlabel{sec:feature_compare}{{3.5}{6}{}{subsection.3.5}{}}
+\newlabel{sec:performance}{{4}{6}{}{section.4}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces  Implemented features in {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml}'s gradient boosting engines. \text  {$\mathsurround \z@ \mathchar "458$}\ = implemented, --- = not implemented. $^*$CatBoost's $O(n^2)$ per-sample model approximation.}}{7}{table.3}\protected@file@percent }
 \newlabel{tab:features}{{3}{7}{Implemented features in \pkg {smelt-ml}'s gradient boosting engines. \checkmark \ = implemented, --- = not implemented. $^*$CatBoost's $O(n^2)$ per-sample model approximation}{table.3}{}}
-\newlabel{sec:performance}{{4}{7}{}{section.4}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces  Classification training time (ms, mean $\pm $ std, 10 runs). Speedup $>1$ means {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} is faster. All values single-threaded.}}{8}{table.4}\protected@file@percent }
 \newlabel{tab:classif_perf}{{4}{8}{Classification training time (ms, mean $\pm $ std, 10 runs). Speedup $>1$ means \pkg {smelt-ml} is faster. All values single-threaded}{table.4}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces  Regression training time (ms, mean $\pm $ std, 10 runs).}}{8}{table.5}\protected@file@percent }
 \newlabel{tab:regress_perf}{{5}{8}{Regression training time (ms, mean $\pm $ std, 10 runs)}{table.5}{}}
 \@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces  Training time scaling comparison (log-log) between {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} (blue) and official \textsf  {C++} libraries (red) across six dataset sizes. Error bars show $\pm $1 standard deviation over 10 runs. {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml}'s {\fontseries  {m}\fontseries  {b}\selectfont  CatBoost} is competitive at all scales; {\fontseries  {m}\fontseries  {b}\selectfont  XGBoost} and {\fontseries  {m}\fontseries  {b}\selectfont  LightGBM} are faster in \textsf  {C++} at $n \geq 50{,}000$.}}{9}{figure.1}\protected@file@percent }
 \newlabel{fig:scaling}{{1}{9}{Training time scaling comparison (log-log) between \pkg {smelt-ml} (blue) and official \proglang {C++} libraries (red) across six dataset sizes. Error bars show $\pm $1 standard deviation over 10 runs. \pkg {smelt-ml}'s \pkg {CatBoost} is competitive at all scales; \pkg {XGBoost} and \pkg {LightGBM} are faster in \proglang {C++} at $n \geq 50{,}000$}{figure.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces  Statistical significance of performance differences (Wilcoxon signed-rank, paired, two-sided). Selected rows shown. $^{*}p < 0.05$, $^{**}p < 0.01$. Bootstrap 95\% CI for the speedup ratio ($>1$ = Rust faster). {\fontseries  {m}\fontseries  {b}\selectfont  CatBoost} classification is significantly faster at 5 of 6 sizes.}}{9}{table.6}\protected@file@percent }
+\newlabel{tab:significance}{{6}{9}{Statistical significance of performance differences (Wilcoxon signed-rank, paired, two-sided). Selected rows shown. $^{*}p < 0.05$, $^{**}p < 0.01$. Bootstrap 95\% CI for the speedup ratio ($>1$ = Rust faster). \pkg {CatBoost} classification is significantly faster at 5 of 6 sizes}{table.6}{}}
 \citation{Grekousis:2025}
 \citation{geoxgboost:2024}
-\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces  Statistical significance of performance differences (Wilcoxon signed-rank, paired, two-sided). Selected rows shown. $^{*}p < 0.05$, $^{**}p < 0.01$. Bootstrap 95\% CI for the speedup ratio ($>1$ = Rust faster). {\fontseries  {m}\fontseries  {b}\selectfont  CatBoost} classification is significantly faster at 5 of 6 sizes.}}{10}{table.6}\protected@file@percent }
-\newlabel{tab:significance}{{6}{10}{Statistical significance of performance differences (Wilcoxon signed-rank, paired, two-sided). Selected rows shown. $^{*}p < 0.05$, $^{**}p < 0.01$. Bootstrap 95\% CI for the speedup ratio ($>1$ = Rust faster). \pkg {CatBoost} classification is significantly faster at 5 of 6 sizes}{table.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces  5-fold CV accuracy/RMSE on real datasets from $n = 178$ to $n = 20{,}640$. Both frameworks use 5-fold CV with seed 42.}}{10}{table.7}\protected@file@percent }
+\newlabel{tab:accuracy}{{7}{10}{5-fold CV accuracy/RMSE on real datasets from $n = 178$ to $n = 20{,}640$. Both frameworks use 5-fold CV with seed 42}{table.7}{}}
 \newlabel{sec:spatial}{{5}{10}{}{section.5}{}}
 \citation{Romano+Patterson+Candes:2019}
 \citation{Roberts2017}
-\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces  5-fold CV accuracy/RMSE on real datasets from $n = 178$ to $n = 20{,}640$. Both frameworks use 5-fold CV with seed 42.}}{11}{table.7}\protected@file@percent }
-\newlabel{tab:accuracy}{{7}{11}{5-fold CV accuracy/RMSE on real datasets from $n = 178$ to $n = 20{,}640$. Both frameworks use 5-fold CV with seed 42}{table.7}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces  Integration comparison for a spatial ML workflow with uncertainty quantification.}}{12}{table.8}\protected@file@percent }
-\newlabel{tab:python_comparison}{{8}{12}{Integration comparison for a spatial ML workflow with uncertainty quantification}{table.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces  Integration comparison for a spatial ML workflow with uncertainty quantification.}}{11}{table.8}\protected@file@percent }
+\newlabel{tab:python_comparison}{{8}{11}{Integration comparison for a spatial ML workflow with uncertainty quantification}{table.8}{}}
 \citation{Roberts2017}
+\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces  Case study results on King County housing (1{,}000 samples, 11 features, log-price target).}}{12}{table.9}\protected@file@percent }
+\newlabel{tab:casestudy}{{9}{12}{Case study results on King County housing (1{,}000 samples, 11 features, log-price target)}{table.9}{}}
 \citation{Athey+Imbens:2016,Wager+Athey:2018}
 \citation{Tomita+Browne+Shen:2020}
-\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces  Case study results on King County housing (1{,}000 samples, 11 features, log-price target).}}{13}{table.9}\protected@file@percent }
-\newlabel{tab:casestudy}{{9}{13}{Case study results on King County housing (1{,}000 samples, 11 features, log-price target)}{table.9}{}}
 \newlabel{sec:summary}{{6}{13}{}{section.6}{}}
 \bibdata{refs}
 \bibcite{Athey+Imbens:2016}{{1}{2016}{{Athey and Imbens}}{{}}}
