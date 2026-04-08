@@ -42,6 +42,7 @@ Grinsztajn L, Oyallon E, Varoquaux G (2022).
 \newblock \enquote{Why Do Tree-Based Models Still Outperform Deep Learning on
   Typical Tabular Data?}
 \newblock In \emph{Advances in Neural Information Processing Systems 35}.
+\newblock \doi{10.48550/arXiv.2207.08815}.
 
 \bibitem[{Ishwaran \emph{et~al.}(2008)Ishwaran, Kogalur, Blackstone, and
   Lauer}]{Ishwaran+Kogalur+Blackstone:2008}
@@ -105,6 +106,7 @@ Roberts DR, Bahn V, Ciuti S, Boyce MS, Elith J, Guillera-Arroita G, Hauenstein
 Romano Y, Patterson E, Cand{\`e}s E (2019).
 \newblock \enquote{Conformalized Quantile Regression.}
 \newblock In \emph{Advances in Neural Information Processing Systems 32}.
+\newblock \doi{10.48550/arXiv.1905.03222}.
 
 \bibitem[{{rust-ml}(2024)}]{linfa:2024}
 {rust-ml} (2024).
