@@ -86,3 +86,17 @@ python3 compare_results.py
 - `benchmark_cpp_results.json` — Raw C++ timing data (10 runs per config)
 - `benchmark_rust_results.json` — Raw Rust timing data (10 runs per config)
 - `comparison_tables.txt` — Formatted tables matching paper Tables 2-3
+
+## Docker (exact reproducibility)
+
+```bash
+# From project root:
+docker build -t smelt-replication .
+docker run --rm smelt-replication
+
+# Interactive shell:
+docker run --rm -it smelt-replication bash
+```
+
+The Dockerfile pins all dependency versions (Rust stable, scikit-learn 1.8.0,
+xgboost 3.1.1, lightgbm 4.6.0, catboost 1.2.8) for exact reproducibility.
