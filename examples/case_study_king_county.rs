@@ -38,7 +38,11 @@ fn main() {
     let target = task.target().to_vec();
     let n = target.len();
 
-    println!("Loaded: {} samples, {} features (excl. coords)\n", n, features.ncols());
+    println!(
+        "Loaded: {} samples, {} features (excl. coords)\n",
+        n,
+        features.ncols()
+    );
 
     // ── Holdout split ──────────────────────────────────────────────────
     let holdout = Holdout::new(0.8).with_seed(42);
@@ -63,13 +67,17 @@ fn main() {
         .with_learning_rate(0.1);
     let xgb_model = xgb.train_regress(&tr_task).unwrap();
     let xgb_pred = xgb_model.predict(&te_feat).unwrap();
-    let xgb_rmse = Rmse.score(&xgb_pred.with_truth_regress(te_tgt.clone())).unwrap();
+    let xgb_rmse = Rmse
+        .score(&xgb_pred.with_truth_regress(te_tgt.clone()))
+        .unwrap();
 
     // Random Forest
     let mut rf = RandomForest::new().with_n_estimators(100).with_seed(42);
     let rf_model = rf.train_regress(&tr_task).unwrap();
     let rf_pred = rf_model.predict(&te_feat).unwrap();
-    let rf_rmse = Rmse.score(&rf_pred.with_truth_regress(te_tgt.clone())).unwrap();
+    let rf_rmse = Rmse
+        .score(&rf_pred.with_truth_regress(te_tgt.clone()))
+        .unwrap();
 
     // GeoXGBoost (with spatial kernel)
     let mut gxgb = GeoXGBoost::new(tr_coords.clone())
@@ -85,13 +93,14 @@ fn main() {
         .unwrap();
     // Out-of-sample (global model only for new locations)
     let gxgb_pred = gxgb_model.predict(&te_feat).unwrap();
-    let gxgb_rmse = Rmse.score(&gxgb_pred.with_truth_regress(te_tgt.clone())).unwrap();
+    let gxgb_rmse = Rmse
+        .score(&gxgb_pred.with_truth_regress(te_tgt.clone()))
+        .unwrap();
 
     // XGBoost with coordinates as features (cheating — uses lat/long directly)
     let feat_with_coords = task.features().select(Axis(0), train_idx).to_owned();
     let te_feat_coords = task.features().select(Axis(0), test_idx).to_owned();
-    let tr_task_coords =
-        RegressionTask::new("train_c", feat_with_coords, tr_tgt.clone()).unwrap();
+    let tr_task_coords = RegressionTask::new("train_c", feat_with_coords, tr_tgt.clone()).unwrap();
     let mut xgb_c = XGBoost::new()
         .with_n_estimators(100)
         .with_max_depth(4)
@@ -109,10 +118,7 @@ fn main() {
         "  GeoXGBoost (train, local) RMSE: {:.4}  (spatial adaptation)",
         gxgb_train_rmse
     );
-    println!(
-        "  GeoXGBoost (test, global) RMSE: {:.4}",
-        gxgb_rmse
-    );
+    println!("  GeoXGBoost (test, global) RMSE: {:.4}", gxgb_rmse);
     let coord_improvement = (1.0 - xgb_c_rmse / xgb_rmse) * 100.0;
     println!(
         "\n  → Coords improve XGBoost by {:.1}% (spatial signal is strong)",
@@ -199,7 +205,8 @@ fn main() {
         .filter(|&(ref iv, &t)| t >= iv.lower && t <= iv.upper)
         .count();
     let coverage = covered as f64 / te_tgt.len() as f64;
-    let width = intervals.iter().map(|iv| iv.upper - iv.lower).sum::<f64>() / intervals.len() as f64;
+    let width =
+        intervals.iter().map(|iv| iv.upper - iv.lower).sum::<f64>() / intervals.len() as f64;
 
     println!("  Target: {:.0}% coverage", (1.0 - alpha) * 100.0);
     println!(
@@ -214,8 +221,14 @@ fn main() {
     println!("\n================================================================");
     println!("  Summary");
     println!("================================================================");
-    println!("  1. Spatial signal: coords improve XGBoost by {:.0}%", coord_improvement);
-    println!("  2. Spatial leakage: random CV underestimates error by {:.0}%", leakage);
+    println!(
+        "  1. Spatial signal: coords improve XGBoost by {:.0}%",
+        coord_improvement
+    );
+    println!(
+        "  2. Spatial leakage: random CV underestimates error by {:.0}%",
+        leakage
+    );
     println!(
         "  3. Conformal: {:.0}% coverage (target {:.0}%)",
         coverage * 100.0,
