@@ -68,7 +68,7 @@ impl Default for CatBoost {
             n_estimators: 100,
             learning_rate: 0.1,
             depth: 6,
-            lambda: 3.0,
+            lambda: 1.0,
             cat_features: Vec::new(),
             prior_strength: 1.0,
             seed: 42,

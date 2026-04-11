@@ -193,7 +193,7 @@ struct CatBoost {
 #[pymethods]
 impl CatBoost {
     #[new]
-    #[pyo3(signature = (n_estimators=100, depth=6, learning_rate=0.3, lambda_=3.0, seed=42))]
+    #[pyo3(signature = (n_estimators=100, depth=6, learning_rate=0.3, lambda_=1.0, seed=42))]
     fn new(n_estimators: usize, depth: usize, learning_rate: f64, lambda_: f64, seed: u64) -> Self {
         Self {
             trained: None,
@@ -281,6 +281,11 @@ impl RandomForest {
         x: PyReadonlyArray2<'_, f64>,
     ) -> PyResult<Bound<'py, PyArray2<f64>>> {
         predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+
+    #[getter]
+    fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
+        Ok(self.trained.as_ref().ok_or_else(not_fitted)?.feature_importance())
     }
 }
 
@@ -464,6 +469,48 @@ fn mae_score(y_true: Vec<f64>, y_pred: Vec<f64>) -> PyResult<f64> {
     smelt_ml::prelude::Mae.score(&pred).map_err(smelt_err)
 }
 
+#[pyfunction]
+fn f1_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
+    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred = Prediction::classification_with_truth(pred_u, y_true);
+    smelt_ml::prelude::F1Score.score(&pred).map_err(smelt_err)
+}
+
+#[pyfunction]
+fn precision_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
+    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred = Prediction::classification_with_truth(pred_u, y_true);
+    smelt_ml::prelude::Precision.score(&pred).map_err(smelt_err)
+}
+
+#[pyfunction]
+fn recall_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
+    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred = Prediction::classification_with_truth(pred_u, y_true);
+    smelt_ml::prelude::Recall.score(&pred).map_err(smelt_err)
+}
+
+#[pyfunction]
+fn auc_roc_score(y_true: Vec<usize>, y_proba: Vec<Vec<f64>>) -> PyResult<f64> {
+    let n = y_true.len();
+    let pred_class: Vec<usize> = y_proba
+        .iter()
+        .map(|p| {
+            p.iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap()
+                .0
+        })
+        .collect();
+    let pred = Prediction::Classification {
+        predicted: pred_class,
+        truth: Some(y_true),
+        probabilities: Some(y_proba),
+    };
+    smelt_ml::prelude::AucRoc.score(&pred).map_err(smelt_err)
+}
+
 // ── Stats ──────────────────────────────────────────────────────────────
 
 #[pyclass]
@@ -561,6 +608,11 @@ impl LightGBM {
 
     fn predict_proba<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray2<f64>>> {
         predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+
+    #[getter]
+    fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
+        Ok(self.trained.as_ref().ok_or_else(not_fitted)?.feature_importance())
     }
 }
 
@@ -734,6 +786,10 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rmse_score, m)?)?;
     m.add_function(wrap_pyfunction!(r2_score, m)?)?;
     m.add_function(wrap_pyfunction!(mae_score, m)?)?;
+    m.add_function(wrap_pyfunction!(f1_score, m)?)?;
+    m.add_function(wrap_pyfunction!(precision_score, m)?)?;
+    m.add_function(wrap_pyfunction!(recall_score, m)?)?;
+    m.add_function(wrap_pyfunction!(auc_roc_score, m)?)?;
 
     // Stats
     m.add_function(wrap_pyfunction!(wilcoxon_signed_rank, m)?)?;

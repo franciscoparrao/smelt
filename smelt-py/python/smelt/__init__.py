@@ -35,13 +35,17 @@ from smelt._smelt import (
     rmse_score,
     r2_score,
     mae_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    auc_roc_score,
     # Stats
     wilcoxon_signed_rank,
     bootstrap_ci,
     sign_test,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "XGBoost", "CatBoost", "LightGBM",
     "RandomForest", "ExtraTrees", "DecisionTree",
@@ -50,5 +54,6 @@ __all__ = [
     "StandardScaler",
     "CrossValidation", "SpatialBlockCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",
+    "f1_score", "precision_score", "recall_score", "auc_roc_score",
     "wilcoxon_signed_rank", "bootstrap_ci", "sign_test",
 ]
