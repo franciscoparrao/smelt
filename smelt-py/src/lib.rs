@@ -353,6 +353,14 @@ impl LogisticRegression {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
+
+    fn predict_proba<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
 }
 
 // ── StandardScaler ─────────────────────────────────────────────────────
@@ -490,10 +498,24 @@ fn recall_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
     smelt_ml::prelude::Recall.score(&pred).map_err(smelt_err)
 }
 
+/// AUC-ROC score. Accepts y_proba as either:
+/// - 2D: [[p0, p1], ...] (per-class probabilities)
+/// - 1D: [p1, ...] (probability of positive class, sklearn-compatible)
 #[pyfunction]
-fn auc_roc_score(y_true: Vec<usize>, y_proba: Vec<Vec<f64>>) -> PyResult<f64> {
-    let n = y_true.len();
-    let pred_class: Vec<usize> = y_proba
+fn auc_roc_score(y_true: Vec<usize>, y_proba: &Bound<'_, PyAny>) -> PyResult<f64> {
+    // Try 2D first, then 1D
+    let proba_2d: Vec<Vec<f64>> = if let Ok(v2d) = y_proba.extract::<Vec<Vec<f64>>>() {
+        v2d
+    } else if let Ok(v1d) = y_proba.extract::<Vec<f64>>() {
+        // Convert 1D (sklearn format) to 2D: p1 → [1-p1, p1]
+        v1d.iter().map(|&p| vec![1.0 - p, p]).collect()
+    } else {
+        return Err(PyRuntimeError::new_err(
+            "y_proba must be 1D (sklearn format: [p_positive, ...]) or 2D ([[p0, p1], ...])",
+        ));
+    };
+
+    let pred_class: Vec<usize> = proba_2d
         .iter()
         .map(|p| {
             p.iter()
@@ -506,7 +528,7 @@ fn auc_roc_score(y_true: Vec<usize>, y_proba: Vec<Vec<f64>>) -> PyResult<f64> {
     let pred = Prediction::Classification {
         predicted: pred_class,
         truth: Some(y_true),
-        probabilities: Some(y_proba),
+        probabilities: Some(proba_2d),
     };
     smelt_ml::prelude::AucRoc.score(&pred).map_err(smelt_err)
 }
@@ -675,6 +697,10 @@ impl KNearestNeighbors {
     fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
+
+    fn predict_proba<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
 }
 
 // ── GaussianNB ─────────────────────────────────────────────────────────
@@ -700,6 +726,10 @@ impl GaussianNB {
 
     fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+
+    fn predict_proba<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 }
 
