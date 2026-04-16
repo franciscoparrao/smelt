@@ -74,6 +74,7 @@ pub mod prelude {
     pub use crate::learner::{
         AdaBoost, Bagging, CatBoost, DecisionTree, DynamicEnsemble, EBM, ElasticNet, ExtraTrees,
         GaussianNB, GeoXGBoost, GradientBoosting, HoeffdingTree, KNearestNeighbors, Lasso, Learner,
+        TrainedGeoXGBoost,
         LightGBM, LinearRegression, LinearSVM, LogisticRegression, ObliqueForest, ObliqueTree,
         QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, XGBoost,
     };

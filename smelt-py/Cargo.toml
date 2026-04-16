@@ -12,6 +12,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 smelt-ml = { path = ".." }
-pyo3 = { version = "0.24", features = ["extension-module"] }
+pyo3 = { version = "0.24", features = ["extension-module", "multiple-pymethods"] }
 numpy = "0.24"
 ndarray = "0.16"

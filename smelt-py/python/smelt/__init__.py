@@ -43,9 +43,26 @@ from smelt._smelt import (
     wilcoxon_signed_rank,
     bootstrap_ci,
     sign_test,
+    # Filters
+    filter_variance,
+    filter_correlation,
+    filter_anova_f,
+    filter_information_gain,
+    filter_mutual_information,
+    filter_mrmr,
+    filter_jmi,
+    filter_jmim,
+    filter_cmim,
+    filter_relief,
+    # RFE
+    rfe,
+    # Tuning
+    BayesianOptimizer,
 )
 
-__version__ = "0.3.0"
+from smelt.filters import cumulative_ranking
+
+__version__ = "0.4.0"
 __all__ = [
     "XGBoost", "CatBoost", "LightGBM",
     "RandomForest", "ExtraTrees", "DecisionTree",
@@ -56,4 +73,10 @@ __all__ = [
     "accuracy_score", "rmse_score", "r2_score", "mae_score",
     "f1_score", "precision_score", "recall_score", "auc_roc_score",
     "wilcoxon_signed_rank", "bootstrap_ci", "sign_test",
+    "filter_variance", "filter_correlation", "filter_anova_f",
+    "filter_information_gain", "filter_mutual_information",
+    "filter_mrmr", "filter_jmi", "filter_jmim", "filter_cmim", "filter_relief",
+    "cumulative_ranking",
+    "rfe",
+    "BayesianOptimizer",
 ]

@@ -4,6 +4,7 @@ pub mod adasyn;
 pub mod encoder;
 pub mod filter;
 pub mod imputer;
+pub mod mutual_info;
 pub mod label_encoder;
 pub mod pca;
 pub mod pipeline;

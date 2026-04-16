@@ -35,7 +35,7 @@ pub use bagging::Bagging;
 pub use catboost::CatBoost;
 pub use des::DynamicEnsemble;
 pub use ebm::EBM;
-pub use geo_xgboost::GeoXGBoost;
+pub use geo_xgboost::{GeoXGBoost, TrainedGeoXGBoost};
 pub use hoeffding::HoeffdingTree;
 pub use knn::KNearestNeighbors;
 pub use lightgbm::LightGBM;

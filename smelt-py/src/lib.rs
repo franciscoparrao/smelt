@@ -96,6 +96,7 @@ fn not_fitted() -> PyErr {
 #[pyclass]
 struct XGBoost {
     trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
     n_estimators: usize,
     max_depth: usize,
     learning_rate: f64,
@@ -124,6 +125,7 @@ impl XGBoost {
     ) -> Self {
         Self {
             trained: None,
+            is_classif: false,
             n_estimators,
             max_depth,
             learning_rate,
@@ -147,8 +149,9 @@ impl XGBoost {
             .with_subsample(self.subsample)
             .with_colsample_bytree(self.colsample_bytree)
             .with_seed(self.seed);
-        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
         self.trained = Some(model);
+        self.is_classif = is_classif;
         Ok(())
     }
 
@@ -183,6 +186,7 @@ impl XGBoost {
 #[pyclass]
 struct CatBoost {
     trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
     n_estimators: usize,
     depth: usize,
     learning_rate: f64,
@@ -197,6 +201,7 @@ impl CatBoost {
     fn new(n_estimators: usize, depth: usize, learning_rate: f64, lambda_: f64, seed: u64) -> Self {
         Self {
             trained: None,
+            is_classif: false,
             n_estimators,
             depth,
             learning_rate,
@@ -212,8 +217,9 @@ impl CatBoost {
             .with_learning_rate(self.learning_rate)
             .with_lambda(self.lambda)
             .with_seed(self.seed);
-        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
         self.trained = Some(model);
+        self.is_classif = is_classif;
         Ok(())
     }
 
@@ -239,6 +245,7 @@ impl CatBoost {
 #[pyclass]
 struct RandomForest {
     trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
     n_estimators: usize,
     max_depth: usize,
     seed: u64,
@@ -251,6 +258,7 @@ impl RandomForest {
     fn new(n_estimators: usize, max_depth: usize, seed: u64) -> Self {
         Self {
             trained: None,
+            is_classif: false,
             n_estimators,
             max_depth,
             seed,
@@ -262,8 +270,9 @@ impl RandomForest {
             .with_n_estimators(self.n_estimators)
             .with_max_depth(self.max_depth)
             .with_seed(self.seed);
-        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
         self.trained = Some(model);
+        self.is_classif = is_classif;
         Ok(())
     }
 
@@ -294,6 +303,7 @@ impl RandomForest {
 #[pyclass]
 struct DecisionTree {
     trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
     max_depth: usize,
 }
 
@@ -304,6 +314,7 @@ impl DecisionTree {
     fn new(max_depth: usize) -> Self {
         Self {
             trained: None,
+            is_classif: false,
             max_depth,
         }
     }
@@ -311,8 +322,9 @@ impl DecisionTree {
     fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
         let mut learner =
             smelt_ml::prelude::DecisionTree::default().with_max_depth(self.max_depth);
-        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
         self.trained = Some(model);
+        self.is_classif = is_classif;
         Ok(())
     }
 
@@ -330,19 +342,21 @@ impl DecisionTree {
 #[pyclass]
 struct LogisticRegression {
     trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
 }
 
 #[pymethods]
 impl LogisticRegression {
     #[new]
     fn new() -> Self {
-        Self { trained: None }
+        Self { trained: None, is_classif: false }
     }
 
     fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::LogisticRegression::new();
-        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
         self.trained = Some(model);
+        self.is_classif = is_classif;
         Ok(())
     }
 
@@ -597,6 +611,7 @@ fn sign_test(a: Vec<f64>, b: Vec<f64>) -> TestResult {
 #[pyclass]
 struct LightGBM {
     trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
     n_estimators: usize,
     num_leaves: usize,
     learning_rate: f64,
@@ -609,7 +624,7 @@ impl LightGBM {
     #[new]
     #[pyo3(signature = (n_estimators=100, num_leaves=31, learning_rate=0.1, max_depth=6, seed=42))]
     fn new(n_estimators: usize, num_leaves: usize, learning_rate: f64, max_depth: usize, seed: u64) -> Self {
-        Self { trained: None, n_estimators, num_leaves, learning_rate, max_depth, seed }
+        Self { trained: None, is_classif: false, n_estimators, num_leaves, learning_rate, max_depth, seed }
     }
 
     fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -619,8 +634,9 @@ impl LightGBM {
             .with_learning_rate(self.learning_rate)
             .with_max_depth(self.max_depth)
             .with_seed(self.seed);
-        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
         self.trained = Some(model);
+        self.is_classif = is_classif;
         Ok(())
     }
 
@@ -643,6 +659,7 @@ impl LightGBM {
 #[pyclass]
 struct ExtraTrees {
     trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
     n_estimators: usize,
     max_depth: usize,
     seed: u64,
@@ -653,7 +670,7 @@ impl ExtraTrees {
     #[new]
     #[pyo3(signature = (n_estimators=100, max_depth=10, seed=42))]
     fn new(n_estimators: usize, max_depth: usize, seed: u64) -> Self {
-        Self { trained: None, n_estimators, max_depth, seed }
+        Self { trained: None, is_classif: false, n_estimators, max_depth, seed }
     }
 
     fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -661,8 +678,9 @@ impl ExtraTrees {
             .with_n_estimators(self.n_estimators)
             .with_max_depth(self.max_depth)
             .with_seed(self.seed);
-        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
         self.trained = Some(model);
+        self.is_classif = is_classif;
         Ok(())
     }
 
@@ -676,6 +694,7 @@ impl ExtraTrees {
 #[pyclass]
 struct KNearestNeighbors {
     trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
     k: usize,
 }
 
@@ -684,13 +703,14 @@ impl KNearestNeighbors {
     #[new]
     #[pyo3(signature = (k=5))]
     fn new(k: usize) -> Self {
-        Self { trained: None, k }
+        Self { trained: None, is_classif: false, k }
     }
 
     fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::KNearestNeighbors::new(self.k);
-        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
         self.trained = Some(model);
+        self.is_classif = is_classif;
         Ok(())
     }
 
@@ -708,19 +728,21 @@ impl KNearestNeighbors {
 #[pyclass]
 struct GaussianNB {
     trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
 }
 
 #[pymethods]
 impl GaussianNB {
     #[new]
     fn new() -> Self {
-        Self { trained: None }
+        Self { trained: None, is_classif: false }
     }
 
     fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::GaussianNB::new();
-        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
         self.trained = Some(model);
+        self.is_classif = is_classif;
         Ok(())
     }
 
@@ -738,6 +760,7 @@ impl GaussianNB {
 #[pyclass]
 struct Ridge {
     trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
     alpha: f64,
 }
 
@@ -746,13 +769,14 @@ impl Ridge {
     #[new]
     #[pyo3(signature = (alpha=1.0))]
     fn new(alpha: f64) -> Self {
-        Self { trained: None, alpha }
+        Self { trained: None, is_classif: false, alpha }
     }
 
     fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::Ridge::new(self.alpha);
-        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
         self.trained = Some(model);
+        self.is_classif = is_classif;
         Ok(())
     }
 
@@ -766,19 +790,21 @@ impl Ridge {
 #[pyclass]
 struct LinearRegression {
     trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
 }
 
 #[pymethods]
 impl LinearRegression {
     #[new]
     fn new() -> Self {
-        Self { trained: None }
+        Self { trained: None, is_classif: false }
     }
 
     fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::LinearRegression::new();
-        let (model, _) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
         self.trained = Some(model);
+        self.is_classif = is_classif;
         Ok(())
     }
 
@@ -786,6 +812,507 @@ impl LinearRegression {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 }
+
+// ── SHAP + Permutation Importance (shared helpers) ────────────────────
+
+fn resolve_measure(metric: &str) -> PyResult<Box<dyn Measure>> {
+    use smelt_ml::measure::*;
+    match metric {
+        "rmse" => Ok(Box::new(Rmse)),
+        "mae" => Ok(Box::new(Mae)),
+        "r2" => Ok(Box::new(RSquared)),
+        "mape" => Ok(Box::new(Mape)),
+        "accuracy" => Ok(Box::new(Accuracy)),
+        "f1" => Ok(Box::new(F1Score)),
+        "precision" => Ok(Box::new(Precision)),
+        "recall" => Ok(Box::new(Recall)),
+        "logloss" => Ok(Box::new(LogLoss)),
+        "auc" => Ok(Box::new(AucRoc)),
+        _ => Err(PyRuntimeError::new_err(format!("Unknown metric: {metric}"))),
+    }
+}
+
+fn shap_impl<'py>(
+    py: Python<'py>,
+    model: &dyn TrainedModel,
+    is_classif: bool,
+    x: PyReadonlyArray2<'_, f64>,
+    y: &Bound<'_, PyAny>,
+    n_background: usize,
+    feature_names: Option<Vec<String>>,
+    target_class: usize,
+) -> PyResult<PyObject> {
+    let features = to_array2(x);
+    let n_feat = features.ncols();
+    let names = feature_names.unwrap_or_else(|| (0..n_feat).map(|i| format!("f{i}")).collect());
+
+    let result = if is_classif {
+        let target: Vec<i64> = y.extract()?;
+        let target: Vec<usize> = target.into_iter().map(|v| v as usize).collect();
+        let task = smelt_ml::task::ClassificationTask::new("shap", features, target)
+            .map_err(smelt_err)?;
+        smelt_ml::importance::shap::tree_shap_classif(model, &task, n_background, target_class)
+            .map_err(smelt_err)?
+    } else {
+        let target: Vec<f64> = y.extract()?;
+        let task = smelt_ml::task::RegressionTask::new("shap", features, target)
+            .map_err(smelt_err)?;
+        smelt_ml::importance::shap::tree_shap_regress(model, &task, n_background)
+            .map_err(smelt_err)?
+    };
+
+    // Convert to Python dict
+    let dict = pyo3::types::PyDict::new(py);
+
+    // SHAP values as 2D numpy array
+    let n = result.explanations.len();
+    let p = if n > 0 { result.explanations[0].values.len() } else { 0 };
+    let flat: Vec<f64> = result.explanations.iter()
+        .flat_map(|e| e.values.iter().copied()).collect();
+    let arr = ndarray::Array2::from_shape_vec((n, p), flat)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    dict.set_item("values", PyArray2::from_owned_array(py, arr))?;
+
+    dict.set_item("base_value",
+        result.explanations.first().map(|e| e.base_value).unwrap_or(0.0))?;
+    dict.set_item("feature_names", &names)?;
+
+    let imp: Vec<(String, f64)> = result.global_importance;
+    dict.set_item("global_importance", imp)?;
+
+    Ok(dict.into_pyobject(py)?.into_any().unbind())
+}
+
+fn perm_importance_impl<'py>(
+    py: Python<'py>,
+    model: &dyn TrainedModel,
+    is_classif: bool,
+    x: PyReadonlyArray2<'_, f64>,
+    y: &Bound<'_, PyAny>,
+    metric: &str,
+    n_repeats: usize,
+    seed: u64,
+    feature_names: Option<Vec<String>>,
+) -> PyResult<PyObject> {
+    let features = to_array2(x);
+    let n_feat = features.ncols();
+    let names = feature_names.unwrap_or_else(|| (0..n_feat).map(|i| format!("f{i}")).collect());
+    let measure = resolve_measure(metric)?;
+
+    let importances = if is_classif {
+        let target: Vec<i64> = y.extract()?;
+        let target: Vec<usize> = target.into_iter().map(|v| v as usize).collect();
+        let mut task = smelt_ml::task::ClassificationTask::new("perm", features, target)
+            .map_err(smelt_err)?;
+        task = task.with_feature_names(names).map_err(smelt_err)?;
+        smelt_ml::importance::permutation_importance_classif(
+            model, &task, &*measure, n_repeats, seed,
+        ).map_err(smelt_err)?
+    } else {
+        let target: Vec<f64> = y.extract()?;
+        let mut task = smelt_ml::task::RegressionTask::new("perm", features, target)
+            .map_err(smelt_err)?;
+        task = task.with_feature_names(names).map_err(smelt_err)?;
+        smelt_ml::importance::permutation_importance_regress(
+            model, &task, &*measure, n_repeats, seed,
+        ).map_err(smelt_err)?
+    };
+
+    // Return list of dicts
+    let list = pyo3::types::PyList::empty(py);
+    for fi in &importances {
+        let d = pyo3::types::PyDict::new(py);
+        d.set_item("feature", &fi.feature)?;
+        d.set_item("importance", fi.importance)?;
+        d.set_item("std_dev", fi.std_dev)?;
+        list.append(d)?;
+    }
+    Ok(list.into_pyobject(py)?.into_any().unbind())
+}
+
+// ── Macro: add shap_values + permutation_importance to all learners ───
+
+macro_rules! add_explain_methods {
+    ($($name:ident),+ $(,)?) => {
+        $(
+            #[pymethods]
+            impl $name {
+                /// Compute SHAP values for each sample.
+                #[pyo3(signature = (x, y, n_background=50, feature_names=None, target_class=1))]
+                fn shap_values<'py>(
+                    &self,
+                    py: Python<'py>,
+                    x: PyReadonlyArray2<'_, f64>,
+                    y: &Bound<'_, PyAny>,
+                    n_background: usize,
+                    feature_names: Option<Vec<String>>,
+                    target_class: usize,
+                ) -> PyResult<PyObject> {
+                    let model = self.trained.as_deref().ok_or_else(not_fitted)?;
+                    shap_impl(py, model, self.is_classif, x, y, n_background, feature_names, target_class)
+                }
+
+                /// Compute permutation importance.
+                #[pyo3(signature = (x, y, metric="rmse", n_repeats=5, seed=42, feature_names=None))]
+                fn permutation_importance<'py>(
+                    &self,
+                    py: Python<'py>,
+                    x: PyReadonlyArray2<'_, f64>,
+                    y: &Bound<'_, PyAny>,
+                    metric: &str,
+                    n_repeats: usize,
+                    seed: u64,
+                    feature_names: Option<Vec<String>>,
+                ) -> PyResult<PyObject> {
+                    let model = self.trained.as_deref().ok_or_else(not_fitted)?;
+                    perm_importance_impl(py, model, self.is_classif, x, y, metric, n_repeats, seed, feature_names)
+                }
+            }
+        )+
+    };
+}
+
+add_explain_methods!(
+    XGBoost, CatBoost, LightGBM, RandomForest, ExtraTrees,
+    DecisionTree, LogisticRegression, LinearRegression, Ridge,
+    KNearestNeighbors, GaussianNB,
+);
+
+// ── RFE ───────────────────────────────────────────────────────────────
+
+// ── BayesianOptimizer ──────────────────────────────────────────────────
+
+fn make_learner_factory(
+    learner_type: &str,
+) -> PyResult<Box<dyn Fn(&smelt_ml::tuning::ParamSet) -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>>
+{
+    use smelt_ml::prelude::*;
+    type L = Box<dyn smelt_ml::learner::Learner>;
+    type PS = smelt_ml::tuning::ParamSet;
+
+    fn get(p: &PS, k: &str, def: f64) -> f64 {
+        p.get(k).copied().unwrap_or(def)
+    }
+
+    match learner_type {
+        "xgboost" => Ok(Box::new(|p: &PS| -> L {
+            Box::new(XGBoost::new()
+                .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
+                .with_max_depth(get(p, "max_depth", 6.0) as usize)
+                .with_learning_rate(get(p, "learning_rate", 0.3))
+                .with_lambda(get(p, "lambda", 1.0))
+                .with_alpha(get(p, "alpha", 0.0))
+                .with_gamma(get(p, "gamma", 0.0))
+                .with_subsample(get(p, "subsample", 1.0))
+                .with_colsample_bytree(get(p, "colsample_bytree", 1.0)))
+        })),
+        "catboost" => Ok(Box::new(|p: &PS| -> L {
+            Box::new(CatBoost::new()
+                .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
+                .with_depth(get(p, "depth", 6.0) as usize)
+                .with_learning_rate(get(p, "learning_rate", 0.3))
+                .with_lambda(get(p, "lambda", 1.0)))
+        })),
+        "lightgbm" => Ok(Box::new(|p: &PS| -> L {
+            Box::new(LightGBM::new()
+                .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
+                .with_num_leaves(get(p, "num_leaves", 31.0) as usize)
+                .with_learning_rate(get(p, "learning_rate", 0.1))
+                .with_max_depth(get(p, "max_depth", 6.0) as usize))
+        })),
+        "random_forest" | "rf" => Ok(Box::new(|p: &PS| -> L {
+            Box::new(RandomForest::new()
+                .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
+                .with_max_depth(get(p, "max_depth", 10.0) as usize))
+        })),
+        "extra_trees" | "et" => Ok(Box::new(|p: &PS| -> L {
+            Box::new(ExtraTrees::new()
+                .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
+                .with_max_depth(get(p, "max_depth", 10.0) as usize))
+        })),
+        "decision_tree" | "dt" => Ok(Box::new(|p: &PS| -> L {
+            Box::new(DecisionTree::new()
+                .with_max_depth(get(p, "max_depth", 10.0) as usize))
+        })),
+        "ridge" => Ok(Box::new(|p: &PS| -> L {
+            Box::new(Ridge::new(get(p, "alpha", 1.0)))
+        })),
+        "knn" => Ok(Box::new(|p: &PS| -> L {
+            Box::new(KNearestNeighbors::new(get(p, "k", 5.0) as usize))
+        })),
+        _ => Err(PyRuntimeError::new_err(format!("Unknown learner type: {learner_type}"))),
+    }
+}
+
+fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::tuning::ParamSpace> {
+    use smelt_ml::tuning::{ParamDistribution, ParamSpace};
+
+    let py_dict: &Bound<'_, pyo3::types::PyDict> = dict.downcast()
+        .map_err(|_| PyRuntimeError::new_err("param_space must be a dict"))?;
+
+    let mut space = ParamSpace::new();
+
+    for (key, val) in py_dict.iter() {
+        let name: String = key.extract()?;
+
+        // Accept dict format: {"type": "uniform", "low": 0.1, "high": 1.0}
+        // Or tuple format: (low, high) → uniform
+        // Or list format: [1, 2, 3] → choice
+        if let Ok(inner_dict) = val.downcast::<pyo3::types::PyDict>() {
+            let dtype: String = inner_dict.get_item("type")?
+                .ok_or_else(|| PyRuntimeError::new_err(format!("Missing 'type' for param '{name}'")))?
+                .extract()?;
+            match dtype.as_str() {
+                "uniform" => {
+                    let low: f64 = inner_dict.get_item("low")?.unwrap().extract()?;
+                    let high: f64 = inner_dict.get_item("high")?.unwrap().extract()?;
+                    space.insert(name, ParamDistribution::Uniform(low, high));
+                }
+                "log_uniform" | "loguniform" => {
+                    let low: f64 = inner_dict.get_item("low")?.unwrap().extract()?;
+                    let high: f64 = inner_dict.get_item("high")?.unwrap().extract()?;
+                    space.insert(name, ParamDistribution::LogUniform(low, high));
+                }
+                "choice" => {
+                    let choices: Vec<f64> = inner_dict.get_item("values")?.unwrap().extract()?;
+                    space.insert(name, ParamDistribution::Choice(choices));
+                }
+                _ => return Err(PyRuntimeError::new_err(format!("Unknown param type: {dtype}"))),
+            }
+        } else if let Ok(tup) = val.extract::<(f64, f64)>() {
+            // Shorthand: (low, high) → uniform
+            space.insert(name, ParamDistribution::Uniform(tup.0, tup.1));
+        } else if let Ok(choices) = val.extract::<Vec<f64>>() {
+            // Shorthand: [1, 2, 3] → choice
+            space.insert(name, ParamDistribution::Choice(choices));
+        } else {
+            return Err(PyRuntimeError::new_err(
+                format!("Invalid param spec for '{name}'. Use dict, tuple (low, high), or list [choices]"),
+            ));
+        }
+    }
+
+    Ok(space)
+}
+
+#[pyclass]
+#[pyo3(name = "BayesianOptimizer")]
+struct PyBayesianOptimizer {
+    n_iter: usize,
+    n_initial: usize,
+    seed: u64,
+}
+
+#[pymethods]
+impl PyBayesianOptimizer {
+    #[new]
+    #[pyo3(signature = (n_iter=30, n_initial=5, seed=42))]
+    fn new(n_iter: usize, n_initial: usize, seed: u64) -> Self {
+        Self { n_iter, n_initial, seed }
+    }
+
+    /// Optimize hyperparameters using Bayesian TPE.
+    ///
+    /// Args:
+    ///     learner_type: "xgboost", "rf", "catboost", "lightgbm", "dt", "ridge", "knn"
+    ///     param_space: dict of param → spec. Specs can be:
+    ///         - (low, high) → uniform distribution
+    ///         - [v1, v2, v3] → choice
+    ///         - {"type": "uniform"/"log_uniform"/"choice", "low": ..., "high": ..., "values": [...]}
+    ///     x, y: training data
+    ///     metric: "rmse", "r2", "accuracy", etc.
+    ///     n_folds: cross-validation folds
+    ///     cv_seed: seed for CV splits
+    #[pyo3(signature = (learner_type, param_space, x, y, metric="rmse", n_folds=5, cv_seed=42))]
+    fn optimize<'py>(
+        &self,
+        py: Python<'py>,
+        learner_type: &str,
+        param_space: &Bound<'_, PyAny>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+        metric: &str,
+        n_folds: usize,
+        cv_seed: u64,
+    ) -> PyResult<PyObject> {
+        let factory = make_learner_factory(learner_type)?;
+        let space = build_param_space(param_space)?;
+        let measure = resolve_measure(metric)?;
+        let cv = smelt_ml::resample::CrossValidation::new(n_folds).with_seed(cv_seed);
+
+        let bo = smelt_ml::tuning::BayesianOptimizer::new(
+            move |params| factory(params),
+            space,
+        )
+        .with_n_iter(self.n_iter)
+        .with_n_initial(self.n_initial)
+        .with_seed(self.seed);
+
+        let features = to_array2(x);
+
+        let result = if is_integer(y) {
+            let target: Vec<i64> = y.extract()?;
+            let target: Vec<usize> = target.into_iter().map(|v| v as usize).collect();
+            let task = smelt_ml::task::ClassificationTask::new("bo", features, target)
+                .map_err(smelt_err)?;
+            bo.tune_classif(&task, &cv, &*measure).map_err(smelt_err)?
+        } else {
+            let target: Vec<f64> = y.extract()?;
+            let task = smelt_ml::task::RegressionTask::new("bo", features, target)
+                .map_err(smelt_err)?;
+            bo.tune_regress(&task, &cv, &*measure).map_err(smelt_err)?
+        };
+
+        // Convert TuneResult to Python dict
+        let dict = pyo3::types::PyDict::new(py);
+
+        // best_params: convert HashMap<String, f64> to Python dict
+        let bp = pyo3::types::PyDict::new(py);
+        for (k, v) in &result.best_params {
+            bp.set_item(k, v)?;
+        }
+        dict.set_item("best_params", bp)?;
+        dict.set_item("best_score", result.best_score)?;
+        dict.set_item("measure", &result.measure_id)?;
+
+        // all_results: list of (params_dict, score)
+        let history = pyo3::types::PyList::empty(py);
+        for (params, score) in &result.all_results {
+            let pd = pyo3::types::PyDict::new(py);
+            for (k, v) in params {
+                pd.set_item(k, v)?;
+            }
+            let tup = pyo3::types::PyTuple::new(py, &[pd.as_any(), score.into_pyobject(py)?.as_any()])?;
+            history.append(tup)?;
+        }
+        dict.set_item("all_results", history)?;
+
+        Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+}
+
+fn make_rfe_factory(learner_type: &str) -> PyResult<Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>> {
+    match learner_type {
+        "decision_tree" => Ok(Box::new(|| Box::new(smelt_ml::prelude::DecisionTree::default()) as Box<dyn smelt_ml::learner::Learner>)),
+        "random_forest" => Ok(Box::new(|| Box::new(smelt_ml::prelude::RandomForest::new()) as Box<dyn smelt_ml::learner::Learner>)),
+        "extra_trees" => Ok(Box::new(|| Box::new(smelt_ml::prelude::ExtraTrees::new()) as Box<dyn smelt_ml::learner::Learner>)),
+        "xgboost" => Ok(Box::new(|| Box::new(smelt_ml::prelude::XGBoost::new()) as Box<dyn smelt_ml::learner::Learner>)),
+        "ridge" => Ok(Box::new(|| Box::new(smelt_ml::prelude::Ridge::new(1.0)) as Box<dyn smelt_ml::learner::Learner>)),
+        _ => Err(PyRuntimeError::new_err(format!("Unknown learner for RFE: {learner_type}"))),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (x, y, learner_type="decision_tree", n_features=5, feature_names=None))]
+fn rfe<'py>(
+    py: Python<'py>,
+    x: PyReadonlyArray2<'_, f64>,
+    y: &Bound<'_, PyAny>,
+    learner_type: &str,
+    n_features: usize,
+    feature_names: Option<Vec<String>>,
+) -> PyResult<PyObject> {
+    use smelt_ml::preprocess::Transformer;
+
+    let factory = make_rfe_factory(learner_type)?;
+    let features = to_array2(x);
+    let n_feat = features.ncols();
+
+    let is_classif = is_integer(y);
+    let mut selector = if is_classif {
+        smelt_ml::preprocess::RFE::classif(move || factory(), n_features)
+    } else {
+        smelt_ml::preprocess::RFE::regress(move || factory(), n_features)
+    };
+
+    let target_f64: Vec<f64> = if is_classif {
+        let t: Vec<i64> = y.extract()?;
+        t.into_iter().map(|v| v as f64).collect()
+    } else {
+        y.extract()?
+    };
+
+    selector.fit_supervised(&features, &target_f64).map_err(smelt_err)?;
+    let indices = selector.selected_indices().unwrap();
+
+    let names: Vec<String> = feature_names.unwrap_or_else(|| (0..n_feat).map(|i| format!("f{i}")).collect());
+    let result: Vec<(String, usize)> = indices.iter().map(|&i| (names[i].clone(), i)).collect();
+    Ok(result.into_pyobject(py)?.into_any().unbind())
+}
+
+// ── Feature Selection Filters ──────────────────────────────────────────
+
+fn run_filter(
+    method: &str,
+    py: Python<'_>,
+    x: PyReadonlyArray2<'_, f64>,
+    y: &Bound<'_, PyAny>,
+    feature_names: Vec<String>,
+    k: usize,
+) -> PyResult<PyObject> {
+    use smelt_ml::preprocess::filter::FilterSelector;
+    use smelt_ml::preprocess::Transformer;
+
+    let features = to_array2(x);
+    let n_feat = features.ncols();
+    let k = k.min(n_feat);
+
+    let target: Vec<f64> = y.extract()?;
+
+    let mut selector = match method {
+        "variance" => FilterSelector::variance(k),
+        "correlation" => FilterSelector::correlation(k),
+        "anova_f" => FilterSelector::anova_f(k),
+        "information_gain" => FilterSelector::information_gain(k),
+        "mutual_information" => FilterSelector::mutual_info(k),
+        "mrmr" => FilterSelector::mrmr(k),
+        "jmi" => FilterSelector::jmi(k),
+        "jmim" => FilterSelector::jmim(k),
+        "cmim" => FilterSelector::cmim(k),
+        "relief" => FilterSelector::relief(k),
+        _ => return Err(PyRuntimeError::new_err(format!("Unknown filter: {method}"))),
+    };
+
+    selector.fit_supervised(&features, &target).map_err(smelt_err)?;
+    let indices = selector.selected_indices().unwrap();
+
+    // Return list of (name, index) tuples preserving selection order
+    let names: Vec<String> = if feature_names.len() == n_feat {
+        feature_names
+    } else {
+        (0..n_feat).map(|i| format!("f{i}")).collect()
+    };
+
+    let result: Vec<(String, usize)> = indices.iter().map(|&i| (names[i].clone(), i)).collect();
+    Ok(result.into_pyobject(py)?.into_any().unbind())
+}
+
+macro_rules! filter_fn {
+    ($name:ident, $method:expr) => {
+        #[pyfunction]
+        #[pyo3(signature = (x, y, feature_names, k=15))]
+        fn $name<'py>(
+            py: Python<'py>,
+            x: PyReadonlyArray2<'_, f64>,
+            y: &Bound<'_, PyAny>,
+            feature_names: Vec<String>,
+            k: usize,
+        ) -> PyResult<PyObject> {
+            run_filter($method, py, x, y, feature_names, k)
+        }
+    };
+}
+
+filter_fn!(filter_variance, "variance");
+filter_fn!(filter_correlation, "correlation");
+filter_fn!(filter_anova_f, "anova_f");
+filter_fn!(filter_information_gain, "information_gain");
+filter_fn!(filter_mutual_information, "mutual_information");
+filter_fn!(filter_mrmr, "mrmr");
+filter_fn!(filter_jmi, "jmi");
+filter_fn!(filter_jmim, "jmim");
+filter_fn!(filter_cmim, "cmim");
+filter_fn!(filter_relief, "relief");
 
 // ── Module ─────────────────────────────────────────────────────────────
 
@@ -825,6 +1352,24 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(wilcoxon_signed_rank, m)?)?;
     m.add_function(wrap_pyfunction!(bootstrap_ci, m)?)?;
     m.add_function(wrap_pyfunction!(sign_test, m)?)?;
+
+    // Filters
+    m.add_function(wrap_pyfunction!(filter_variance, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_correlation, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_anova_f, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_information_gain, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_mutual_information, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_mrmr, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_jmi, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_jmim, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_cmim, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_relief, m)?)?;
+
+    // Tuning
+    m.add_class::<PyBayesianOptimizer>()?;
+
+    // RFE
+    m.add_function(wrap_pyfunction!(rfe, m)?)?;
 
     Ok(())
 }

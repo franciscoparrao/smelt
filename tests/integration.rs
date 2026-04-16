@@ -4170,6 +4170,137 @@ fn filter_mutual_info_regression() {
     assert_eq!(selected[0], 0);
 }
 
+// ── Info-theoretic filter tests ────────────────────────────────────
+
+#[test]
+fn filter_mrmr_selects_informative() {
+    use smelt_ml::preprocess::filter::FilterSelector;
+
+    // Feature 0: perfectly correlated with target
+    // Feature 1: random noise
+    // Feature 2: partial correlation
+    let features = array![
+        [1.0, 42.0, 1.5],
+        [2.0, 13.0, 2.3],
+        [3.0, 99.0, 3.1],
+        [4.0, 55.0, 4.8],
+        [5.0, 42.0, 4.9],
+        [6.0, 13.0, 6.2],
+        [7.0, 99.0, 7.0],
+        [8.0, 55.0, 8.4],
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+
+    let mut selector = FilterSelector::mrmr(2);
+    selector.fit_supervised(&features, &target).unwrap();
+
+    let selected = selector.selected_indices().unwrap();
+    assert_eq!(selected.len(), 2);
+    // Feature 0 (best correlated) should be selected
+    assert!(selected.contains(&0), "MRMR should select feature 0");
+}
+
+#[test]
+fn filter_jmi_selects_informative() {
+    use smelt_ml::preprocess::filter::FilterSelector;
+
+    let features = array![
+        [1.0, 42.0],
+        [2.0, 13.0],
+        [3.0, 99.0],
+        [4.0, 55.0],
+        [5.0, 42.0],
+        [6.0, 13.0],
+        [7.0, 99.0],
+        [8.0, 55.0],
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+
+    let mut selector = FilterSelector::jmi(1);
+    selector.fit_supervised(&features, &target).unwrap();
+
+    let selected = selector.selected_indices().unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0], 0, "JMI should select feature 0");
+}
+
+#[test]
+fn filter_jmim_selects_informative() {
+    use smelt_ml::preprocess::filter::FilterSelector;
+
+    let features = array![
+        [1.0, 42.0],
+        [2.0, 13.0],
+        [3.0, 99.0],
+        [4.0, 55.0],
+        [5.0, 42.0],
+        [6.0, 13.0],
+        [7.0, 99.0],
+        [8.0, 55.0],
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+
+    let mut selector = FilterSelector::jmim(1);
+    selector.fit_supervised(&features, &target).unwrap();
+
+    let selected = selector.selected_indices().unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0], 0, "JMIM should select feature 0");
+}
+
+#[test]
+fn filter_cmim_selects_informative() {
+    use smelt_ml::preprocess::filter::FilterSelector;
+
+    let features = array![
+        [1.0, 42.0],
+        [2.0, 13.0],
+        [3.0, 99.0],
+        [4.0, 55.0],
+        [5.0, 42.0],
+        [6.0, 13.0],
+        [7.0, 99.0],
+        [8.0, 55.0],
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+
+    let mut selector = FilterSelector::cmim(1);
+    selector.fit_supervised(&features, &target).unwrap();
+
+    let selected = selector.selected_indices().unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0], 0, "CMIM should select feature 0");
+}
+
+#[test]
+fn filter_relief_selects_informative() {
+    use smelt_ml::preprocess::filter::FilterSelector;
+
+    // Feature 0 linearly related to target, feature 1 is noise
+    let features = array![
+        [1.0, 42.0],
+        [2.0, 13.0],
+        [3.0, 99.0],
+        [4.0, 55.0],
+        [5.0, 42.0],
+        [6.0, 13.0],
+        [7.0, 99.0],
+        [8.0, 55.0],
+        [9.0, 42.0],
+        [10.0, 13.0],
+        [11.0, 99.0],
+        [12.0, 55.0],
+    ];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0];
+
+    let mut selector = FilterSelector::relief(1);
+    selector.fit_supervised(&features, &target).unwrap();
+
+    let selected = selector.selected_indices().unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0], 0, "Relief should select feature 0");
+}
+
 // ── K-Means tests ──────────────────────────────────────────────────
 
 #[test]

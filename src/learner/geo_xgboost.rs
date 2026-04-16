@@ -102,6 +102,15 @@ impl GeoXGBoost {
         self
     }
 
+    /// Train and return a `TrainedGeoXGBoost` that supports `predict_spatial`.
+    ///
+    /// Unlike `train_regress` (which returns `Box<dyn TrainedModel>`), this
+    /// preserves the concrete type so you can call `predict_spatial` with
+    /// new coordinates for spatially-aware out-of-sample prediction.
+    pub fn train_geo(&mut self, task: &RegressionTask) -> Result<TrainedGeoXGBoost> {
+        self.train_geo_inner(task)
+    }
+
     fn make_xgb(&self) -> XGBoost {
         XGBoost::new()
             .with_n_estimators(self.n_estimators)
@@ -156,14 +165,67 @@ fn spatial_weights(coords: &[(f64, f64)], center: usize, n_neighbors: usize) -> 
 // ── Trained model ───────────────────────────────────────────────────
 
 /// Trained G-XGBoost model with global model, local models, and alpha weights.
-struct TrainedGeoXGBoost {
+pub struct TrainedGeoXGBoost {
     global_model: Box<dyn TrainedModel>,
     local_models: Vec<Box<dyn TrainedModel>>,
     alphas: Vec<f64>,
-    #[allow(dead_code)]
-    coords: Vec<(f64, f64)>, // stored for future prediction on new spatial units
+    coords: Vec<(f64, f64)>,
     feature_names: Vec<String>,
     local_importances: Vec<Option<Vec<(String, f64)>>>,
+}
+
+impl TrainedGeoXGBoost {
+    /// Predict on new data using the nearest local model for each point.
+    ///
+    /// For each new coordinate, finds the closest training point and uses
+    /// its local model blended with the global model via the stored alpha weight.
+    /// This matches the behavior of the Python `predict_gxgb` function.
+    pub fn predict_spatial(
+        &self,
+        features: &Array2<f64>,
+        new_coords: &[(f64, f64)],
+    ) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.feature_names.len())?;
+        let n_samples = features.nrows();
+        if new_coords.len() != n_samples {
+            return Err(SmeltError::DimensionMismatch {
+                expected: n_samples,
+                got: new_coords.len(),
+            });
+        }
+
+        let global_pred = self.global_model.predict(features)?;
+        let global_vals = match &global_pred {
+            Prediction::Regression { predicted, .. } => predicted.clone(),
+            _ => return Err(SmeltError::Other("Expected regression".into())),
+        };
+
+        let mut predicted = Vec::with_capacity(n_samples);
+        for i in 0..n_samples {
+            // Find nearest training point
+            let nearest = self
+                .coords
+                .iter()
+                .enumerate()
+                .map(|(j, &c)| (j, dist(new_coords[i], c)))
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                .map(|(j, _)| j)
+                .unwrap_or(0);
+
+            let row = features.select(ndarray::Axis(0), &[i]);
+            let local_pred = self.local_models[nearest].predict(&row)?;
+            let local_val = match &local_pred {
+                Prediction::Regression { predicted, .. } => predicted[0],
+                _ => return Err(SmeltError::Other("Expected regression".into())),
+            };
+
+            let alpha = self.alphas[nearest];
+            let ensemble = alpha * local_val + (1.0 - alpha) * global_vals[i];
+            predicted.push(ensemble);
+        }
+
+        Ok(Prediction::regression(predicted))
+    }
 }
 
 impl TrainedModel for TrainedGeoXGBoost {
@@ -253,6 +315,12 @@ impl Learner for GeoXGBoost {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        Ok(Box::new(self.train_geo_inner(task)?))
+    }
+}
+
+impl GeoXGBoost {
+    fn train_geo_inner(&mut self, task: &RegressionTask) -> Result<TrainedGeoXGBoost> {
         let features = task.features();
         let target = task.target();
         let n_samples = task.n_samples();
@@ -350,13 +418,13 @@ impl Learner for GeoXGBoost {
             })
             .collect();
 
-        Ok(Box::new(TrainedGeoXGBoost {
+        Ok(TrainedGeoXGBoost {
             global_model,
             local_models,
             alphas,
             coords: self.coords.clone(),
             feature_names: task.feature_names().to_vec(),
             local_importances,
-        }))
+        })
     }
 }

@@ -13,10 +13,10 @@
 
 %% -- Article metainformation -------------------------------------------------
 
-\author{Francisco Parra\\Universidad de Santiago de Chile
-   \And Carolina Bonacic\\Universidad de Santiago de Chile
-   \And Ver\'onica Gil-Costa\\Universidad de San Luis
-   \And Mauricio Mar\'in\\Universidad de Santiago de Chile
+\author{Francisco Parra\\Universidad de Santiago
+   \And Carolina Bonacic\\Universidad de Santiago
+   \And Ver\'onica Gil-Costa\\CONICET / UNSL
+   \AND Mauricio Mar\'in\\Universidad de Santiago
    \And George Grekousis\\Peking University}
 \Plainauthor{Francisco Parra, Carolina Bonacic, Ver\'onica Gil-Costa, Mauricio Mar\'in, George Grekousis}
 
@@ -38,9 +38,10 @@ implementations employ cache-optimized column-major histogram accumulation
 with \code{u8} packing and a histogram subtraction trick. On single-threaded
 benchmarks ($n$ from 500 to 100{,}000, 10 runs, mean $\pm$ std), the
 \pkg{CatBoost}-inspired implementation matches or exceeds the official
-\proglang{C++} library at all tested scales (1.0--1.4$\times$ for
-classification), while \pkg{XGBoost} is competitive at $n \leq 10{,}000$.
-Memory consumption is 25--40$\times$ lower than the \proglang{C++} libraries. The composable, trait-based
+\proglang{C++} library for classification (1.0--1.4$\times$) and is
+within 0.8--1.2$\times$ for regression, while \pkg{XGBoost} is
+competitive at $n \leq 10{,}000$.
+Memory consumption is 23--41$\times$ lower than the \proglang{C++} libraries. The composable, trait-based
 architecture is inspired by \pkg{mlr3} \citep{Lang+Binder+Richter:2019} and
 \pkg{scikit-learn} \citep{Pedregosa+Varoquaux+Gramfort:2011}, with zero
 \code{unsafe} blocks across 17{,}000+ lines of code.
@@ -110,8 +111,9 @@ practitioners who need spatially-aware prediction with uncertainty
 quantification must currently combine multiple \proglang{Python} or
 \proglang{R} packages with incompatible APIs (e.g., \pkg{scikit-learn} for
 modeling, \pkg{geoxgboost} for spatial regression, \pkg{MAPIE} for conformal
-intervals, and custom spatial resampling code). To our knowledge, no existing framework in any
-language integrates all of these in a single composable pipeline.
+intervals, and custom spatial resampling code). To our knowledge, no existing framework integrates
+Geographical-\pkg{XGBoost}, spatial cross-validation, and conformal
+prediction in a single composable library.
 
 In this paper, we present \pkg{smelt-ml}, a comprehensive ML framework in
 \proglang{Rust} that addresses both gaps. Our main contributions are:
@@ -216,12 +218,12 @@ Ensemble Selection (KNORA-E).
 Category & Algorithm & Classif. & Regress. \\
 \midrule
 Trees       & Decision Tree, Oblique Tree/Forest & \checkmark & \checkmark \\
-Ensembles   & Random Forest, Extra Trees, Bagging, Stacking & \checkmark & \checkmark \\
-            & AdaBoost, Dynamic Ensemble Selection & \checkmark & \\
+Ensembles   & Random Forest \citep{Breiman:2001}, Extra Trees, Bagging, Stacking & \checkmark & \checkmark \\
+            & AdaBoost \citep{Freund+Schapire:1997}, Dynamic Ensemble Selection \citep{Ko+Sabourin+Britto:2008} & \checkmark & \\
 Boosting    & XGBoost, LightGBM, CatBoost$^\dagger$ & \checkmark & \checkmark \\
-            & Gradient Boosting, Quantile GB, EBM & \checkmark & \checkmark \\
+            & Gradient Boosting \citep{Friedman:2001}, Quantile GB, EBM \citep{Lou+Caruana+Gehrke:2012} & \checkmark & \checkmark \\
 Linear      & Linear/Logistic Regression, Ridge, Lasso, Elastic Net & \checkmark & \checkmark \\
-Other       & KNN, Gaussian NB, Linear SVM, Hoeffding Tree & \checkmark & \checkmark \\
+Other       & KNN, Gaussian NB, Linear SVM, Hoeffding Tree \citep{Domingos+Hulten:2000} & \checkmark & \checkmark \\
 Spatial     & Geographical-XGBoost & & \checkmark \\
 \bottomrule
 \end{tabular}
@@ -230,7 +232,7 @@ $^\dagger$CatBoost-inspired symmetric GBM with ordered target statistics;
 see Section~\ref{sec:catboost_scope} for scope.}
 \end{table}
 
-Additional modules provide: K-Means, DBSCAN, and Isolation Forest (clustering/anomaly);
+Additional modules provide: K-Means, DBSCAN \citep{Ester+Kriegel+Sander:1996}, and Isolation Forest \citep{Liu+Ting+Zhou:2008} (clustering/anomaly);
 Random Survival Forest with C-index \citep{Ishwaran+Kogalur+Blackstone:2008}
 (survival analysis); Causal Forest with honest splitting
 \citep{Athey+Imbens:2016, Wager+Athey:2018} (causal inference); Classifier Chains
@@ -270,7 +272,7 @@ Survival Forest                & \checkmark     & ---        & ---            & 
 Conformal Prediction           & \checkmark     & ---        & ---            & ---        \\
 Geographical-XGBoost           & \checkmark     & ---        & ---            & ---        \\
 Spatial cross-validation       & \checkmark     & ---        & ---            & \checkmark$^c$ \\
-SMOTE / ADASYN                 & \checkmark     & ---        & \checkmark$^e$ & \checkmark$^c$ \\
+SMOTE \citep{Chawla+Bowyer+Hall:2002} / ADASYN \citep{He+Bai+Garcia:2008} & \checkmark & --- & \checkmark$^e$ & \checkmark$^c$ \\
 Bayesian tuning                & \checkmark     & ---        & \checkmark$^f$ & \checkmark \\
 Statistical tests (Wilcoxon, Friedman) & \checkmark & --- & \checkmark$^g$ & \checkmark \\
 \midrule
@@ -359,12 +361,16 @@ Column-major + u8          & 0.08 ms (1.3$\times$) & 0.50 ms (1.4$\times$) & 2.6
 \end{tabular}
 \caption{\label{tab:ablation} Ablation study: histogram scanning kernel time
 per iteration (20 features, 256 bins). Column-major layout provides
-1.1--2.1$\times$ speedup; u8 packing adds a further 1.3--1.4$\times$ at
-$n = 10{,}000$. The histogram subtraction trick (not shown) reduces total
-tree-building work by $\sim$40\% on top of these kernel improvements.}
+1.1--2.1$\times$ speedup over the row-major baseline. The effect of u8
+packing on speed is dataset-size-dependent: it improves throughput at
+$n = 10{,}000$ (1.4$\times$ vs.\ 1.1$\times$ for u16) but is neutral or
+slightly slower at $n = 1{,}000$ and $n = 100{,}000$; its primary benefit
+is halving memory bandwidth for bin storage. The histogram subtraction
+trick (not shown) reduces total tree-building work by $\sim$40\% on top
+of these kernel improvements.}
 \end{table}
 
-\subsection{Implementation scope} \label{sec:catboost_scope} \label{sec:lightgbm_scope}
+\subsection{Implementation scope} \label{sec:catboost_scope}
 
 Our gradient boosting implementations focus on the core algorithmic
 contributions of each engine while omitting features that require
@@ -556,7 +562,7 @@ replication package.
 
 \textbf{Memory.} Peak RSS at $n = 10{,}000$ is 5--8\,MB (\pkg{smelt-ml})
 vs.\ 197--215\,MB for the \proglang{C++} libraries (after subtracting
-11\,MB \proglang{Python} runtime), a \textbf{25--40$\times$} reduction from
+11\,MB \proglang{Python} runtime), a \textbf{23--41$\times$} reduction from
 \code{u8} bin packing and deterministic memory management.
 
 The practical implication is that \pkg{smelt-ml}'s gradient boosting is
@@ -692,17 +698,23 @@ in \pkg{smelt-ml}.
 
 A key contribution of \pkg{smelt-ml} is the integration of spatial modeling,
 spatial resampling, and distribution-free uncertainty quantification in a
-single composable framework. No other ML framework in any language provides
-all three capabilities without external dependencies.
+single composable framework. To our knowledge, no other ML framework provides
+all three capabilities in a single library without external dependencies.
 
 \subsection{Components}
 
 \textbf{Geographical-XGBoost} \citep{Grekousis:2025} extends gradient boosting
 with spatial awareness: bi-square kernel weights define local neighborhoods,
 per-location models capture spatially non-stationary relationships, and an
-adaptive $\alpha$ weight blends local and global predictions. To our knowledge, this is the first
-implementation outside the original \proglang{Python} package
-\citep{geoxgboost:2024}.
+adaptive $\alpha$ weight blends local and global predictions. Our
+implementation trains local models on the spatial neighborhood subset (samples
+with kernel weight $> 0$) rather than incorporating spatial weights into the
+\pkg{XGBoost} objective function (Eq.~13 in \citealp{Grekousis:2025}), which
+would require modifying the gradient computation. As shown in
+Table~\ref{tab:geoxgb_validation}, this approximation produces equivalent
+results ($\Delta\text{RMSE} = 0.001$).
+To our knowledge, this is the first implementation outside the original
+\proglang{Python} package \citep{geoxgboost:2024}.
 
 \textbf{Spatial cross-validation} (\code{SpatialBlockCV}, \code{SpatialBufferCV})
 prevents spatial autocorrelation leakage by ensuring that train and test sets
@@ -836,6 +848,43 @@ mean interval width of 1.13 log-dollars. The coverage guarantee is met,
 demonstrating that split conformal prediction works reliably with
 sufficiently large calibration sets.
 
+\subsection{Validation against the original implementation}
+
+Table~\ref{tab:geoxgb_validation} compares our Geographical-\pkg{XGBoost}
+implementation against the original \proglang{Python} package
+\citep{geoxgboost:2024} on the King County dataset (800 train, 200 test,
+identical split). Both use 100 trees, depth~6, learning rate 0.3,
+bandwidth 30 (adaptive), and pure local prediction ($\alpha = 1$).
+
+\begin{table}[t!]
+\centering
+\begin{tabular}{lccc}
+\toprule
+Implementation & RMSE & R$^2$ & Time (s) \\
+\midrule
+\pkg{XGBoost} (\proglang{C++}, baseline) & 0.331 & 0.615 & 2 \\
+\pkg{XGBoost} (\pkg{smelt-ml}, baseline) & 0.327 & 0.625 & 3 \\
+Geo-\pkg{XGBoost} (\pkg{geoxgboost}, \proglang{Python}) & 0.272 & 0.740 & 1{,}884 \\
+Geo-\pkg{XGBoost} (\pkg{smelt-ml}, \proglang{Rust}) & 0.271 & 0.741 & 701 \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:geoxgb_validation} Validation of \pkg{smelt-ml}'s
+Geographical-\pkg{XGBoost} against the original \proglang{Python}
+implementation on King County housing (holdout, 11 features, log-price).
+Both implementations produce equivalent RMSE ($\Delta = 0.001$) and
+R$^2$ ($\Delta = 0.001$). \pkg{smelt-ml} is 2.7$\times$ faster (701\,s
+vs.\ 1{,}884\,s) due to lower per-model overhead in \proglang{Rust}.}
+\end{table}
+
+The close agreement ($\Delta\text{RMSE} = 0.001$) confirms that
+\pkg{smelt-ml}'s implementation correctly reproduces the
+Geographical-\pkg{XGBoost} algorithm. The residual difference is expected
+because the underlying \pkg{XGBoost} engines differ (pure \proglang{Rust}
+vs.\ official \proglang{C++}). Both Geo-\pkg{XGBoost} implementations
+improve substantially over the non-spatial baseline (RMSE 0.33 $\to$ 0.27,
+$\approx 18\%$ reduction), confirming the practical value of spatial
+modeling for geographically heterogeneous data.
+
 \subsection{Additional unique algorithms}
 
 \textbf{Causal Forest.} Honest splitting following
@@ -885,7 +934,7 @@ edge devices); (2)~spatial ML workflows where the integrated pipeline of
 Geographical-\pkg{XGBoost}, spatial CV, and conformal prediction eliminates
 multi-package orchestration; (3)~safety-critical systems where zero
 \code{unsafe} blocks and compile-time thread safety are requirements; and
-(4)~memory-constrained environments where the 25--40$\times$ memory reduction
+(4)~memory-constrained environments where the 23--41$\times$ memory reduction
 is operationally significant.
 
 Limitations include the performance gap on datasets beyond 10{,}000 samples
@@ -893,7 +942,7 @@ Limitations include the performance gap on datasets beyond 10{,}000 samples
 SIMD intrinsics, hardware-specific memory management, and GPU backends;
 see Section~\ref{sec:performance}), the absence of GPU support, and the
 simplified scope of the \pkg{CatBoost} and \pkg{LightGBM} implementations
-(see Sections~\ref{sec:catboost_scope}--\ref{sec:lightgbm_scope}). All
+(see Section~\ref{sec:catboost_scope}). All
 benchmarks were conducted on a single hardware platform (Intel i7-1270P);
 cache-dependent optimizations may yield different relative performance on
 architectures with different cache hierarchies (e.g., AMD, Apple Silicon).
@@ -950,7 +999,7 @@ reproduces all benchmark tables and figures.
 
 \section*{Acknowledgments}
 
-The authors thank the anonymous reviewers for their constructive feedback.
+This work was partially supported by Universidad de Santiago de Chile.
 
 
 %% -- Bibliography -------------------------------------------------------------

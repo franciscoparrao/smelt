@@ -4,6 +4,7 @@
 //! Integrates with Pipeline as a Transformer — fit on training data only,
 //! preventing data leakage in cross-validation.
 
+use super::mutual_info;
 use super::Transformer;
 use crate::{Result, SmeltError};
 use ndarray::Array2;
@@ -50,6 +51,11 @@ enum FilterType {
     AnovaF,
     InformationGain,
     MutualInfo,
+    Mrmr,
+    Jmi,
+    Jmim,
+    Cmim,
+    Relief,
 }
 
 impl FilterBox {
@@ -60,6 +66,11 @@ impl FilterBox {
             FilterType::AnovaF => AnovaFFilter.score(features, target),
             FilterType::InformationGain => InformationGainFilter.score(features, target),
             FilterType::MutualInfo => MutualInfoFilter.score(features, target),
+            FilterType::Mrmr => MrmrFilter.score(features, target),
+            FilterType::Jmi => JmiFilter.score(features, target),
+            FilterType::Jmim => JmimFilter.score(features, target),
+            FilterType::Cmim => CmimFilter.score(features, target),
+            FilterType::Relief => ReliefFilter.score(features, target),
         }
     }
 
@@ -71,6 +82,11 @@ impl FilterBox {
             FilterType::AnovaF => "anova_f",
             FilterType::InformationGain => "information_gain",
             FilterType::MutualInfo => "mutual_info",
+            FilterType::Mrmr => "mrmr",
+            FilterType::Jmi => "jmi",
+            FilterType::Jmim => "jmim",
+            FilterType::Cmim => "cmim",
+            FilterType::Relief => "relief",
         }
     }
 }
@@ -121,6 +137,61 @@ impl FilterSelector {
         Self {
             filter: FilterBox {
                 inner: FilterType::MutualInfo,
+            },
+            n_features,
+            selected_indices: None,
+        }
+    }
+
+    /// Minimum Redundancy Maximum Relevance (Peng et al., 2005).
+    pub fn mrmr(n_features: usize) -> Self {
+        Self {
+            filter: FilterBox {
+                inner: FilterType::Mrmr,
+            },
+            n_features,
+            selected_indices: None,
+        }
+    }
+
+    /// Joint Mutual Information (Brown et al., 2012).
+    pub fn jmi(n_features: usize) -> Self {
+        Self {
+            filter: FilterBox {
+                inner: FilterType::Jmi,
+            },
+            n_features,
+            selected_indices: None,
+        }
+    }
+
+    /// Joint Mutual Information Maximization (Brown et al., 2012).
+    pub fn jmim(n_features: usize) -> Self {
+        Self {
+            filter: FilterBox {
+                inner: FilterType::Jmim,
+            },
+            n_features,
+            selected_indices: None,
+        }
+    }
+
+    /// Conditional Mutual Information Maximization (Fleuret, 2004).
+    pub fn cmim(n_features: usize) -> Self {
+        Self {
+            filter: FilterBox {
+                inner: FilterType::Cmim,
+            },
+            n_features,
+            selected_indices: None,
+        }
+    }
+
+    /// RReliefF distance-based filter (Kononenko, 1994).
+    pub fn relief(n_features: usize) -> Self {
+        Self {
+            filter: FilterBox {
+                inner: FilterType::Relief,
             },
             n_features,
             selected_indices: None,
@@ -458,4 +529,230 @@ fn entropy(counts: &[usize], total: f64) -> f64 {
             -p * p.ln()
         })
         .sum()
+}
+
+// ── Greedy info-theoretic filters ──────────────────────────────────
+
+/// Helper: greedy sequential selection that assigns descending scores.
+/// `criterion` receives (candidate_bins, target_bins, &[selected_bins]) → f64.
+fn greedy_select(
+    features: &Array2<f64>,
+    target: &[f64],
+    criterion: fn(&[usize], &[usize], &[&[usize]]) -> f64,
+) -> Vec<f64> {
+    let p = features.ncols();
+    let t_bins = mutual_info::discretize(target);
+
+    // Pre-discretize all features
+    let all_bins: Vec<Vec<usize>> = (0..p)
+        .map(|j| {
+            let col: Vec<f64> = features.column(j).to_vec();
+            mutual_info::discretize(&col)
+        })
+        .collect();
+
+    let mut selected: Vec<usize> = Vec::new();
+    let mut available: Vec<bool> = vec![true; p];
+    let mut scores = vec![0.0_f64; p];
+
+    for rank in 0..p {
+        let sel_bins: Vec<&[usize]> = selected.iter().map(|&i| all_bins[i].as_slice()).collect();
+
+        let mut best_j = 0;
+        let mut best_val = f64::NEG_INFINITY;
+
+        for j in 0..p {
+            if !available[j] {
+                continue;
+            }
+            let val = criterion(&all_bins[j], &t_bins, &sel_bins);
+            if val > best_val {
+                best_val = val;
+                best_j = j;
+            }
+        }
+
+        available[best_j] = false;
+        selected.push(best_j);
+        // Higher score = selected earlier
+        scores[best_j] = (p - rank) as f64;
+    }
+
+    scores
+}
+
+/// MRMR: Minimum Redundancy Maximum Relevance (Peng et al., 2005).
+pub struct MrmrFilter;
+
+impl Filter for MrmrFilter {
+    fn id(&self) -> &str {
+        "mrmr"
+    }
+
+    fn score(&self, features: &Array2<f64>, target: &[f64]) -> Vec<f64> {
+        greedy_select(features, target, |cand, tgt, selected| {
+            let relevance = mutual_info::mi_from_bins(cand, tgt);
+            if selected.is_empty() {
+                return relevance;
+            }
+            let redundancy: f64 = selected
+                .iter()
+                .map(|s| mutual_info::mi_from_bins(cand, s))
+                .sum::<f64>()
+                / selected.len() as f64;
+            relevance - redundancy
+        })
+    }
+}
+
+/// JMI: Joint Mutual Information (Brown et al., 2012).
+pub struct JmiFilter;
+
+impl Filter for JmiFilter {
+    fn id(&self) -> &str {
+        "jmi"
+    }
+
+    fn score(&self, features: &Array2<f64>, target: &[f64]) -> Vec<f64> {
+        greedy_select(features, target, |cand, tgt, selected| {
+            if selected.is_empty() {
+                return mutual_info::mi_from_bins(cand, tgt);
+            }
+            // JMI = Σ_{s in S} I(cand, s; y)
+            selected
+                .iter()
+                .map(|s| mutual_info::joint_mi(cand, s, tgt))
+                .sum()
+        })
+    }
+}
+
+/// JMIM: Joint Mutual Information Maximization (Brown et al., 2012).
+pub struct JmimFilter;
+
+impl Filter for JmimFilter {
+    fn id(&self) -> &str {
+        "jmim"
+    }
+
+    fn score(&self, features: &Array2<f64>, target: &[f64]) -> Vec<f64> {
+        greedy_select(features, target, |cand, tgt, selected| {
+            if selected.is_empty() {
+                return mutual_info::mi_from_bins(cand, tgt);
+            }
+            // JMIM = min_{s in S} I(cand, s; y)
+            selected
+                .iter()
+                .map(|s| mutual_info::joint_mi(cand, s, tgt))
+                .fold(f64::INFINITY, f64::min)
+        })
+    }
+}
+
+/// CMIM: Conditional Mutual Information Maximization (Fleuret, 2004).
+pub struct CmimFilter;
+
+impl Filter for CmimFilter {
+    fn id(&self) -> &str {
+        "cmim"
+    }
+
+    fn score(&self, features: &Array2<f64>, target: &[f64]) -> Vec<f64> {
+        greedy_select(features, target, |cand, tgt, selected| {
+            if selected.is_empty() {
+                return mutual_info::mi_from_bins(cand, tgt);
+            }
+            // CMIM = min_{s in S} I(cand; y | s)
+            selected
+                .iter()
+                .map(|s| mutual_info::conditional_mi(cand, tgt, s))
+                .fold(f64::INFINITY, f64::min)
+        })
+    }
+}
+
+// ── Relief ─────────────────────────────────────────────────────────
+
+/// RReliefF filter for regression (Kononenko, 1994).
+pub struct ReliefFilter;
+
+impl Filter for ReliefFilter {
+    fn id(&self) -> &str {
+        "relief"
+    }
+
+    fn score(&self, features: &Array2<f64>, target: &[f64]) -> Vec<f64> {
+        let n = features.nrows();
+        let p = features.ncols();
+        let k = 10.min(n - 1); // number of neighbours
+
+        // Normalize features and target to [0, 1]
+        let mut col_min = vec![f64::INFINITY; p];
+        let mut col_max = vec![f64::NEG_INFINITY; p];
+        for j in 0..p {
+            for i in 0..n {
+                let v = features[[i, j]];
+                if v < col_min[j] {
+                    col_min[j] = v;
+                }
+                if v > col_max[j] {
+                    col_max[j] = v;
+                }
+            }
+        }
+        let col_range: Vec<f64> = (0..p).map(|j| (col_max[j] - col_min[j]).max(1e-10)).collect();
+
+        let t_min = target.iter().cloned().fold(f64::INFINITY, f64::min);
+        let t_max = target.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let t_range = (t_max - t_min).max(1e-10);
+
+        // Precompute pairwise distances (Euclidean on normalized features)
+        // For each instance, find k nearest neighbours
+        let mut weights = vec![0.0_f64; p];
+        let mut n_dc = 0.0_f64;
+
+        for i in 0..n {
+            // Compute distances to all other instances
+            let mut dists: Vec<(usize, f64)> = (0..n)
+                .filter(|&j| j != i)
+                .map(|j| {
+                    let d: f64 = (0..p)
+                        .map(|f| {
+                            let diff =
+                                (features[[i, f]] - features[[j, f]]) / col_range[f];
+                            diff * diff
+                        })
+                        .sum::<f64>()
+                        .sqrt();
+                    (j, d)
+                })
+                .collect();
+            dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+            // Adaptive sigma = distance to k-th neighbour
+            let sigma = dists[k.min(dists.len()) - 1].1.max(1e-10);
+
+            for &(j, d) in dists.iter().take(k) {
+                let w = (-d * d / (sigma * sigma)).exp();
+                let diff_target = ((target[i] - target[j]) / t_range).abs();
+                n_dc += diff_target * w;
+
+                for f in 0..p {
+                    let diff_f = ((features[[i, f]] - features[[j, f]]) / col_range[f]).abs();
+                    // Positive: different target → feature is relevant
+                    weights[f] += diff_target * diff_f * w;
+                    // Negative: same target → feature is noise
+                    weights[f] -= (1.0 - diff_target) * diff_f * w;
+                }
+            }
+        }
+
+        // Normalize by total target difference
+        if n_dc > 0.0 {
+            for w in &mut weights {
+                *w /= n_dc;
+            }
+        }
+        weights
+    }
 }
