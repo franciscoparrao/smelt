@@ -1117,6 +1117,35 @@ add_explain_methods!(
     KNearestNeighbors, GaussianNB,
 );
 
+// ── Macro: declare task-type support flags per learner ────────────────
+
+macro_rules! declare_support {
+    ($name:ident, classif = $c:expr, regress = $r:expr) => {
+        #[pymethods]
+        impl $name {
+            /// Whether this learner can train on classification targets (integer y).
+            #[getter]
+            fn supports_classification(&self) -> bool { $c }
+
+            /// Whether this learner can train on regression targets (continuous y).
+            #[getter]
+            fn supports_regression(&self) -> bool { $r }
+        }
+    };
+}
+
+declare_support!(XGBoost,            classif = true,  regress = true);
+declare_support!(CatBoost,           classif = true,  regress = true);
+declare_support!(LightGBM,           classif = true,  regress = true);
+declare_support!(RandomForest,       classif = true,  regress = true);
+declare_support!(ExtraTrees,         classif = true,  regress = true);
+declare_support!(DecisionTree,       classif = true,  regress = true);
+declare_support!(KNearestNeighbors,  classif = true,  regress = true);
+declare_support!(LogisticRegression, classif = true,  regress = false);
+declare_support!(GaussianNB,         classif = true,  regress = false);
+declare_support!(LinearRegression,   classif = false, regress = true);
+declare_support!(Ridge,              classif = false, regress = true);
+
 // ── RFE ───────────────────────────────────────────────────────────────
 
 // ── BayesianOptimizer ──────────────────────────────────────────────────

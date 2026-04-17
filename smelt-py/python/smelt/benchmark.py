@@ -59,6 +59,20 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
 
     results = {}
     for name, learner_template in learners.items():
+        # Skip learners incompatible with this task type
+        if is_classif:
+            supports = getattr(learner_template, "supports_classification", True)
+        else:
+            supports = getattr(learner_template, "supports_regression", True)
+        if not supports:
+            task_name = "classification" if is_classif else "regression"
+            results[name] = {
+                m: {"mean": float("nan"), "std": float("nan"), "folds": []}
+                for m in metrics
+            }
+            results[name]["_skipped"] = f"{name} does not support {task_name}"
+            continue
+
         fold_scores = {m: [] for m in metrics}
 
         for train_idx, test_idx in splits:
@@ -121,7 +135,7 @@ def benchmark_table(results):
     lines = []
     first = next(iter(results.values()))
     metrics = [k for k in first.keys() if not k.startswith("_")]
-    header = f"{'Learner':<20}" + "".join(f"  {m:>12}" for m in metrics)
+    header = f"{'Learner':<20}" + "".join(f"  {m:>12}" for m in metrics) + "  note"
     lines.append(header)
     lines.append("-" * len(header))
 
@@ -134,22 +148,36 @@ def benchmark_table(results):
                 mean, std = stats["mean"], stats["std"]
             else:
                 mean, std = float(np.mean(stats)), float(np.std(stats))
-            row += f"  {mean:>5.3f}±{std:.3f}"
+            if np.isnan(mean):
+                row += "          n/a"
+            else:
+                row += f"  {mean:>5.3f}±{std:.3f}"
+        if "_skipped" in scores:
+            row += f"  (skipped: incompatible)"
+        elif "_error" in scores:
+            row += f"  (error)"
         lines.append(row)
 
     return "\n".join(lines)
+
+
+_NON_PARAM_ATTRS = {
+    "fit", "predict", "predict_proba", "feature_importances_",
+    "shap_values", "permutation_importance", "conformal_predict",
+    "supports_classification", "supports_regression",
+}
 
 
 def _get_params(learner):
     """Extract constructor parameters from a learner instance."""
     params = {}
     for attr in dir(learner):
-        if not attr.startswith("_") and attr not in ("fit", "predict", "predict_proba",
-                                                       "feature_importances_"):
-            try:
-                val = getattr(learner, attr)
-                if isinstance(val, (int, float, bool, str)):
-                    params[attr] = val
-            except Exception:
-                pass
+        if attr.startswith("_") or attr in _NON_PARAM_ATTRS:
+            continue
+        try:
+            val = getattr(learner, attr)
+            if isinstance(val, (int, float, bool, str)):
+                params[attr] = val
+        except Exception:
+            pass
     return params
