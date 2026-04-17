@@ -449,13 +449,84 @@ struct SpatialBlockCV {
     inner: smelt_ml::prelude::SpatialBlockCV,
 }
 
+/// Parse coords from numpy array (Nx2), list of tuples, or list of lists.
+fn parse_coords(coords: &Bound<'_, PyAny>) -> PyResult<Vec<(f64, f64)>> {
+    // Try numpy 2D array first (most common case)
+    if let Ok(arr) = coords.extract::<PyReadonlyArray2<'_, f64>>() {
+        let a = arr.as_array();
+        if a.ncols() != 2 {
+            return Err(PyRuntimeError::new_err(format!(
+                "coords array must have 2 columns (X, Y), got {}",
+                a.ncols()
+            )));
+        }
+        return Ok(a.rows().into_iter().map(|r| (r[0], r[1])).collect());
+    }
+    // Fallback: list of (x, y) tuples
+    if let Ok(tuples) = coords.extract::<Vec<(f64, f64)>>() {
+        return Ok(tuples);
+    }
+    // Fallback: list of [x, y] lists
+    if let Ok(lists) = coords.extract::<Vec<Vec<f64>>>() {
+        let mut out = Vec::with_capacity(lists.len());
+        for (i, v) in lists.iter().enumerate() {
+            if v.len() != 2 {
+                return Err(PyRuntimeError::new_err(format!(
+                    "coords[{i}] must have 2 elements, got {}",
+                    v.len()
+                )));
+            }
+            out.push((v[0], v[1]));
+        }
+        return Ok(out);
+    }
+    Err(PyRuntimeError::new_err(
+        "coords must be a numpy array (Nx2), list of (x, y) tuples, or list of [x, y] lists",
+    ))
+}
+
 #[pymethods]
 impl SpatialBlockCV {
     #[new]
-    fn new(n_folds: usize, coords: Vec<(f64, f64)>) -> Self {
-        Self {
-            inner: smelt_ml::prelude::SpatialBlockCV::new(n_folds, coords),
-        }
+    fn new(n_folds: usize, coords: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let parsed = parse_coords(coords)?;
+        Ok(Self {
+            inner: smelt_ml::prelude::SpatialBlockCV::new(n_folds, parsed),
+        })
+    }
+
+    fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
+        use smelt_ml::prelude::Resample;
+        self.inner.splits(n_samples)
+    }
+}
+
+// ── SpatialBufferCV ────────────────────────────────────────────────────
+
+#[pyclass]
+struct SpatialBufferCV {
+    inner: smelt_ml::resample::SpatialBufferCV,
+}
+
+#[pymethods]
+impl SpatialBufferCV {
+    /// Buffered k-fold spatial CV. Training samples within `buffer_distance`
+    /// of any test sample are excluded, reducing spatial autocorrelation leakage.
+    ///
+    /// For Spatial Leave-One-Out behaviour, set `n_folds = n_samples`.
+    #[new]
+    #[pyo3(signature = (n_folds, coords, buffer_distance, seed=42))]
+    fn new(
+        n_folds: usize,
+        coords: &Bound<'_, PyAny>,
+        buffer_distance: f64,
+        seed: u64,
+    ) -> PyResult<Self> {
+        let parsed = parse_coords(coords)?;
+        Ok(Self {
+            inner: smelt_ml::resample::SpatialBufferCV::new(n_folds, parsed, buffer_distance)
+                .with_seed(seed),
+        })
     }
 
     fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
@@ -849,14 +920,16 @@ fn shap_impl<'py>(
     let result = if is_classif {
         let target: Vec<i64> = y.extract()?;
         let target: Vec<usize> = target.into_iter().map(|v| v as usize).collect();
-        let task = smelt_ml::task::ClassificationTask::new("shap", features, target)
+        let mut task = smelt_ml::task::ClassificationTask::new("shap", features, target)
             .map_err(smelt_err)?;
+        task = task.with_feature_names(names.clone()).map_err(smelt_err)?;
         smelt_ml::importance::shap::tree_shap_classif(model, &task, n_background, target_class)
             .map_err(smelt_err)?
     } else {
         let target: Vec<f64> = y.extract()?;
-        let task = smelt_ml::task::RegressionTask::new("shap", features, target)
+        let mut task = smelt_ml::task::RegressionTask::new("shap", features, target)
             .map_err(smelt_err)?;
+        task = task.with_feature_names(names.clone()).map_err(smelt_err)?;
         smelt_ml::importance::shap::tree_shap_regress(model, &task, n_background)
             .map_err(smelt_err)?
     };
@@ -930,6 +1003,45 @@ fn perm_importance_impl<'py>(
     Ok(list.into_pyobject(py)?.into_any().unbind())
 }
 
+// ── Conformal prediction helper ────────────────────────────────────────
+
+fn conformal_predict_impl<'py>(
+    py: Python<'py>,
+    model: &dyn TrainedModel,
+    x_cal: PyReadonlyArray2<'_, f64>,
+    y_cal: Vec<f64>,
+    x_test: PyReadonlyArray2<'_, f64>,
+    alpha: f64,
+) -> PyResult<PyObject> {
+    let cal_features = to_array2(x_cal);
+    let test_features = to_array2(x_test);
+
+    let cf = smelt_ml::conformal::ConformalRegressor::calibrate(
+        model, &cal_features, &y_cal, alpha,
+    )
+    .map_err(smelt_err)?;
+
+    let intervals = cf.predict(&test_features).map_err(smelt_err)?;
+
+    let n = intervals.len();
+    let mut preds = Vec::with_capacity(n);
+    let mut lower = Vec::with_capacity(n);
+    let mut upper = Vec::with_capacity(n);
+    for iv in &intervals {
+        preds.push(iv.prediction);
+        lower.push(iv.lower);
+        upper.push(iv.upper);
+    }
+
+    let dict = pyo3::types::PyDict::new(py);
+    dict.set_item("predictions", PyArray1::from_vec(py, preds))?;
+    dict.set_item("lower", PyArray1::from_vec(py, lower))?;
+    dict.set_item("upper", PyArray1::from_vec(py, upper))?;
+    dict.set_item("interval_width", cf.interval_width())?;
+    dict.set_item("alpha", alpha)?;
+    Ok(dict.into_pyobject(py)?.into_any().unbind())
+}
+
 // ── Macro: add shap_values + permutation_importance to all learners ───
 
 macro_rules! add_explain_methods {
@@ -966,6 +1078,33 @@ macro_rules! add_explain_methods {
                 ) -> PyResult<PyObject> {
                     let model = self.trained.as_deref().ok_or_else(not_fitted)?;
                     perm_importance_impl(py, model, self.is_classif, x, y, metric, n_repeats, seed, feature_names)
+                }
+
+                /// Split conformal prediction intervals with guaranteed (1-alpha) coverage.
+                ///
+                /// Args:
+                ///     x_cal, y_cal: calibration data (held out from training)
+                ///     x_test: features to predict on
+                ///     alpha: miscoverage level (default 0.1 → 90% coverage)
+                ///
+                /// Returns dict with: "predictions", "lower", "upper" (numpy arrays),
+                /// "interval_width" (float), "alpha" (float).
+                #[pyo3(signature = (x_cal, y_cal, x_test, alpha=0.1))]
+                fn conformal_predict<'py>(
+                    &self,
+                    py: Python<'py>,
+                    x_cal: PyReadonlyArray2<'_, f64>,
+                    y_cal: Vec<f64>,
+                    x_test: PyReadonlyArray2<'_, f64>,
+                    alpha: f64,
+                ) -> PyResult<PyObject> {
+                    let model = self.trained.as_deref().ok_or_else(not_fitted)?;
+                    if self.is_classif {
+                        return Err(PyRuntimeError::new_err(
+                            "conformal_predict is only available for regression models",
+                        ));
+                    }
+                    conformal_predict_impl(py, model, x_cal, y_cal, x_test, alpha)
                 }
             }
         )+
@@ -1163,24 +1302,22 @@ impl PyBayesianOptimizer {
             bo.tune_regress(&task, &cv, &*measure).map_err(smelt_err)?
         };
 
-        // Convert TuneResult to Python dict
+        // Convert TuneResult to Python dict, casting integer params to int
         let dict = pyo3::types::PyDict::new(py);
 
-        // best_params: convert HashMap<String, f64> to Python dict
         let bp = pyo3::types::PyDict::new(py);
         for (k, v) in &result.best_params {
-            bp.set_item(k, v)?;
+            set_param(&bp, k, *v)?;
         }
         dict.set_item("best_params", bp)?;
         dict.set_item("best_score", result.best_score)?;
         dict.set_item("measure", &result.measure_id)?;
 
-        // all_results: list of (params_dict, score)
         let history = pyo3::types::PyList::empty(py);
         for (params, score) in &result.all_results {
             let pd = pyo3::types::PyDict::new(py);
             for (k, v) in params {
-                pd.set_item(k, v)?;
+                set_param(&pd, k, *v)?;
             }
             let tup = pyo3::types::PyTuple::new(py, &[pd.as_any(), score.into_pyobject(py)?.as_any()])?;
             history.append(tup)?;
@@ -1188,6 +1325,31 @@ impl PyBayesianOptimizer {
         dict.set_item("all_results", history)?;
 
         Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+}
+
+/// Param names that are conceptually integer-valued and should be rounded.
+fn is_integer_param(name: &str) -> bool {
+    matches!(
+        name,
+        "n_estimators"
+            | "max_depth"
+            | "depth"
+            | "num_leaves"
+            | "k"
+            | "min_samples_split"
+            | "min_samples_leaf"
+            | "n_features"
+            | "seed"
+            | "random_state"
+    )
+}
+
+fn set_param(dict: &Bound<'_, pyo3::types::PyDict>, name: &str, value: f64) -> PyResult<()> {
+    if is_integer_param(name) {
+        dict.set_item(name, value.round() as i64)
+    } else {
+        dict.set_item(name, value)
     }
 }
 
@@ -1250,8 +1412,10 @@ fn run_filter(
     feature_names: Vec<String>,
     k: usize,
 ) -> PyResult<PyObject> {
-    use smelt_ml::preprocess::filter::FilterSelector;
-    use smelt_ml::preprocess::Transformer;
+    use smelt_ml::preprocess::filter::{
+        AnovaFFilter, CmimFilter, CorrelationFilter, Filter, InformationGainFilter, JmiFilter,
+        JmimFilter, MrmrFilter, MutualInfoFilter, ReliefFilter, VarianceFilter,
+    };
 
     let features = to_array2(x);
     let n_feat = features.ncols();
@@ -1259,31 +1423,35 @@ fn run_filter(
 
     let target: Vec<f64> = y.extract()?;
 
-    let mut selector = match method {
-        "variance" => FilterSelector::variance(k),
-        "correlation" => FilterSelector::correlation(k),
-        "anova_f" => FilterSelector::anova_f(k),
-        "information_gain" => FilterSelector::information_gain(k),
-        "mutual_information" => FilterSelector::mutual_info(k),
-        "mrmr" => FilterSelector::mrmr(k),
-        "jmi" => FilterSelector::jmi(k),
-        "jmim" => FilterSelector::jmim(k),
-        "cmim" => FilterSelector::cmim(k),
-        "relief" => FilterSelector::relief(k),
+    // Get raw per-feature scores (higher = better)
+    let scores: Vec<f64> = match method {
+        "variance" => VarianceFilter.score(&features, &target),
+        "correlation" => CorrelationFilter.score(&features, &target),
+        "anova_f" => AnovaFFilter.score(&features, &target),
+        "information_gain" => InformationGainFilter.score(&features, &target),
+        "mutual_information" => MutualInfoFilter.score(&features, &target),
+        "mrmr" => MrmrFilter.score(&features, &target),
+        "jmi" => JmiFilter.score(&features, &target),
+        "jmim" => JmimFilter.score(&features, &target),
+        "cmim" => CmimFilter.score(&features, &target),
+        "relief" => ReliefFilter.score(&features, &target),
         _ => return Err(PyRuntimeError::new_err(format!("Unknown filter: {method}"))),
     };
 
-    selector.fit_supervised(&features, &target).map_err(smelt_err)?;
-    let indices = selector.selected_indices().unwrap();
-
-    // Return list of (name, index) tuples preserving selection order
     let names: Vec<String> = if feature_names.len() == n_feat {
         feature_names
     } else {
         (0..n_feat).map(|i| format!("f{i}")).collect()
     };
 
-    let result: Vec<(String, usize)> = indices.iter().map(|&i| (names[i].clone(), i)).collect();
+    // Sort by score descending (higher = more important), take top k
+    let mut ranked: Vec<(usize, f64)> = scores.into_iter().enumerate().collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let result: Vec<(String, f64)> = ranked
+        .into_iter()
+        .take(k)
+        .map(|(i, s)| (names[i].clone(), s))
+        .collect();
     Ok(result.into_pyobject(py)?.into_any().unbind())
 }
 
@@ -1337,6 +1505,7 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Resampling
     m.add_class::<CrossValidation>()?;
     m.add_class::<SpatialBlockCV>()?;
+    m.add_class::<SpatialBufferCV>()?;
 
     // Measures
     m.add_function(wrap_pyfunction!(accuracy_score, m)?)?;

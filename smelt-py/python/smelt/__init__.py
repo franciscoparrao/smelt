@@ -30,6 +30,7 @@ from smelt._smelt import (
     # Resampling
     CrossValidation,
     SpatialBlockCV,
+    SpatialBufferCV,
     # Measures
     accuracy_score,
     rmse_score,
@@ -61,6 +62,7 @@ from smelt._smelt import (
 )
 
 from smelt.filters import cumulative_ranking
+from smelt.spatial import spatial_leave_one_out
 
 __version__ = "0.4.0"
 __all__ = [
@@ -69,7 +71,7 @@ __all__ = [
     "LogisticRegression", "LinearRegression", "Ridge",
     "KNearestNeighbors", "GaussianNB",
     "StandardScaler",
-    "CrossValidation", "SpatialBlockCV",
+    "CrossValidation", "SpatialBlockCV", "SpatialBufferCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",
     "f1_score", "precision_score", "recall_score", "auc_roc_score",
     "wilcoxon_signed_rank", "bootstrap_ci", "sign_test",
@@ -79,4 +81,5 @@ __all__ = [
     "cumulative_ranking",
     "rfe",
     "BayesianOptimizer",
+    "spatial_leave_one_out",
 ]

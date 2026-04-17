@@ -73,13 +73,9 @@ def cumulative_ranking(X, y, feature_names, filters=None, top_k=15, corr_cutoff=
 
     for fname in filters:
         func = _FILTER_FUNCS[fname]
-        # Run filter selecting ALL features to get full ranking
+        # filter returns list of (name, score) sorted by score descending
         result = func(X, y, feature_names, k=p)
-        # result is list of (name, index) in selection order
-        rank_map = {}
-        for rank, (name, _idx) in enumerate(result):
-            rank_map[name] = rank + 1  # 1 = best
-        # Features not selected get worst rank
+        rank_map = {name: rank + 1 for rank, (name, _score) in enumerate(result)}
         for name in feature_names:
             if name not in rank_map:
                 rank_map[name] = p + 1

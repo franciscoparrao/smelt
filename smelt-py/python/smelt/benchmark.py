@@ -15,26 +15,29 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
         Feature matrix (n_samples, n_features).
     y : numpy.ndarray
         Target vector.
-    cv : int or object, optional
-        Number of folds (default 5) or a CV object (CrossValidation, SpatialBlockCV).
-    coords : list of tuples, optional
-        If provided with int cv, uses SpatialBlockCV instead of random CV.
+    cv : int or CV object, optional (default: 5)
+        Number of folds, or a CV object (CrossValidation, SpatialBlockCV, ...).
+    coords : array-like, optional
+        If provided with `cv` as int, uses SpatialBlockCV.
+        Accepts numpy array (Nx2), list of (x, y) tuples, or list of [x, y] lists.
     metrics : dict, optional
         Mapping of name → metric function. Default: {"accuracy": accuracy_score}.
 
     Returns
     -------
     dict
-        Results per learner: {"name": {"metric": [fold_scores], ...}}.
+        Results per learner: ``{name: {metric: {"mean", "std", "folds"}}}``.
 
     Example
     -------
-    >>> from smelt import XGBoost, RandomForest, LightGBM
+    >>> from smelt import XGBoost, RandomForest, SpatialBlockCV
     >>> from smelt.benchmark import benchmark
     >>> results = benchmark(
-    ...     {"XGB": XGBoost(), "RF": RandomForest(), "LGB": LightGBM()},
-    ...     X, y, cv=5
+    ...     {"XGB": XGBoost(), "RF": RandomForest()},
+    ...     X, y, cv=SpatialBlockCV(5, coords),
     ... )
+    >>> results["XGB"]["accuracy"]["mean"]
+    0.87
     """
     if metrics is None:
         metrics = {"accuracy": accuracy_score}
@@ -56,7 +59,7 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
 
     results = {}
     for name, learner_template in learners.items():
-        results[name] = {m: [] for m in metrics}
+        fold_scores = {m: [] for m in metrics}
 
         for train_idx, test_idx in splits:
             if len(train_idx) == 0 or len(test_idx) == 0:
@@ -69,15 +72,35 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
 
             # Clone learner (create fresh instance with same params)
             learner = learner_template.__class__(**_get_params(learner_template))
-            learner.fit(X_tr, y_tr)
-            preds = learner.predict(X_te)
+            try:
+                learner.fit(X_tr, y_tr)
+                preds = learner.predict(X_te)
+            except RuntimeError as exc:
+                # Incompatible learner (e.g. GaussianNB on regression target)
+                for m in metrics:
+                    fold_scores[m].append(float("nan"))
+                fold_scores.setdefault("_error", str(exc))
+                continue
 
             for metric_name, metric_fn in metrics.items():
                 if is_classif:
                     score = metric_fn(y_te.tolist(), preds.tolist())
                 else:
                     score = metric_fn(y_te.tolist(), preds.tolist())
-                results[name][metric_name].append(score)
+                fold_scores[metric_name].append(score)
+
+        # Aggregate per-metric stats
+        results[name] = {}
+        for metric_name in metrics:
+            vals = fold_scores[metric_name]
+            finite = [v for v in vals if np.isfinite(v)]
+            results[name][metric_name] = {
+                "mean": float(np.mean(finite)) if finite else float("nan"),
+                "std": float(np.std(finite)) if finite else float("nan"),
+                "folds": vals,
+            }
+        if "_error" in fold_scores:
+            results[name]["_error"] = fold_scores["_error"]
 
     return results
 
@@ -96,7 +119,8 @@ def benchmark_table(results):
         Formatted table string.
     """
     lines = []
-    metrics = list(next(iter(results.values())).keys())
+    first = next(iter(results.values()))
+    metrics = [k for k in first.keys() if not k.startswith("_")]
     header = f"{'Learner':<20}" + "".join(f"  {m:>12}" for m in metrics)
     lines.append(header)
     lines.append("-" * len(header))
@@ -104,9 +128,12 @@ def benchmark_table(results):
     for name, scores in results.items():
         row = f"{name:<20}"
         for m in metrics:
-            vals = scores[m]
-            mean = np.mean(vals)
-            std = np.std(vals)
+            stats = scores[m]
+            # Support both new dict format and legacy list format
+            if isinstance(stats, dict):
+                mean, std = stats["mean"], stats["std"]
+            else:
+                mean, std = float(np.mean(stats)), float(np.std(stats))
             row += f"  {mean:>5.3f}±{std:.3f}"
         lines.append(row)
 
