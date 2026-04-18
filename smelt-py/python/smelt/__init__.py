@@ -25,6 +25,7 @@ from smelt._smelt import (
     Ridge,
     KNearestNeighbors,
     GaussianNB,
+    GeoXGBoost,
     # Preprocessing
     StandardScaler,
     # Resampling
@@ -69,7 +70,7 @@ __all__ = [
     "XGBoost", "CatBoost", "LightGBM",
     "RandomForest", "ExtraTrees", "DecisionTree",
     "LogisticRegression", "LinearRegression", "Ridge",
-    "KNearestNeighbors", "GaussianNB",
+    "KNearestNeighbors", "GaussianNB", "GeoXGBoost",
     "StandardScaler",
     "CrossValidation", "SpatialBlockCV", "SpatialBufferCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",

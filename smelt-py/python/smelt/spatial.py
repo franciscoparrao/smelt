@@ -1,6 +1,6 @@
-"""Spatial ML components: spatial cross-validation strategies."""
+"""Spatial ML components: GeoXGBoost + spatial cross-validation strategies."""
 
-from smelt._smelt import SpatialBlockCV, SpatialBufferCV
+from smelt._smelt import GeoXGBoost, SpatialBlockCV, SpatialBufferCV
 
 
 def spatial_leave_one_out(coords, buffer_distance, seed=42):
@@ -34,4 +34,4 @@ def spatial_leave_one_out(coords, buffer_distance, seed=42):
     return SpatialBufferCV(n, coords, buffer_distance, seed)
 
 
-__all__ = ["SpatialBlockCV", "SpatialBufferCV", "spatial_leave_one_out"]
+__all__ = ["GeoXGBoost", "SpatialBlockCV", "SpatialBufferCV", "spatial_leave_one_out"]

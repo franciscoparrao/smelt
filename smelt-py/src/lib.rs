@@ -884,6 +884,181 @@ impl LinearRegression {
     }
 }
 
+// ── GeoXGBoost ─────────────────────────────────────────────────────────
+
+#[pyclass]
+struct GeoXGBoost {
+    trained: Option<smelt_ml::prelude::TrainedGeoXGBoost>,
+    bandwidth: usize,
+    n_estimators: usize,
+    max_depth: usize,
+    learning_rate: f64,
+    lambda: f64,
+    alpha: Option<f64>,
+    seed: u64,
+}
+
+#[pymethods]
+impl GeoXGBoost {
+    /// Geographical-XGBoost for spatially-local regression (Grekousis, 2025).
+    ///
+    /// Args:
+    ///     bandwidth: number of nearest neighbours for adaptive bi-square kernel.
+    ///     n_estimators, max_depth, learning_rate, lambda_: XGBoost hyperparameters
+    ///         used for both global and local models.
+    ///     alpha: None (default) for adaptive blending, 1.0 for pure local,
+    ///         0.0 for pure global.
+    ///     seed: random seed.
+    #[new]
+    #[pyo3(signature = (bandwidth=30, n_estimators=100, max_depth=6, learning_rate=0.3, lambda_=1.0, alpha=None, seed=42))]
+    fn new(
+        bandwidth: usize,
+        n_estimators: usize,
+        max_depth: usize,
+        learning_rate: f64,
+        lambda_: f64,
+        alpha: Option<f64>,
+        seed: u64,
+    ) -> Self {
+        Self {
+            trained: None,
+            bandwidth,
+            n_estimators,
+            max_depth,
+            learning_rate,
+            lambda: lambda_,
+            alpha,
+            seed,
+        }
+    }
+
+    /// Train the model. `coords` is an (N, 2) array-like of (x, y) per sample.
+    fn fit(
+        &mut self,
+        x: PyReadonlyArray2<'_, f64>,
+        y: Vec<f64>,
+        coords: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let parsed = parse_coords(coords)?;
+        let features = to_array2(x);
+        if parsed.len() != features.nrows() {
+            return Err(PyRuntimeError::new_err(format!(
+                "coords length ({}) must match number of samples ({})",
+                parsed.len(),
+                features.nrows()
+            )));
+        }
+        let task = smelt_ml::task::RegressionTask::new("gxgb", features, y).map_err(smelt_err)?;
+        let mut learner = smelt_ml::prelude::GeoXGBoost::new(parsed)
+            .with_bandwidth(self.bandwidth)
+            .with_n_estimators(self.n_estimators)
+            .with_max_depth(self.max_depth)
+            .with_learning_rate(self.learning_rate)
+            .with_lambda(self.lambda)
+            .with_seed(self.seed);
+        if let Some(a) = self.alpha {
+            learner = learner.with_alpha(a);
+        }
+        let trained = learner.train_geo(&task).map_err(smelt_err)?;
+        self.trained = Some(trained);
+        Ok(())
+    }
+
+    /// Predict. If `coords` is provided, uses per-sample nearest local model
+    /// (spatial prediction); otherwise falls back to in-sample / global model.
+    #[pyo3(signature = (x, coords=None))]
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+        coords: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        use smelt_ml::learner::TrainedModel;
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let features = to_array2(x);
+        let pred = if let Some(c) = coords {
+            let new_coords = parse_coords(c)?;
+            if new_coords.len() != features.nrows() {
+                return Err(PyRuntimeError::new_err(format!(
+                    "coords length ({}) must match number of samples ({})",
+                    new_coords.len(),
+                    features.nrows()
+                )));
+            }
+            model.predict_spatial(&features, &new_coords).map_err(smelt_err)?
+        } else {
+            model.predict(&features).map_err(smelt_err)?
+        };
+        let values: Vec<f64> = match &pred {
+            Prediction::Regression { predicted, .. } => predicted.clone(),
+            _ => return Err(PyRuntimeError::new_err("Expected regression prediction")),
+        };
+        Ok(PyArray1::from_vec(py, values))
+    }
+
+    #[getter]
+    fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
+        use smelt_ml::learner::TrainedModel;
+        Ok(self
+            .trained
+            .as_ref()
+            .ok_or_else(not_fitted)?
+            .feature_importance())
+    }
+
+    #[getter]
+    fn supports_classification(&self) -> bool { false }
+
+    #[getter]
+    fn supports_regression(&self) -> bool { true }
+
+    /// SHAP values (interventional). Uses the global model internally.
+    #[pyo3(signature = (x, y, n_background=50, feature_names=None))]
+    fn shap_values<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+        n_background: usize,
+        feature_names: Option<Vec<String>>,
+    ) -> PyResult<PyObject> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        shap_impl(py, model, false, x, y, n_background, feature_names, 0)
+    }
+
+    /// Permutation importance.
+    #[pyo3(signature = (x, y, metric="rmse", n_repeats=5, seed=42, feature_names=None))]
+    fn permutation_importance<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+        metric: &str,
+        n_repeats: usize,
+        seed: u64,
+        feature_names: Option<Vec<String>>,
+    ) -> PyResult<PyObject> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        perm_importance_impl(py, model, false, x, y, metric, n_repeats, seed, feature_names)
+    }
+
+    /// Split conformal prediction intervals. Calibration data may include
+    /// their own `coords` for spatially-aware predictions on the calibration set;
+    /// if omitted, the global model is used for calibration.
+    #[pyo3(signature = (x_cal, y_cal, x_test, alpha=0.1))]
+    fn conformal_predict<'py>(
+        &self,
+        py: Python<'py>,
+        x_cal: PyReadonlyArray2<'_, f64>,
+        y_cal: Vec<f64>,
+        x_test: PyReadonlyArray2<'_, f64>,
+        alpha: f64,
+    ) -> PyResult<PyObject> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        conformal_predict_impl(py, model, x_cal, y_cal, x_test, alpha)
+    }
+}
+
 // ── SHAP + Permutation Importance (shared helpers) ────────────────────
 
 fn resolve_measure(metric: &str) -> PyResult<Box<dyn Measure>> {
@@ -1527,6 +1702,7 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Ridge>()?;
     m.add_class::<KNearestNeighbors>()?;
     m.add_class::<GaussianNB>()?;
+    m.add_class::<GeoXGBoost>()?;
 
     // Preprocessing
     m.add_class::<StandardScaler>()?;
