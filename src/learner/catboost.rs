@@ -13,7 +13,7 @@
 //! Reference: Prokhorenkova, L. et al. (2018). CatBoost: unbiased boosting
 //! with categorical features. NeurIPS.
 
-use super::histogram::HistBins;
+use super::histogram::{HistBins, NAN_BIN};
 use crate::Result;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
@@ -175,10 +175,20 @@ pub struct ObliviousTree {
 
 impl ObliviousTree {
     fn predict_one(&self, row: ArrayView1<f64>) -> f64 {
+        // Training assembles partitions via `new_pi = 2*old_pi + right_bit`, so
+        // pi's high bit = earliest level, LSB = latest level. leaf_idx must use
+        // the same bit ordering (level 0 → most-significant bit) or the weight
+        // lookup reads an unrelated leaf for asymmetric paths, causing
+        // catastrophic divergence on small training sets.
+        //
+        // `>=` (not `>`): samples whose value equals `bounds[best_bin]` are
+        // routed RIGHT during training (their bin index > best_bin), so prediction
+        // must route them RIGHT too.
         let mut leaf_idx = 0usize;
+        let d = self.splits.len();
         for (level, &(feat, threshold)) in self.splits.iter().enumerate() {
-            if row[feat] > threshold {
-                leaf_idx |= 1 << level;
+            if row[feat] >= threshold {
+                leaf_idx |= 1 << (d - 1 - level);
             }
         }
         self.leaf_weights[leaf_idx]
@@ -212,7 +222,11 @@ fn build_oblivious_tree(
             let mut bg = vec![0.0; nb];
             let mut bh = vec![0.0; nb];
             for &idx in indices {
-                let b = bins.get_bin(feat, idx) as usize;
+                let b = bins.get_bin(feat, idx);
+                if b == NAN_BIN {
+                    continue;
+                }
+                let b = b as usize;
                 bg[b] += grads[idx];
                 bh[b] += hess[idx];
             }
@@ -291,7 +305,10 @@ fn build_oblivious_tree(
             let mut left = Vec::new();
             let mut right = Vec::new();
             for &idx in partition {
-                if (bins.get_bin(best_feat, idx) as usize) <= best_bin {
+                let b = bins.get_bin(best_feat, idx);
+                // NaN samples route LEFT (matches predict_one: NaN >= threshold is false).
+                let goes_left = b == NAN_BIN || (b as usize) <= best_bin;
+                if goes_left {
                     left.push(idx);
                 } else {
                     right.push(idx);
@@ -314,7 +331,11 @@ fn build_oblivious_tree(
                     let mut bg = vec![0.0; nb];
                     let mut bh = vec![0.0; nb];
                     for &idx in smaller.iter() {
-                        let b = bins.get_bin(feat, idx) as usize;
+                        let b = bins.get_bin(feat, idx);
+                        if b == NAN_BIN {
+                            continue;
+                        }
+                        let b = b as usize;
                         bg[b] += grads[idx];
                         bh[b] += hess[idx];
                     }
@@ -684,6 +705,55 @@ impl CatBoost {
             cat_features: self.cat_features.clone(),
             cat_encodings,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array2;
+
+    /// Regression test for the leaf-index bit-order bug and boundary-value routing bug.
+    /// On small datasets with large-magnitude features, these two bugs caused
+    /// predictions to diverge to 1e8+ while y remained in a normal range.
+    /// Ref: team feedback 2026-04-20 (CatBoost SLOO RMSE=2.3e8).
+    #[test]
+    fn small_n_large_scale_does_not_diverge() {
+        use rand::prelude::*;
+        let mut rng = StdRng::seed_from_u64(42);
+        let n = 56;
+        let p = 8;
+        let mut features = Array2::zeros((n, p));
+        for i in 0..n {
+            // UTM-scale coords + mixed feature scales
+            features[[i, 0]] = 6_500_000.0 + rng.random::<f64>() * 200_000.0;
+            features[[i, 1]] = 300_000.0 + rng.random::<f64>() * 200_000.0;
+            features[[i, 2]] = 100.0 + rng.random::<f64>() * 3900.0;
+            for j in 3..p {
+                features[[i, j]] = rng.random::<f64>() * 100.0;
+            }
+        }
+        // target roughly in [0, 100]
+        let target: Vec<f64> = (0..n)
+            .map(|i| (0.01 * features[[i, 2]] + rng.random::<f64>() * 5.0 + 20.0).clamp(0.37, 93.62))
+            .collect();
+
+        let task = RegressionTask::new("cat_diverge", features.clone(), target.clone()).unwrap();
+        let mut cb = CatBoost::new()
+            .with_n_estimators(261)
+            .with_depth(5)
+            .with_learning_rate(0.28);
+        let model = cb.train_regress(&task).unwrap();
+        let pred = model.predict(&features).unwrap();
+        let Prediction::Regression { predicted, .. } = pred else {
+            panic!("expected regression")
+        };
+        let max_abs = predicted.iter().fold(0.0_f64, |a, &b| a.max(b.abs()));
+        let y_max = target.iter().fold(0.0_f64, |a, &b| a.max(b.abs()));
+        assert!(
+            max_abs < 10.0 * y_max,
+            "CatBoost diverged: max_pred={max_abs}, y_max={y_max}"
+        );
     }
 }
 
