@@ -1,0 +1,121 @@
+name: Build and publish wheels
+
+# Build abi3 binary wheels for Windows, macOS and Linux so that
+# `pip install smelt-ml` never needs a Rust toolchain or a C++ linker.
+# abi3-py38 means ONE wheel per platform works for CPython 3.8+.
+#
+# Triggers:
+#   - push of a tag like v0.4.2  -> build + publish to PyPI
+#   - manual dispatch            -> build only (artifacts), no publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The pyproject.toml lives in smelt-py/ (workspace member). maturin-action
+# is pointed there via `working-directory`; the parent crate (path dep) is
+# still on disk because the whole repo is checked out.
+env:
+  MATURIN_DIR: smelt-py
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ env.MATURIN_DIR }}
+          target: ${{ matrix.target }}
+          manylinux: "2014"   # == manylinux_2_17, broad compatibility
+          args: --release --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: smelt-py/dist
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ env.MATURIN_DIR }}
+          target: x64
+          args: --release --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-x64
+          path: smelt-py/dist
+
+  macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ env.MATURIN_DIR }}
+          target: ${{ matrix.target }}
+          args: --release --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-${{ matrix.target }}
+          path: smelt-py/dist
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ env.MATURIN_DIR }}
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: smelt-py/dist
+
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    # Only publish on a version tag, after every build succeeds.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows, macos, sdist]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          # Add a repository secret named PYPI_API_TOKEN
+          # (GitHub repo -> Settings -> Secrets and variables -> Actions).
+          # Generate the token at https://pypi.org/manage/account/token/
+          password: ${{ secrets.PYPI_API_TOKEN }}

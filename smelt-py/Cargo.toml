@@ -1,6 +1,6 @@
 [package]
 name = "smelt-py"
-version = "0.3.0"
+version = "0.4.2"
 edition = "2024"
 authors = ["Francisco Parra <francisco.parra.o@usach.cl>"]
 description = "Python bindings for smelt-ml (Rust ML framework)"
@@ -12,6 +12,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 smelt-ml = { path = ".." }
-pyo3 = { version = "0.24", features = ["extension-module", "multiple-pymethods"] }
+pyo3 = { version = "0.24", features = ["extension-module", "multiple-pymethods", "abi3-py38"] }
 numpy = "0.24"
 ndarray = "0.16"

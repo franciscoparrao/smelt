@@ -65,7 +65,7 @@ from smelt._smelt import (
 from smelt.filters import cumulative_ranking
 from smelt.spatial import spatial_leave_one_out
 
-__version__ = "0.4.0"
+__version__ = "0.4.2"
 __all__ = [
     "XGBoost", "CatBoost", "LightGBM",
     "RandomForest", "ExtraTrees", "DecisionTree",
