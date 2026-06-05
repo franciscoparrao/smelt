@@ -28,8 +28,8 @@ ALPHA = 0.10  # conformal: target 90% coverage
 
 
 def _find_data():
-    """Locate king_county_1k.csv next to this script, in ./data, or in the repo."""
-    name = "king_county_1k.csv"
+    """Locate king_county_1k_utm.csv next to this script, in ./data, or in the repo."""
+    name = "king_county_1k_utm.csv"
     here = Path(__file__).resolve().parent
     candidates = [
         here / name,                       # same folder as the script
@@ -48,12 +48,21 @@ def _find_data():
 
 DATA = _find_data()
 
+# Geographically-weighted models (GeoXGBoost, GRF, GWR) feed coordinates into a
+# Euclidean distance / kernel, so coordinates MUST be in a projected planar CRS,
+# not raw lat/long degrees (1° lon != 1° lat in distance). We use PROJECTED
+# X, Y in metres (UTM Zone 10N, EPSG:32610 — appropriate for King County, WA).
+ALPHA_GEO = 0.5      # blend global+local (knowledge transfer), per Grekousis
+BUFFER_M = 5_000.0   # spatial-CV exclusion buffer, in metres
+
 
 # ── 1. Load and preprocess ──────────────────────────────────────────────
 df = pd.read_csv(DATA)
 target_col = "log_price"
-coord_cols = ["lat", "long"]
-feature_cols = [c for c in df.columns if c not in coord_cols + [target_col]]
+# lat/long kept for reference only; X, Y (projected, metres) are the coords used.
+coord_cols = ["X", "Y"]
+drop_cols = ["lat", "long", "X", "Y", target_col]
+feature_cols = [c for c in df.columns if c not in drop_cols]
 
 X = df[feature_cols].to_numpy(dtype=np.float64)
 y = df[target_col].to_numpy(dtype=np.float64)
@@ -91,15 +100,16 @@ r2_aug   = r2_score(yte.tolist(), pred_aug.tolist())
 
 
 # ── 3. GeoXGBoost ───────────────────────────────────────────────────────
-# Hyperparameters from paper Table 11 (validation against original Python pkg):
-#   100 trees, depth 6, learning_rate 0.3, bandwidth 30 nearest neighbours,
-#   adaptive alpha (None) — set to 1.0 for pure-local prediction.
+# 100 trees, depth 6, learning_rate 0.3, bandwidth 30 nearest neighbours.
+# alpha=0.5 blends the global and local models so the global model transfers
+# knowledge to each local model (Grekousis) — this improves on pure-local
+# (alpha=1) prediction. Coordinates are projected X, Y in metres.
 geo = GeoXGBoost(
     bandwidth=30,
     n_estimators=100,
     max_depth=6,
     learning_rate=0.3,
-    alpha=1.0,           # pure local; use None for adaptive global/local blend
+    alpha=ALPHA_GEO,     # 0.5 = blend global+local; 1.0 = pure local
     seed=SEED,
 )
 geo.fit(Xtr, ytr, coords=Ctr)
@@ -109,17 +119,17 @@ pred_geo = geo.predict(Xte, coords=Cte)
 rmse_geo = rmse_score(yte.tolist(), pred_geo.tolist())
 r2_geo   = r2_score(yte.tolist(), pred_geo.tolist())
 
-print("\n── Holdout performance (test n = {:d}) ──".format(len(te)))
-print(f"  XGBoost           RMSE={rmse_xgb:.3f}  R²={r2_xgb:.3f}")
-print(f"  XGBoost + coords  RMSE={rmse_aug:.3f}  R²={r2_aug:.3f}")
-print(f"  GeoXGBoost (α=1)  RMSE={rmse_geo:.3f}  R²={r2_geo:.3f}")
+print("\n── Holdout performance (test n = {:d}, projected UTM coords) ──".format(len(te)))
+print(f"  XGBoost              RMSE={rmse_xgb:.3f}  R²={r2_xgb:.3f}")
+print(f"  XGBoost + X,Y        RMSE={rmse_aug:.3f}  R²={r2_aug:.3f}")
+print(f"  GeoXGBoost (α={ALPHA_GEO})    RMSE={rmse_geo:.3f}  R²={r2_geo:.3f}")
 
 
 # ── 4. Spatial cross-validation ─────────────────────────────────────────
 # SpatialBufferCV excludes training samples within `buffer_distance` of
-# each test fold's centroid — prevents spatial leakage.
-# Coordinates are lat/long in degrees; ~0.05° ≈ 5 km at this latitude.
-cv = SpatialBufferCV(n_folds=5, coords=coords, buffer_distance=0.05, seed=SEED)
+# each test fold's centroid — prevents spatial leakage. With projected
+# coordinates the buffer is in metres (5 km here).
+cv = SpatialBufferCV(n_folds=5, coords=coords, buffer_distance=BUFFER_M, seed=SEED)
 rmse_per_fold = []
 for fold_idx, (train_idx, test_idx) in enumerate(cv.splits(len(df))):
     if len(train_idx) < 10 or len(test_idx) == 0:
@@ -127,12 +137,12 @@ for fold_idx, (train_idx, test_idx) in enumerate(cv.splits(len(df))):
     Xtr_f, ytr_f, Ctr_f = X[train_idx], y[train_idx], coords[train_idx]
     Xte_f, yte_f, Cte_f = X[test_idx],  y[test_idx],  coords[test_idx]
     m = GeoXGBoost(bandwidth=30, n_estimators=100, max_depth=6,
-                   learning_rate=0.3, alpha=1.0, seed=SEED)
+                   learning_rate=0.3, alpha=ALPHA_GEO, seed=SEED)
     m.fit(Xtr_f, ytr_f, coords=Ctr_f)
     pred = m.predict(Xte_f, coords=Cte_f)
     rmse_per_fold.append(rmse_score(yte_f.tolist(), pred.tolist()))
 
-print("\n── SpatialBufferCV (5 folds, 0.05° ≈ 5 km buffer) ──")
+print("\n── SpatialBufferCV (5 folds, 5 km buffer, projected coords) ──")
 print(f"  mean RMSE = {np.mean(rmse_per_fold):.3f}  "
       f"± {np.std(rmse_per_fold):.3f}  "
       f"(per-fold: {[round(v, 3) for v in rmse_per_fold]})")
@@ -147,7 +157,7 @@ cal_perm = rng.permutation(n_tr)
 cal_idx, fit_idx = cal_perm[:n_cal], cal_perm[n_cal:]
 
 geo_cf = GeoXGBoost(bandwidth=30, n_estimators=100, max_depth=6,
-                    learning_rate=0.3, alpha=1.0, seed=SEED)
+                    learning_rate=0.3, alpha=ALPHA_GEO, seed=SEED)
 geo_cf.fit(Xtr[fit_idx], ytr[fit_idx], coords=Ctr[fit_idx])
 cf = geo_cf.conformal_predict(Xtr[cal_idx], ytr[cal_idx].tolist(),
                               Xte, alpha=ALPHA)
