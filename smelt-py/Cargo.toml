@@ -1,6 +1,6 @@
 [package]
 name = "smelt-py"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 authors = ["Francisco Parra <francisco.parra.o@usach.cl>"]
 description = "Python bindings for smelt-ml (Rust ML framework)"

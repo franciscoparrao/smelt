@@ -99,19 +99,36 @@ rmse_aug = rmse_score(yte.tolist(), pred_aug.tolist())
 r2_aug   = r2_score(yte.tolist(), pred_aug.tolist())
 
 
-# ── 3. GeoXGBoost ───────────────────────────────────────────────────────
-# 100 trees, depth 6, learning_rate 0.3, bandwidth 30 nearest neighbours.
-# alpha=0.5 blends the global and local models so the global model transfers
-# knowledge to each local model (Grekousis) — this improves on pure-local
-# (alpha=1) prediction. Coordinates are projected X, Y in metres.
+# ── 3. Bandwidth selection ──────────────────────────────────────────────
+# The neighbourhood size (bandwidth = number of nearest neighbours) is the key
+# hyperparameter of any geographically-weighted model and should be tuned, not
+# guessed. `select_bandwidth` runs k-fold CV over a grid of candidates on the
+# TRAINING set and returns the value with the lowest mean RMSE (it also stores
+# that value on the estimator, so the subsequent fit() uses it).
 geo = GeoXGBoost(
-    bandwidth=30,
     n_estimators=100,
     max_depth=6,
     learning_rate=0.3,
     alpha=ALPHA_GEO,     # 0.5 = blend global+local; 1.0 = pure local
     seed=SEED,
 )
+bw_sel = geo.select_bandwidth(
+    Xtr, ytr.tolist(), Ctr,
+    candidates=[20, 30, 50, 75, 100, 150, 200],
+    k_folds=5,
+)
+BW_GEO = bw_sel["best"]
+print("\n── Bandwidth selection (5-fold CV on training set) ──")
+for bw, r in zip(bw_sel["bandwidths"], bw_sel["rmse"]):
+    print(f"  bandwidth={bw:<4d} CV-RMSE={r:.4f}" + ("   <- selected" if bw == BW_GEO else ""))
+
+
+# ── 4. GeoXGBoost ───────────────────────────────────────────────────────
+# 100 trees, depth 6, learning_rate 0.3, CV-selected bandwidth (BW_GEO).
+# alpha=0.5 blends the global and local models so the global model transfers
+# knowledge to each local model (Grekousis) — this improves on pure-local
+# (alpha=1) prediction. Coordinates are projected X, Y in metres.
+# `geo` already carries the selected bandwidth from select_bandwidth above.
 geo.fit(Xtr, ytr, coords=Ctr)
 # Spatial-aware prediction: pass new coords so each test point uses
 # its nearest local model.
@@ -122,10 +139,10 @@ r2_geo   = r2_score(yte.tolist(), pred_geo.tolist())
 print("\n── Holdout performance (test n = {:d}, projected UTM coords) ──".format(len(te)))
 print(f"  XGBoost              RMSE={rmse_xgb:.3f}  R²={r2_xgb:.3f}")
 print(f"  XGBoost + X,Y        RMSE={rmse_aug:.3f}  R²={r2_aug:.3f}")
-print(f"  GeoXGBoost (α={ALPHA_GEO})    RMSE={rmse_geo:.3f}  R²={r2_geo:.3f}")
+print(f"  GeoXGBoost (α={ALPHA_GEO}, bw={BW_GEO})  RMSE={rmse_geo:.3f}  R²={r2_geo:.3f}")
 
 
-# ── 4. Spatial cross-validation ─────────────────────────────────────────
+# ── 5. Spatial cross-validation ─────────────────────────────────────────
 # SpatialBufferCV excludes training samples within `buffer_distance` of
 # each test fold's centroid — prevents spatial leakage. With projected
 # coordinates the buffer is in metres (5 km here).
@@ -136,7 +153,7 @@ for fold_idx, (train_idx, test_idx) in enumerate(cv.splits(len(df))):
         continue
     Xtr_f, ytr_f, Ctr_f = X[train_idx], y[train_idx], coords[train_idx]
     Xte_f, yte_f, Cte_f = X[test_idx],  y[test_idx],  coords[test_idx]
-    m = GeoXGBoost(bandwidth=30, n_estimators=100, max_depth=6,
+    m = GeoXGBoost(bandwidth=BW_GEO, n_estimators=100, max_depth=6,
                    learning_rate=0.3, alpha=ALPHA_GEO, seed=SEED)
     m.fit(Xtr_f, ytr_f, coords=Ctr_f)
     pred = m.predict(Xte_f, coords=Cte_f)
@@ -148,7 +165,7 @@ print(f"  mean RMSE = {np.mean(rmse_per_fold):.3f}  "
       f"(per-fold: {[round(v, 3) for v in rmse_per_fold]})")
 
 
-# ── 5. Conformal prediction ─────────────────────────────────────────────
+# ── 6. Conformal prediction ─────────────────────────────────────────────
 # Split conformal: hold out 20% of TRAINING as a calibration set, refit on
 # the remaining 80%, then build distribution-free intervals.
 n_tr = len(tr)
@@ -156,7 +173,7 @@ n_cal = int(0.20 * n_tr)
 cal_perm = rng.permutation(n_tr)
 cal_idx, fit_idx = cal_perm[:n_cal], cal_perm[n_cal:]
 
-geo_cf = GeoXGBoost(bandwidth=30, n_estimators=100, max_depth=6,
+geo_cf = GeoXGBoost(bandwidth=BW_GEO, n_estimators=100, max_depth=6,
                     learning_rate=0.3, alpha=ALPHA_GEO, seed=SEED)
 geo_cf.fit(Xtr[fit_idx], ytr[fit_idx], coords=Ctr[fit_idx])
 cf = geo_cf.conformal_predict(Xtr[cal_idx], ytr[cal_idx].tolist(),
@@ -171,7 +188,7 @@ print(f"  empirical coverage = {100*covered:.1f}%")
 print(f"  mean interval width = {width:.3f} log-dollars")
 
 
-# ── 6. Feature importance (averaged across local models) ───────────────
+# ── 7. Feature importance (averaged across local models) ───────────────
 imps = geo.feature_importances_  # list of (name, gain) tuples
 if imps:
     # Internal names are "x0", "x1", ... — map back to real feature names.

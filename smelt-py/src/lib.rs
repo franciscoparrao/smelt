@@ -964,6 +964,79 @@ impl GeoXGBoost {
         Ok(())
     }
 
+    /// Select the optimal bandwidth by k-fold cross-validation over a grid of
+    /// candidate neighbour counts.
+    ///
+    /// Runs `k_folds`-fold CV for every candidate and returns the bandwidth
+    /// minimising mean RMSE. The chosen value is also stored on this estimator,
+    /// so a subsequent `fit(...)` uses it automatically.
+    ///
+    /// Args:
+    ///     x, y, coords: training data (same as `fit`).
+    ///     candidates: list of bandwidths to try. Defaults to
+    ///         [20, 30, 50, 75, 100, 150, 200] (filtered to values < n).
+    ///     k_folds: number of CV folds (default 5).
+    ///
+    /// Returns:
+    ///     dict with keys ``best`` (int), ``bandwidths`` (list[int]) and
+    ///     ``rmse`` (list[float]), aligned by index.
+    #[pyo3(signature = (x, y, coords, candidates=None, k_folds=5))]
+    fn select_bandwidth(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: Vec<f64>,
+        coords: &Bound<'_, PyAny>,
+        candidates: Option<Vec<usize>>,
+        k_folds: usize,
+    ) -> PyResult<PyObject> {
+        let parsed = parse_coords(coords)?;
+        let features = to_array2(x);
+        let n = features.nrows();
+        if parsed.len() != n {
+            return Err(PyRuntimeError::new_err(format!(
+                "coords length ({}) must match number of samples ({})",
+                parsed.len(),
+                n
+            )));
+        }
+        let grid: Vec<usize> = candidates
+            .unwrap_or_else(|| vec![20, 30, 50, 75, 100, 150, 200])
+            .into_iter()
+            .filter(|&bw| bw > 0 && bw < n)
+            .collect();
+        if grid.is_empty() {
+            return Err(PyRuntimeError::new_err(
+                "no valid candidate bandwidths (all >= number of samples?)",
+            ));
+        }
+
+        let task = smelt_ml::task::RegressionTask::new("gxgb", features, y).map_err(smelt_err)?;
+        let mut learner = smelt_ml::prelude::GeoXGBoost::new(parsed)
+            .with_n_estimators(self.n_estimators)
+            .with_max_depth(self.max_depth)
+            .with_learning_rate(self.learning_rate)
+            .with_lambda(self.lambda)
+            .with_seed(self.seed);
+        if let Some(a) = self.alpha {
+            learner = learner.with_alpha(a);
+        }
+        let sel = learner
+            .select_bandwidth(&task, &grid, k_folds)
+            .map_err(smelt_err)?;
+
+        // Store the selected bandwidth so the next fit() uses it.
+        self.bandwidth = sel.best;
+
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("best", sel.best)?;
+        let bws: Vec<usize> = sel.scores.iter().map(|&(bw, _)| bw).collect();
+        let rmses: Vec<f64> = sel.scores.iter().map(|&(_, r)| r).collect();
+        dict.set_item("bandwidths", bws)?;
+        dict.set_item("rmse", rmses)?;
+        Ok(dict.into())
+    }
+
     /// Predict. If `coords` is provided, uses per-sample nearest local model
     /// (spatial prediction); otherwise falls back to in-sample / global model.
     #[pyo3(signature = (x, coords=None))]
