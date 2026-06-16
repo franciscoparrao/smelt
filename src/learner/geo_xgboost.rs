@@ -8,7 +8,7 @@
 //! - Bi-square spatial kernel weights
 //! - Local XGBoost models per spatial unit (gradients × spatial weights)
 //! - Ensemble of global + local models with adaptive alpha
-//! - Bandwidth selection via k-fold cross-validation (`select_bandwidth`)
+//! - Bandwidth selection via the leave-one-out CV criterion (`select_bandwidth`)
 //! - Local feature importance
 
 use crate::learner::xgboost::XGBoost;
@@ -111,32 +111,30 @@ impl GeoXGBoost {
         self.train_geo_inner(task)
     }
 
-    /// Select the optimal bandwidth (number of nearest neighbours) by k-fold
-    /// cross-validation over a grid of candidate values.
+    /// Select the optimal bandwidth (number of nearest neighbours) by minimising
+    /// the leave-one-out cross-validation (CV) criterion of Grekousis (2025, Eq. 11).
     ///
-    /// For each candidate bandwidth, the data are split into `k_folds` folds;
-    /// a model is trained on the other folds and evaluated on the held-out fold
-    /// via spatially-aware prediction (`predict_spatial`). The candidate that
-    /// minimises the mean cross-validated RMSE is returned, together with the
-    /// full per-candidate scores.
+    /// For each candidate bandwidth `h` and each location `i`, a *local* model is
+    /// calibrated on `i`'s spatially-weighted neighbours **excluding `i` itself**,
+    /// and used to predict `y_i`. The CV criterion is the resulting leave-one-out
+    /// error, `sqrt( mean_i (y_i - ŷ_{≠i}(h))² )`; the bandwidth minimising it is
+    /// returned, together with the per-candidate scores.
     ///
-    /// All other hyperparameters (`n_estimators`, `max_depth`, `learning_rate`,
-    /// `lambda`, `alpha`, `seed`) are held fixed at their current values. This
-    /// is the principled alternative to setting `bandwidth` by hand: the optimal
-    /// neighbourhood size is method- and data-dependent and should be tuned, not
-    /// assumed (cf. Grekousis, 2025).
+    /// This is deliberately a property of the **local model alone**: the global
+    /// model and the ensemble weight `alpha` are *not* involved, because bandwidth
+    /// is tuned before the global/local blending step (cf. Grekousis, 2025). A
+    /// too-small neighbourhood leaves each excluded location with too few points
+    /// to predict well, so the criterion spikes — which is precisely why the LOO
+    /// criterion, not the ensemble's hold-out RMSE, is the correct objective.
+    ///
+    /// `n_estimators`, `max_depth`, `learning_rate`, `lambda` and `seed` are held
+    /// at their current values.
     pub fn select_bandwidth(
         &self,
         task: &RegressionTask,
         candidates: &[usize],
-        k_folds: usize,
     ) -> Result<BandwidthSelection> {
         let n = task.n_samples();
-        if k_folds < 2 {
-            return Err(SmeltError::Other(
-                "select_bandwidth requires k_folds >= 2".into(),
-            ));
-        }
         if self.coords.len() != n {
             return Err(SmeltError::DimensionMismatch {
                 expected: n,
@@ -149,71 +147,9 @@ impl GeoXGBoost {
             ));
         }
 
-        let features = task.features();
-        let target = task.target();
-
-        // Deterministic fold assignment from a seeded permutation.
-        let perm = seeded_permutation(n, self.seed);
-        let mut folds: Vec<Vec<usize>> = vec![Vec::new(); k_folds];
-        for (pos, &idx) in perm.iter().enumerate() {
-            folds[pos % k_folds].push(idx);
-        }
-
         let mut scores: Vec<(usize, f64)> = Vec::with_capacity(candidates.len());
         for &bw in candidates {
-            let mut fold_rmses: Vec<f64> = Vec::with_capacity(k_folds);
-            for k in 0..k_folds {
-                let test_idx = &folds[k];
-                let train_idx: Vec<usize> = (0..k_folds)
-                    .filter(|&j| j != k)
-                    .flat_map(|j| folds[j].iter().copied())
-                    .collect();
-                // Need enough neighbours to fit a meaningful local model.
-                if train_idx.len() <= 3 || test_idx.is_empty() {
-                    continue;
-                }
-
-                let train_features = features.select(ndarray::Axis(0), &train_idx);
-                let train_target: Vec<f64> = train_idx.iter().map(|&j| target[j]).collect();
-                let train_coords: Vec<(f64, f64)> =
-                    train_idx.iter().map(|&j| self.coords[j]).collect();
-                let train_task = RegressionTask::new(task.id(), train_features, train_target)?;
-
-                let mut fold_model = GeoXGBoost::new(train_coords)
-                    .with_bandwidth(bw)
-                    .with_n_estimators(self.n_estimators)
-                    .with_max_depth(self.max_depth)
-                    .with_learning_rate(self.learning_rate)
-                    .with_lambda(self.lambda)
-                    .with_seed(self.seed);
-                if let Some(a) = self.alpha {
-                    fold_model = fold_model.with_alpha(a);
-                }
-                let trained = fold_model.train_geo(&train_task)?;
-
-                let test_features = features.select(ndarray::Axis(0), test_idx);
-                let test_coords: Vec<(f64, f64)> =
-                    test_idx.iter().map(|&j| self.coords[j]).collect();
-                let pred = trained.predict_spatial(&test_features, &test_coords)?;
-                let pred_vals = match &pred {
-                    Prediction::Regression { predicted, .. } => predicted,
-                    _ => return Err(SmeltError::Other("Expected regression".into())),
-                };
-
-                let mut sse = 0.0;
-                for (m, &j) in test_idx.iter().enumerate() {
-                    let e = target[j] - pred_vals[m];
-                    sse += e * e;
-                }
-                fold_rmses.push((sse / test_idx.len() as f64).sqrt());
-            }
-
-            let mean_rmse = if fold_rmses.is_empty() {
-                f64::INFINITY
-            } else {
-                fold_rmses.iter().sum::<f64>() / fold_rmses.len() as f64
-            };
-            scores.push((bw, mean_rmse));
+            scores.push((bw, self.loo_cv_criterion(task, bw)?));
         }
 
         let best = scores
@@ -223,6 +159,54 @@ impl GeoXGBoost {
             .unwrap_or(self.bandwidth);
 
         Ok(BandwidthSelection { best, scores })
+    }
+
+    /// Leave-one-out CV criterion (Grekousis 2025, Eq. 11) for a single bandwidth.
+    ///
+    /// Returns `sqrt( mean_i (y_i - ŷ_{≠i})² )`, where `ŷ_{≠i}` is the prediction
+    /// for location `i` from a local model fit on its neighbours, excluding `i`.
+    /// Uses the local model only (no global model, no `alpha`).
+    fn loo_cv_criterion(&self, task: &RegressionTask, bandwidth: usize) -> Result<f64> {
+        let features = task.features();
+        let target = task.target();
+        let n = task.n_samples();
+        let bw = bandwidth.min(n - 1);
+
+        let mut sse = 0.0;
+        let mut count = 0usize;
+        for i in 0..n {
+            // Adaptive bi-square weights for i's neighbourhood; spatial_weights
+            // already zeroes out the centre, so i is excluded (leave-one-out).
+            let ws = spatial_weights(&self.coords, i, bw);
+            let idx: Vec<usize> = (0..n).filter(|&j| ws[j] > 0.0 && j != i).collect();
+            if idx.len() < 3 {
+                // Too few neighbours to fit a local model: this point cannot be
+                // predicted at this bandwidth. Penalise so tiny bandwidths lose.
+                continue;
+            }
+
+            let local_features = features.select(ndarray::Axis(0), &idx);
+            let local_target: Vec<f64> = idx.iter().map(|&j| target[j]).collect();
+            let local_task = RegressionTask::new(task.id(), local_features, local_target)?;
+
+            let mut local_xgb = self.make_xgb();
+            let local_model = local_xgb.train_regress(&local_task)?;
+
+            let center_row = features.select(ndarray::Axis(0), &[i]);
+            let pred = local_model.predict(&center_row)?;
+            let yhat = match &pred {
+                Prediction::Regression { predicted, .. } => predicted[0],
+                _ => return Err(SmeltError::Other("Expected regression".into())),
+            };
+            let e = target[i] - yhat;
+            sse += e * e;
+            count += 1;
+        }
+
+        if count == 0 {
+            return Ok(f64::INFINITY);
+        }
+        Ok((sse / count as f64).sqrt())
     }
 
     fn make_xgb(&self) -> XGBoost {
@@ -241,21 +225,6 @@ pub struct BandwidthSelection {
     pub best: usize,
     /// `(bandwidth, mean_cv_rmse)` for every candidate, in input order.
     pub scores: Vec<(usize, f64)>,
-}
-
-/// Deterministic Fisher-Yates shuffle of `0..n` driven by a seeded LCG.
-/// Used to assign cross-validation folds reproducibly without pulling in `rand`.
-fn seeded_permutation(n: usize, seed: u64) -> Vec<usize> {
-    let mut idx: Vec<usize> = (0..n).collect();
-    let mut state = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    for i in (1..n).rev() {
-        state = state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        let j = ((state >> 33) as usize) % (i + 1);
-        idx.swap(i, j);
-    }
-    idx
 }
 
 /// Euclidean distance between two points.
@@ -592,31 +561,21 @@ mod tests {
     }
 
     #[test]
-    fn seeded_permutation_is_a_permutation() {
-        let p = seeded_permutation(50, 7);
-        let mut sorted = p.clone();
-        sorted.sort_unstable();
-        assert_eq!(sorted, (0..50).collect::<Vec<_>>());
-        // Deterministic for a given seed.
-        assert_eq!(p, seeded_permutation(50, 7));
-    }
-
-    #[test]
     fn select_bandwidth_returns_a_candidate() {
         let (task, coords) = toy_task(8); // 64 points
-        let gxgb = GeoXGBoost::new(coords).with_n_estimators(20).with_alpha(0.5);
+        let gxgb = GeoXGBoost::new(coords).with_n_estimators(20);
         let candidates = [5usize, 10, 20, 40];
-        let sel = gxgb.select_bandwidth(&task, &candidates, 4).unwrap();
+        let sel = gxgb.select_bandwidth(&task, &candidates).unwrap();
         assert!(candidates.contains(&sel.best));
         assert_eq!(sel.scores.len(), candidates.len());
-        // Every reported score is finite (every candidate was actually evaluated).
+        // Every reported LOO criterion is finite (each candidate was evaluated).
         assert!(sel.scores.iter().all(|&(_, r)| r.is_finite()));
     }
 
     #[test]
-    fn select_bandwidth_rejects_too_few_folds() {
+    fn select_bandwidth_rejects_empty_grid() {
         let (task, coords) = toy_task(5);
         let gxgb = GeoXGBoost::new(coords);
-        assert!(gxgb.select_bandwidth(&task, &[5], 1).is_err());
+        assert!(gxgb.select_bandwidth(&task, &[]).is_err());
     }
 }

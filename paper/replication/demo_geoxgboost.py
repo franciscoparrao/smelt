@@ -102,25 +102,29 @@ r2_aug   = r2_score(yte.tolist(), pred_aug.tolist())
 # ── 3. Bandwidth selection ──────────────────────────────────────────────
 # The neighbourhood size (bandwidth = number of nearest neighbours) is the key
 # hyperparameter of any geographically-weighted model and should be tuned, not
-# guessed. `select_bandwidth` runs k-fold CV over a grid of candidates on the
-# TRAINING set and returns the value with the lowest mean RMSE (it also stores
-# that value on the estimator, so the subsequent fit() uses it).
+# guessed. `select_bandwidth` minimises the leave-one-out CV criterion of
+# Grekousis (2025, Eq. 11): each location is predicted by a LOCAL model fit on
+# its neighbours excluding itself, and the criterion is the LOO error. This is a
+# property of the local model alone — the global model and alpha are not used,
+# because bandwidth is tuned before the ensemble step. A too-small neighbourhood
+# leaves each excluded point with too few neighbours, so the criterion spikes;
+# the optimum is therefore typically large. The selected value is stored on the
+# estimator, so the subsequent fit() uses it.
 geo = GeoXGBoost(
     n_estimators=100,
     max_depth=6,
     learning_rate=0.3,
-    alpha=ALPHA_GEO,     # 0.5 = blend global+local; 1.0 = pure local
+    alpha=ALPHA_GEO,     # 0.5 = blend global+local (used at fit time, not tuning)
     seed=SEED,
 )
 bw_sel = geo.select_bandwidth(
     Xtr, ytr.tolist(), Ctr,
-    candidates=[20, 30, 50, 75, 100, 150, 200],
-    k_folds=5,
+    candidates=[30, 50, 100, 150, 200, 300],
 )
 BW_GEO = bw_sel["best"]
-print("\n── Bandwidth selection (5-fold CV on training set) ──")
-for bw, r in zip(bw_sel["bandwidths"], bw_sel["rmse"]):
-    print(f"  bandwidth={bw:<4d} CV-RMSE={r:.4f}" + ("   <- selected" if bw == BW_GEO else ""))
+print("\n── Bandwidth selection (leave-one-out CV criterion, training set) ──")
+for bw, c in zip(bw_sel["bandwidths"], bw_sel["cv"]):
+    print(f"  bandwidth={bw:<4d} CV-criterion={c:.4f}" + ("   <- selected" if bw == BW_GEO else ""))
 
 
 # ── 4. GeoXGBoost ───────────────────────────────────────────────────────
