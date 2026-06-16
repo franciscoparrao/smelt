@@ -1076,6 +1076,45 @@ impl GeoXGBoost {
             .feature_importance())
     }
 
+    /// Per-location local-model feature importances, for mapping spatial
+    /// non-stationarity (how each predictor's influence varies across space).
+    ///
+    /// Returns a dict with:
+    ///   - ``coords``: (N, 2) float array of training (x, y) coordinates,
+    ///   - ``importances``: list of length N; entry i is a dict
+    ///     {feature_name: gain} for location i's local model, or None where the
+    ///     neighbourhood was too small (global-model fallback).
+    /// Feature names are the internal x0, x1, ... order.
+    fn local_feature_importances<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let coords = model.coords();
+        let imps = model.local_importances();
+
+        let n = coords.len();
+        let flat: Vec<f64> = coords.iter().flat_map(|&(x, y)| [x, y]).collect();
+        let coord_arr = ndarray::Array2::from_shape_vec((n, 2), flat)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+
+        let imp_list = pyo3::types::PyList::empty(py);
+        for entry in imps {
+            match entry {
+                Some(v) => {
+                    let d = pyo3::types::PyDict::new(py);
+                    for (name, gain) in v {
+                        d.set_item(name, gain)?;
+                    }
+                    imp_list.append(d)?;
+                }
+                None => imp_list.append(py.None())?,
+            }
+        }
+
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("coords", PyArray2::from_owned_array(py, coord_arr))?;
+        dict.set_item("importances", imp_list)?;
+        Ok(dict.into())
+    }
+
     #[getter]
     fn supports_classification(&self) -> bool { false }
 

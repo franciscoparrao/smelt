@@ -281,6 +281,26 @@ pub struct TrainedGeoXGBoost {
 }
 
 impl TrainedGeoXGBoost {
+    /// Training coordinates, one `(x, y)` per local model (same order as
+    /// [`local_importances`](Self::local_importances)).
+    pub fn coords(&self) -> &[(f64, f64)] {
+        &self.coords
+    }
+
+    /// Per-location local-model feature importances, one entry per training
+    /// point (in `coords` order). `None` where the neighbourhood was too small
+    /// and the global model was used as a fallback. Each inner vector is a list
+    /// of `(feature_name, gain)`. This is what lets you *map* how the influence
+    /// of each predictor varies across space (spatial non-stationarity).
+    pub fn local_importances(&self) -> &[Option<Vec<(String, f64)>>] {
+        &self.local_importances
+    }
+
+    /// Feature names (internal `x0`, `x1`, ... order).
+    pub fn feature_names(&self) -> &[String] {
+        &self.feature_names
+    }
+
     /// Predict on new data using the nearest local model for each point.
     ///
     /// For each new coordinate, finds the closest training point and uses
