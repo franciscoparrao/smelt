@@ -17,6 +17,7 @@ use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use crate::{Result, SmeltError};
 use ndarray::Array2;
+use rayon::prelude::*;
 
 /// Geographical-XGBoost for spatially local regression.
 ///
@@ -172,36 +173,46 @@ impl GeoXGBoost {
         let n = task.n_samples();
         let bw = bandwidth.min(n - 1);
 
+        // Each location's leave-one-out fit is independent -> compute in parallel.
+        // Each returns Some(squared error) or None where the neighbourhood was
+        // too small to fit a local model (that point is skipped, penalising tiny
+        // bandwidths).
+        let per_point: Vec<Result<Option<f64>>> = (0..n)
+            .into_par_iter()
+            .map(|i| -> Result<Option<f64>> {
+                // spatial_weights already zeroes out the centre, so i is excluded.
+                let ws = spatial_weights(&self.coords, i, bw);
+                let idx: Vec<usize> = (0..n).filter(|&j| ws[j] > 0.0 && j != i).collect();
+                if idx.len() < 3 {
+                    return Ok(None);
+                }
+
+                let local_features = features.select(ndarray::Axis(0), &idx);
+                let local_target: Vec<f64> = idx.iter().map(|&j| target[j]).collect();
+                let local_weights: Vec<f64> = idx.iter().map(|&j| ws[j]).collect();
+                let local_task = RegressionTask::new(task.id(), local_features, local_target)?;
+
+                let mut local_xgb = self.make_xgb().with_sample_weights(local_weights);
+                let local_model = local_xgb.train_regress(&local_task)?;
+
+                let center_row = features.select(ndarray::Axis(0), &[i]);
+                let pred = local_model.predict(&center_row)?;
+                let yhat = match &pred {
+                    Prediction::Regression { predicted, .. } => predicted[0],
+                    _ => return Err(SmeltError::Other("Expected regression".into())),
+                };
+                let e = target[i] - yhat;
+                Ok(Some(e * e))
+            })
+            .collect();
+
         let mut sse = 0.0;
         let mut count = 0usize;
-        for i in 0..n {
-            // Adaptive bi-square weights for i's neighbourhood; spatial_weights
-            // already zeroes out the centre, so i is excluded (leave-one-out).
-            let ws = spatial_weights(&self.coords, i, bw);
-            let idx: Vec<usize> = (0..n).filter(|&j| ws[j] > 0.0 && j != i).collect();
-            if idx.len() < 3 {
-                // Too few neighbours to fit a local model: this point cannot be
-                // predicted at this bandwidth. Penalise so tiny bandwidths lose.
-                continue;
+        for r in per_point {
+            if let Some(se) = r? {
+                sse += se;
+                count += 1;
             }
-
-            let local_features = features.select(ndarray::Axis(0), &idx);
-            let local_target: Vec<f64> = idx.iter().map(|&j| target[j]).collect();
-            let local_weights: Vec<f64> = idx.iter().map(|&j| ws[j]).collect();
-            let local_task = RegressionTask::new(task.id(), local_features, local_target)?;
-
-            let mut local_xgb = self.make_xgb().with_sample_weights(local_weights);
-            let local_model = local_xgb.train_regress(&local_task)?;
-
-            let center_row = features.select(ndarray::Axis(0), &[i]);
-            let pred = local_model.predict(&center_row)?;
-            let yhat = match &pred {
-                Prediction::Regression { predicted, .. } => predicted[0],
-                _ => return Err(SmeltError::Other("Expected regression".into())),
-            };
-            let e = target[i] - yhat;
-            sse += e * e;
-            count += 1;
         }
 
         if count == 0 {
@@ -274,7 +285,9 @@ fn spatial_weights(coords: &[(f64, f64)], center: usize, n_neighbors: usize) -> 
 /// Trained G-XGBoost model with global model, local models, and alpha weights.
 pub struct TrainedGeoXGBoost {
     global_model: Box<dyn TrainedModel>,
-    local_models: Vec<Box<dyn TrainedModel>>,
+    /// One per training point; `None` where the neighbourhood was too small and
+    /// the global model is used as the local prediction instead.
+    local_models: Vec<Option<Box<dyn TrainedModel>>>,
     alphas: Vec<f64>,
     coords: Vec<(f64, f64)>,
     feature_names: Vec<String>,
@@ -339,15 +352,21 @@ impl TrainedGeoXGBoost {
                 .map(|(j, _)| j)
                 .unwrap_or(0);
 
-            let row = features.select(ndarray::Axis(0), &[i]);
-            let local_pred = self.local_models[nearest].predict(&row)?;
-            let local_val = match &local_pred {
-                Prediction::Regression { predicted, .. } => predicted[0],
-                _ => return Err(SmeltError::Other("Expected regression".into())),
+            // If the nearest training point had no local model (neighbourhood
+            // too small), fall back to the global prediction for this point.
+            let ensemble = match &self.local_models[nearest] {
+                Some(local_model) => {
+                    let row = features.select(ndarray::Axis(0), &[i]);
+                    let local_pred = local_model.predict(&row)?;
+                    let local_val = match &local_pred {
+                        Prediction::Regression { predicted, .. } => predicted[0],
+                        _ => return Err(SmeltError::Other("Expected regression".into())),
+                    };
+                    let alpha = self.alphas[nearest];
+                    alpha * local_val + (1.0 - alpha) * global_vals[i]
+                }
+                None => global_vals[i],
             };
-
-            let alpha = self.alphas[nearest];
-            let ensemble = alpha * local_val + (1.0 - alpha) * global_vals[i];
             predicted.push(ensemble);
         }
 
@@ -376,15 +395,19 @@ impl TrainedModel for TrainedGeoXGBoost {
 
             let mut predicted = Vec::with_capacity(n_samples);
             for i in 0..n_samples {
-                let row = features.select(ndarray::Axis(0), &[i]);
-                let local_pred = self.local_models[i].predict(&row)?;
-                let local_val = match &local_pred {
-                    Prediction::Regression { predicted, .. } => predicted[0],
-                    _ => return Err(SmeltError::Other("Expected regression".into())),
+                let ensemble = match &self.local_models[i] {
+                    Some(local_model) => {
+                        let row = features.select(ndarray::Axis(0), &[i]);
+                        let local_pred = local_model.predict(&row)?;
+                        let local_val = match &local_pred {
+                            Prediction::Regression { predicted, .. } => predicted[0],
+                            _ => return Err(SmeltError::Other("Expected regression".into())),
+                        };
+                        let alpha = self.alphas[i];
+                        alpha * local_val + (1.0 - alpha) * global_vals[i]
+                    }
+                    None => global_vals[i],
                 };
-
-                let alpha = self.alphas[i];
-                let ensemble = alpha * local_val + (1.0 - alpha) * global_vals[i];
                 predicted.push(ensemble);
             }
 
@@ -477,49 +500,57 @@ impl GeoXGBoost {
             .map(|(y, p)| (y - p).abs())
             .collect();
 
-        // Step 2: Train local models for each spatial unit
-        let mut local_models: Vec<Box<dyn TrainedModel>> = Vec::with_capacity(n_samples);
+        // Step 2: Train local models for each spatial unit.
+        // The local models are independent, so we train them in parallel.
+        // Each entry is `None` where the neighbourhood was too small (the global
+        // model is used for that point at prediction time).
+        type LocalFit = (Option<Box<dyn TrainedModel>>, f64, Option<Vec<(String, f64)>>);
+        let fits: Vec<Result<LocalFit>> = (0..n_samples)
+            .into_par_iter()
+            .map(|i| -> Result<LocalFit> {
+                let ws = spatial_weights(&self.coords, i, bandwidth);
+
+                // Neighbourhood = points with ws > 0, excluding the centre.
+                let weighted_indices: Vec<usize> =
+                    (0..n_samples).filter(|&j| ws[j] > 0.0 && j != i).collect();
+
+                if weighted_indices.len() < 3 {
+                    // Not enough neighbours: fall back to the global model.
+                    return Ok((None, global_vals[i], None));
+                }
+
+                // Fit a *weighted* local XGBoost: each neighbour's bi-square
+                // kernel weight scales its gradient/hessian, so closer points
+                // count more — the spatially-weighted objective of G-XGBoost
+                // (Eq. 13), rather than a hard 0/1 subset.
+                let local_features = features.select(ndarray::Axis(0), &weighted_indices);
+                let local_target: Vec<f64> = weighted_indices.iter().map(|&j| target[j]).collect();
+                let local_weights: Vec<f64> = weighted_indices.iter().map(|&j| ws[j]).collect();
+                let local_task = RegressionTask::new(task.id(), local_features, local_target)?;
+
+                let mut local_xgb = self.make_xgb().with_sample_weights(local_weights);
+                let local_model = local_xgb.train_regress(&local_task)?;
+
+                // OOB prediction for the centre point (Eq. 14).
+                let center_row = features.select(ndarray::Axis(0), &[i]);
+                let center_pred = local_model.predict(&center_row)?;
+                let pred = match &center_pred {
+                    Prediction::Regression { predicted, .. } => predicted[0],
+                    _ => global_vals[i],
+                };
+                let imp = local_model.feature_importance();
+                Ok((Some(local_model), pred, imp))
+            })
+            .collect();
+
+        let mut local_models: Vec<Option<Box<dyn TrainedModel>>> = Vec::with_capacity(n_samples);
         let mut local_preds = vec![0.0; n_samples];
         let mut local_importances = Vec::with_capacity(n_samples);
-
-        for i in 0..n_samples {
-            let ws = spatial_weights(&self.coords, i, bandwidth);
-
-            // Create weighted training data: include samples with ws > 0 (excluding center)
-            let weighted_indices: Vec<usize> =
-                (0..n_samples).filter(|&j| ws[j] > 0.0 && j != i).collect();
-
-            if weighted_indices.len() < 3 {
-                // Not enough neighbors: use global model for this point
-                local_preds[i] = global_vals[i];
-                local_models.push(global_xgb.train_regress(task)?); // fallback
-                local_importances.push(None);
-                continue;
-            }
-
-            // Build the local task from the neighbourhood (points with ws > 0)
-            // and fit a *weighted* local XGBoost: each neighbour's bi-square
-            // kernel weight scales its gradient/hessian, so closer points count
-            // more — the spatially-weighted objective of G-XGBoost (Eq. 13),
-            // rather than treating the neighbourhood as a hard 0/1 subset.
-            let local_features = features.select(ndarray::Axis(0), &weighted_indices);
-            let local_target: Vec<f64> = weighted_indices.iter().map(|&j| target[j]).collect();
-            let local_weights: Vec<f64> = weighted_indices.iter().map(|&j| ws[j]).collect();
-            let local_task = RegressionTask::new(task.id(), local_features, local_target)?;
-
-            let mut local_xgb = self.make_xgb().with_sample_weights(local_weights);
-            let local_model = local_xgb.train_regress(&local_task)?;
-
-            // OOB prediction for center point (Eq. 14)
-            let center_row = features.select(ndarray::Axis(0), &[i]);
-            let center_pred = local_model.predict(&center_row)?;
-            local_preds[i] = match &center_pred {
-                Prediction::Regression { predicted, .. } => predicted[0],
-                _ => global_vals[i],
-            };
-
-            local_importances.push(local_model.feature_importance());
-            local_models.push(local_model);
+        for (i, fit) in fits.into_iter().enumerate() {
+            let (model, pred, imp) = fit?;
+            local_models.push(model);
+            local_preds[i] = pred;
+            local_importances.push(imp);
         }
 
         // Step 3: Compute alpha weights (Eq. 19, 20)
