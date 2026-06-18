@@ -4,7 +4,7 @@
 //! histogram-based + auto exact greedy, NaN handling, row/col subsampling,
 //! parallel split finding, early stopping, zero-copy prediction, in-place partitioning.
 
-use crate::Result;
+use crate::{Result, SmeltError};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
@@ -52,6 +52,10 @@ pub struct XGBoost {
     n_bins: usize,
     early_stopping_rounds: usize,
     seed: u64,
+    /// Optional per-sample weights (regression). When set, each sample's gradient
+    /// and hessian are scaled by its weight — the standard way to fit a weighted
+    /// objective. Used by GeoXGBoost to apply the bi-square spatial kernel.
+    sample_weight: Option<Vec<f64>>,
 }
 
 impl Default for XGBoost {
@@ -69,6 +73,7 @@ impl Default for XGBoost {
             n_bins: 256,
             early_stopping_rounds: 0,
             seed: 42,
+            sample_weight: None,
         }
     }
 }
@@ -119,6 +124,12 @@ impl XGBoost {
     }
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
+        self
+    }
+    /// Set per-sample weights for (weighted) regression. Length must match the
+    /// number of training samples; each gradient/hessian is scaled by its weight.
+    pub fn with_sample_weights(mut self, w: Vec<f64>) -> Self {
+        self.sample_weight = Some(w);
         self
     }
 }
@@ -885,8 +896,27 @@ impl Learner for XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
+        if let Some(w) = &self.sample_weight {
+            if w.len() != ns {
+                return Err(SmeltError::DimensionMismatch {
+                    expected: ns,
+                    got: w.len(),
+                });
+            }
+        }
         let bins = HistBins::build(features, self.n_bins);
-        let initial = target.iter().sum::<f64>() / ns as f64;
+        // Weighted mean as the initial prediction when sample weights are set.
+        let initial = match &self.sample_weight {
+            Some(w) => {
+                let wsum: f64 = w.iter().sum();
+                if wsum > 0.0 {
+                    target.iter().zip(w).map(|(y, wi)| y * wi).sum::<f64>() / wsum
+                } else {
+                    target.iter().sum::<f64>() / ns as f64
+                }
+            }
+            None => target.iter().sum::<f64>() / ns as f64,
+        };
         let mut preds = vec![initial; ns];
         let mut trees = Vec::with_capacity(self.n_estimators);
         let mut imp = vec![0.0; nf];
@@ -894,8 +924,16 @@ impl Learner for XGBoost {
         let (mut best_loss, mut no_improve, mut best_n) = (f64::INFINITY, 0usize, 0usize);
 
         for round in 0..self.n_estimators {
-            let grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
-            let hess = vec![1.0; ns];
+            let mut grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
+            let mut hess = vec![1.0; ns];
+            if let Some(w) = &self.sample_weight {
+                // Scale gradient and hessian by the sample weight: this fits the
+                // weighted least-squares objective (XGBoost's standard mechanism).
+                for i in 0..ns {
+                    grads[i] *= w[i];
+                    hess[i] *= w[i];
+                }
+            }
             let (mut idx, cols) = self.sample(&mut rng, ns, nf);
             let (tree, fi) =
                 self.build_one_tree(features, &bins, &grads, &hess, &mut idx, cols, nf);
@@ -908,12 +946,26 @@ impl Learner for XGBoost {
             trees.push(tree);
 
             if self.early_stopping_rounds > 0 {
-                let loss = preds
-                    .iter()
-                    .zip(target)
-                    .map(|(p, y)| (p - y).powi(2))
-                    .sum::<f64>()
-                    / ns as f64;
+                let loss = match &self.sample_weight {
+                    Some(w) => {
+                        let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                        preds
+                            .iter()
+                            .zip(target)
+                            .zip(w)
+                            .map(|((p, y), wi)| wi * (p - y).powi(2))
+                            .sum::<f64>()
+                            / wsum
+                    }
+                    None => {
+                        preds
+                            .iter()
+                            .zip(target)
+                            .map(|(p, y)| (p - y).powi(2))
+                            .sum::<f64>()
+                            / ns as f64
+                    }
+                };
                 if loss < best_loss - 1e-10 {
                     best_loss = loss;
                     best_n = round + 1;
@@ -1080,5 +1132,51 @@ impl XGBoost {
             feature_names: task.feature_names().to_vec(),
             feature_importances: imp,
         }))
+    }
+}
+
+#[cfg(test)]
+mod weight_tests {
+    use super::*;
+    use ndarray::Array2;
+
+    /// With a constant feature (no split possible) the model collapses to the
+    /// (weighted) mean of the targets. Heavily weighting the y=10 group must pull
+    /// the prediction far above the unweighted midpoint of 5.
+    #[test]
+    fn sample_weights_shift_prediction_toward_heavy_group() {
+        let n = 20;
+        let features = Array2::<f64>::zeros((n, 1));
+        let target: Vec<f64> = (0..n).map(|i| if i < n / 2 { 0.0 } else { 10.0 }).collect();
+
+        let task = RegressionTask::new("w", features.clone(), target.clone()).unwrap();
+        let mut unweighted = XGBoost::new().with_n_estimators(50).with_learning_rate(0.3);
+        let m0 = unweighted.train_regress(&task).unwrap();
+        let p0 = match m0.predict(&features).unwrap() {
+            Prediction::Regression { predicted, .. } => predicted[0],
+            _ => unreachable!(),
+        };
+        assert!((4.0..=6.0).contains(&p0), "unweighted should be ~5, got {p0}");
+
+        // Weight the y=10 group 9x heavier -> weighted mean = 9.
+        let w: Vec<f64> = (0..n).map(|i| if i < n / 2 { 1.0 } else { 9.0 }).collect();
+        let mut weighted = XGBoost::new()
+            .with_n_estimators(50)
+            .with_learning_rate(0.3)
+            .with_sample_weights(w);
+        let m1 = weighted.train_regress(&task).unwrap();
+        let p1 = match m1.predict(&features).unwrap() {
+            Prediction::Regression { predicted, .. } => predicted[0],
+            _ => unreachable!(),
+        };
+        assert!(p1 > 7.0, "weighted prediction should be pulled toward 9, got {p1}");
+    }
+
+    #[test]
+    fn sample_weights_length_mismatch_errors() {
+        let features = Array2::<f64>::zeros((10, 1));
+        let task = RegressionTask::new("w", features, vec![0.0; 10]).unwrap();
+        let mut m = XGBoost::new().with_sample_weights(vec![1.0; 5]);
+        assert!(m.train_regress(&task).is_err());
     }
 }

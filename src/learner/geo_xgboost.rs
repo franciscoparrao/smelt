@@ -187,9 +187,10 @@ impl GeoXGBoost {
 
             let local_features = features.select(ndarray::Axis(0), &idx);
             let local_target: Vec<f64> = idx.iter().map(|&j| target[j]).collect();
+            let local_weights: Vec<f64> = idx.iter().map(|&j| ws[j]).collect();
             let local_task = RegressionTask::new(task.id(), local_features, local_target)?;
 
-            let mut local_xgb = self.make_xgb();
+            let mut local_xgb = self.make_xgb().with_sample_weights(local_weights);
             let local_model = local_xgb.train_regress(&local_task)?;
 
             let center_row = features.select(ndarray::Axis(0), &[i]);
@@ -496,18 +497,17 @@ impl GeoXGBoost {
                 continue;
             }
 
-            // Build local task with weighted samples
-            // G-XGBoost uses sample_weights in the XGBoost objective (Eq. 13)
-            // Our XGBoost doesn't support sample weights directly, so we
-            // approximate by repeating samples proportional to their weight
-            // OR by creating a subset and using the spatial weight as importance
-
-            // Simpler approach: create sub-task from neighborhood
+            // Build the local task from the neighbourhood (points with ws > 0)
+            // and fit a *weighted* local XGBoost: each neighbour's bi-square
+            // kernel weight scales its gradient/hessian, so closer points count
+            // more — the spatially-weighted objective of G-XGBoost (Eq. 13),
+            // rather than treating the neighbourhood as a hard 0/1 subset.
             let local_features = features.select(ndarray::Axis(0), &weighted_indices);
             let local_target: Vec<f64> = weighted_indices.iter().map(|&j| target[j]).collect();
+            let local_weights: Vec<f64> = weighted_indices.iter().map(|&j| ws[j]).collect();
             let local_task = RegressionTask::new(task.id(), local_features, local_target)?;
 
-            let mut local_xgb = self.make_xgb();
+            let mut local_xgb = self.make_xgb().with_sample_weights(local_weights);
             let local_model = local_xgb.train_regress(&local_task)?;
 
             // OOB prediction for center point (Eq. 14)
