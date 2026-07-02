@@ -102,7 +102,7 @@ impl IsolationForest {
         for i in 0..n_samples {
             let avg_path: f64 = trees
                 .iter()
-                .map(|tree| path_length(tree, features, i, 0) as f64)
+                .map(|tree| path_length(tree, features, i, 0))
                 .sum::<f64>()
                 / self.n_estimators as f64;
 
@@ -223,9 +223,9 @@ fn build_itree(
     }
 }
 
-fn path_length(node: &INode, features: &Array2<f64>, sample: usize, depth: usize) -> usize {
+fn path_length(node: &INode, features: &Array2<f64>, sample: usize, depth: usize) -> f64 {
     match node {
-        INode::Leaf { size } => depth + c_factor(*size) as usize,
+        INode::Leaf { size } => depth as f64 + c_factor(*size),
         INode::Split {
             feature,
             threshold,
@@ -242,11 +242,61 @@ fn path_length(node: &INode, features: &Array2<f64>, sample: usize, depth: usize
 }
 
 /// Average path length of unsuccessful search in BST (normalization factor).
-/// c(n) = 2*H(n-1) - 2*(n-1)/n where H(i) = ln(i) + 0.5772 (Euler constant)
+/// c(n) = 2*H(n-1) - 2*(n-1)/n where H(i) = ln(i) + 0.5772 (Euler constant).
+/// Liu, Ting & Zhou (2008), Eq. 2. `n == 2` is special-cased to `1.0`
+/// (matches scikit-learn's `_average_path_length`), since the general
+/// formula's `ln(n-1) = ln(1) = 0` term underestimates the two-point case.
 fn c_factor(n: usize) -> f64 {
     if n <= 1 {
         return 0.0;
     }
+    if n == 2 {
+        return 1.0;
+    }
     let n = n as f64;
-    2.0 * (n - 1.0).ln() + 0.5772156649 - 2.0 * (n - 1.0) / n
+    2.0 * ((n - 1.0).ln() + 0.5772156649) - 2.0 * (n - 1.0) / n
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for the missing-parenthesis bug: `2*ln(n-1) + gamma`
+    /// (wrong) vs `2*(ln(n-1) + gamma)` (correct) — applying gamma only once
+    /// instead of twice made c(n) negative for small n and ~5% low at n=256.
+    /// Reference values from scikit-learn's `_average_path_length`.
+    #[test]
+    fn c_factor_matches_reference_values() {
+        assert_eq!(c_factor(0), 0.0);
+        assert_eq!(c_factor(1), 0.0);
+        assert_eq!(c_factor(2), 1.0);
+        assert!((c_factor(10) - 3.7488806).abs() < 1e-5, "c(10) = {}", c_factor(10));
+        assert!((c_factor(256) - 10.244770).abs() < 1e-5, "c(256) = {}", c_factor(256));
+        // Must never be negative for any n >= 1 (the old bug gave -0.42 at n=2).
+        for n in 1..1000 {
+            assert!(c_factor(n) >= 0.0, "c_factor({n}) = {} is negative", c_factor(n));
+        }
+    }
+
+    #[test]
+    fn outlier_gets_higher_score_than_inliers() {
+        let mut data = Vec::new();
+        for i in 0..50 {
+            data.push((i as f64 * 0.01) % 1.0);
+            data.push(((i as f64 * 0.017) % 1.0) + 1.0);
+        }
+        data.push(50.0);
+        data.push(50.0); // clear outlier, far from the cluster
+        let features = Array2::from_shape_vec((51, 2), data).unwrap();
+
+        let iforest = IsolationForest::new().with_n_estimators(100).with_seed(42);
+        let result = iforest.fit_predict(&features).unwrap();
+
+        let outlier_score = result.scores[50];
+        let mean_inlier_score: f64 = result.scores[..50].iter().sum::<f64>() / 50.0;
+        assert!(
+            outlier_score > mean_inlier_score,
+            "outlier score ({outlier_score}) should exceed mean inlier score ({mean_inlier_score})"
+        );
+    }
 }
