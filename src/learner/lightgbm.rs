@@ -577,10 +577,10 @@ impl TrainedModel for TrainedLightGBM {
         crate::validate::check_n_features(features, self.feature_names.len())?;
         match &self.mode {
             LGBMode::Regression => {
-                let predicted: Vec<f64> = features
-                    .rows()
-                    .into_iter()
-                    .map(|r| {
+                let predicted: Vec<f64> = (0..features.nrows())
+                    .into_par_iter()
+                    .map(|i| {
+                        let r = features.row(i);
                         let mut v = self.initial[0];
                         for t in &self.trees {
                             v += self.learning_rate * t.predict_one(r);
@@ -591,16 +591,23 @@ impl TrainedModel for TrainedLightGBM {
                 Ok(Prediction::regression(predicted))
             }
             LGBMode::BinaryClassif => {
-                let mut predicted = Vec::with_capacity(features.nrows());
-                let mut probabilities = Vec::with_capacity(features.nrows());
-                for r in features.rows() {
-                    let mut f = self.initial[0];
-                    for t in &self.trees {
-                        f += self.learning_rate * t.predict_one(r);
-                    }
-                    let p = sigmoid(f);
-                    predicted.push(if p >= 0.5 { 1 } else { 0 });
-                    probabilities.push(vec![1.0 - p, p]);
+                let results: Vec<(usize, Vec<f64>)> = (0..features.nrows())
+                    .into_par_iter()
+                    .map(|i| {
+                        let r = features.row(i);
+                        let mut f = self.initial[0];
+                        for t in &self.trees {
+                            f += self.learning_rate * t.predict_one(r);
+                        }
+                        let p = sigmoid(f);
+                        (if p >= 0.5 { 1 } else { 0 }, vec![1.0 - p, p])
+                    })
+                    .collect();
+                let mut predicted = Vec::with_capacity(results.len());
+                let mut probabilities = Vec::with_capacity(results.len());
+                for (pred, prob) in results {
+                    predicted.push(pred);
+                    probabilities.push(prob);
                 }
                 Ok(Prediction::Classification {
                     predicted,
@@ -610,23 +617,31 @@ impl TrainedModel for TrainedLightGBM {
             }
             LGBMode::MultiClassif { n_classes } => {
                 let k = *n_classes;
-                let mut predicted = Vec::with_capacity(features.nrows());
-                let mut probabilities = Vec::with_capacity(features.nrows());
-                for r in features.rows() {
-                    let mut scores = self.initial.clone();
-                    let ni = self.trees.len() / k;
-                    for i in 0..ni {
-                        for c in 0..k {
-                            scores[c] += self.learning_rate * self.trees[i * k + c].predict_one(r);
+                let ni = self.trees.len() / k;
+                let results: Vec<(usize, Vec<f64>)> = (0..features.nrows())
+                    .into_par_iter()
+                    .map(|i| {
+                        let r = features.row(i);
+                        let mut scores = self.initial.clone();
+                        for iter in 0..ni {
+                            for c in 0..k {
+                                scores[c] +=
+                                    self.learning_rate * self.trees[iter * k + c].predict_one(r);
+                            }
                         }
-                    }
-                    let probs = softmax(&scores);
-                    let pred = probs
-                        .iter()
-                        .enumerate()
-                        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                        .unwrap()
-                        .0;
+                        let probs = softmax(&scores);
+                        let pred = probs
+                            .iter()
+                            .enumerate()
+                            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                            .unwrap()
+                            .0;
+                        (pred, probs)
+                    })
+                    .collect();
+                let mut predicted = Vec::with_capacity(results.len());
+                let mut probabilities = Vec::with_capacity(results.len());
+                for (pred, probs) in results {
                     predicted.push(pred);
                     probabilities.push(probs);
                 }

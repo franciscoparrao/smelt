@@ -710,24 +710,31 @@ impl TrainedModel for TrainedXGBoost {
             }
             XGBMode::MultiClassif { n_classes } => {
                 let k = *n_classes;
-                let mut predicted = Vec::with_capacity(features.nrows());
-                let mut probabilities = Vec::with_capacity(features.nrows());
-                for row in features.rows() {
-                    let mut scores = self.initial.clone();
-                    let n_iters = self.trees.len() / k;
-                    for iter in 0..n_iters {
-                        for c in 0..k {
-                            scores[c] +=
-                                self.learning_rate * self.trees[iter * k + c].predict_one(row);
+                let n_iters = self.trees.len() / k;
+                let results: Vec<(usize, Vec<f64>)> = (0..features.nrows())
+                    .into_par_iter()
+                    .map(|i| {
+                        let row = features.row(i);
+                        let mut scores = self.initial.clone();
+                        for iter in 0..n_iters {
+                            for c in 0..k {
+                                scores[c] +=
+                                    self.learning_rate * self.trees[iter * k + c].predict_one(row);
+                            }
                         }
-                    }
-                    let probs = softmax(&scores);
-                    let pred = probs
-                        .iter()
-                        .enumerate()
-                        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                        .unwrap()
-                        .0;
+                        let probs = softmax(&scores);
+                        let pred = probs
+                            .iter()
+                            .enumerate()
+                            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                            .unwrap()
+                            .0;
+                        (pred, probs)
+                    })
+                    .collect();
+                let mut predicted = Vec::with_capacity(results.len());
+                let mut probabilities = Vec::with_capacity(results.len());
+                for (pred, probs) in results {
                     predicted.push(pred);
                     probabilities.push(probs);
                 }
