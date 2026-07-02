@@ -37,6 +37,10 @@ from smelt._smelt import (
     ObliqueForest,
     QuantileForest,
     QuantileGB,
+    Bagging,
+    Stacking,
+    DynamicEnsemble,
+    registered_learner_ids,
     # Preprocessing
     StandardScaler,
     # Resampling
@@ -90,6 +94,7 @@ __all__ = [
     "KNearestNeighbors", "GaussianNB", "GeoXGBoost",
     "AdaBoost", "EBM", "Lasso", "ElasticNet", "GradientBoosting",
     "HoeffdingTree", "LinearSVM", "ObliqueTree", "ObliqueForest", "QuantileForest", "QuantileGB",
+    "Bagging", "Stacking", "DynamicEnsemble", "registered_learner_ids",
     "StandardScaler",
     "CrossValidation", "SpatialBlockCV", "SpatialBufferCV", "StratifiedCV", "GroupCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",
