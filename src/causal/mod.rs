@@ -166,9 +166,13 @@ impl CausalForest {
                 let train_idx = &sub_indices[..split_point];
                 let est_idx = &sub_indices[split_point..];
 
-                // Build causal tree on training indices
+                // Build the tree STRUCTURE from train_idx only (splits chosen
+                // to maximise treatment-effect heterogeneity on the training
+                // half). Its leaf tau values are provisional -- computed from
+                // train_idx during construction purely so build_node has a
+                // criterion to split on -- and are overwritten below.
                 let mut importances = vec![0.0; n_features];
-                let root = build_causal_tree(
+                let mut root = build_causal_tree(
                     features,
                     treatment,
                     outcome,
@@ -180,22 +184,22 @@ impl CausalForest {
                     &mut rng,
                 );
 
-                // Estimate tau using estimation indices (honest)
-                let mut sample_effects: Vec<Option<f64>> = vec![None; n_samples];
-                for &idx in est_idx {
-                    let leaf = find_leaf(&root, features.row(idx));
-                    sample_effects[idx] = Some(leaf.tau);
-                }
+                // Honest step: route the held-out estimation indices down the
+                // (already-fixed) tree structure and recompute each leaf's
+                // tau using ONLY those points -- the estimation sample never
+                // influenced where the splits are, and the training sample
+                // never influences the final tau (Athey & Imbens 2016;
+                // Wager & Athey 2018). Leaves with no honest treated/control
+                // pair are marked invalid rather than falling back to the
+                // biased training-sample tau.
+                populate_leaf_tau(&mut root, features, est_idx, treatment, outcome);
 
-                // Also predict tau for ALL samples (for final aggregation)
-                // using the tree structure with estimation-sample tau
-                populate_leaf_tau(&root, features, est_idx, treatment, outcome);
-
-                // Re-predict all samples with the honest tree
                 let mut all_effects = vec![None; n_samples];
                 for idx in 0..n_samples {
                     let leaf = find_leaf(&root, features.row(idx));
-                    all_effects[idx] = Some(leaf.tau);
+                    if leaf.honest_valid {
+                        all_effects[idx] = Some(leaf.tau);
+                    }
                 }
 
                 (all_effects, importances)
@@ -278,11 +282,16 @@ impl CausalForest {
 // ── Causal tree internals ───────────────────────────────────────────
 
 struct CausalNode {
+    /// Leaf tau. Set from train_idx during construction (needed to choose
+    /// splits), then overwritten with the honest estimate by
+    /// `populate_leaf_tau`. Meaningless for non-leaf (Split) nodes -- only
+    /// leaf values are ever read, via `find_leaf`.
     tau: f64,
-    #[allow(dead_code)]
-    n_treated: usize,
-    #[allow(dead_code)]
-    n_control: usize,
+    /// True once this leaf has been honestly re-estimated from `est_idx` AND
+    /// that estimation sample contained at least one treated and one control
+    /// unit. `find_leaf` callers must check this before trusting `tau`: a
+    /// leaf that reaches no honest data is not a valid estimate, not zero.
+    honest_valid: bool,
     /// Split info (None for leaf).
     split: Option<CausalSplit>,
 }
@@ -307,18 +316,40 @@ fn find_leaf<'a>(node: &'a CausalNode, sample: ArrayView1<f64>) -> &'a CausalNod
     }
 }
 
-/// Populate leaf tau values using estimation sample (honest estimation).
+/// Honest step: route `est_idx` down the fixed tree structure and recompute
+/// each leaf's tau using only the estimation points that land there. The
+/// tree's splits (built from `train_idx`) are never touched, so structure
+/// and effect estimates come from disjoint samples throughout.
 fn populate_leaf_tau(
-    _node: &CausalNode,
-    _features: &Array2<f64>,
-    _est_idx: &[usize],
-    _treatment: &[usize],
-    _outcome: &[f64],
+    node: &mut CausalNode,
+    features: &Array2<f64>,
+    est_idx: &[usize],
+    treatment: &[usize],
+    outcome: &[f64],
 ) {
-    // The tau is already estimated during tree building using the training sample.
-    // In a full honest implementation, we'd re-estimate using est_idx only.
-    // This is handled in build_causal_tree by computing tau from the indices
-    // that reach each leaf.
+    match &mut node.split {
+        None => {
+            let (tau, n_treated, n_control) = estimate_tau(treatment, outcome, est_idx);
+            node.honest_valid = n_treated >= 1 && n_control >= 1;
+            if node.honest_valid {
+                node.tau = tau;
+            }
+        }
+        Some(split) => {
+            let (feature, threshold) = (split.feature, split.threshold);
+            let mut left_idx = Vec::new();
+            let mut right_idx = Vec::new();
+            for &i in est_idx {
+                if features[[i, feature]] <= threshold {
+                    left_idx.push(i);
+                } else {
+                    right_idx.push(i);
+                }
+            }
+            populate_leaf_tau(&mut split.left, features, &left_idx, treatment, outcome);
+            populate_leaf_tau(&mut split.right, features, &right_idx, treatment, outcome);
+        }
+    }
 }
 
 /// Estimate tau within a set of indices.
@@ -395,8 +426,7 @@ fn build_node(
     {
         return CausalNode {
             tau,
-            n_treated,
-            n_control,
+            honest_valid: false,
             split: None,
         };
     }
@@ -486,8 +516,7 @@ fn build_node(
 
             CausalNode {
                 tau,
-                n_treated,
-                n_control,
+                honest_valid: false,
                 split: Some(CausalSplit {
                     feature: feat,
                     threshold,
@@ -498,9 +527,108 @@ fn build_node(
         }
         None => CausalNode {
             tau,
-            n_treated,
-            n_control,
+            honest_valid: false,
             split: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    /// Regression test for the honest-splitting bug: `populate_leaf_tau` was
+    /// a no-op, so leaf tau came entirely from `train_idx` (the same sample
+    /// that chose where the splits are) -- the classic adaptive-estimation
+    /// bias honest forests exist to avoid. This builds a two-leaf tree by
+    /// hand with an obviously-wrong "training" tau in each leaf, then checks
+    /// that `populate_leaf_tau` overwrites it with the value implied by the
+    /// estimation sample alone.
+    #[test]
+    fn populate_leaf_tau_uses_only_estimation_indices() {
+        let mut tree = CausalNode {
+            tau: 999.0, // deliberately wrong "training" value
+            honest_valid: false,
+            split: Some(CausalSplit {
+                feature: 0,
+                threshold: 0.5,
+                left: Box::new(CausalNode { tau: 999.0, honest_valid: false, split: None }),
+                right: Box::new(CausalNode { tau: 999.0, honest_valid: false, split: None }),
+            }),
+        };
+
+        // 4 estimation points: 2 route left (x<0.5), 2 route right (x>=0.5).
+        let features = array![[0.0], [0.1], [0.9], [1.0]];
+        // Left leaf: treated outcome 10, control outcome 0 -> honest tau = 10.
+        // Right leaf: treated outcome 3, control outcome 1 -> honest tau = 2.
+        let treatment = vec![1, 0, 1, 0];
+        let outcome = vec![10.0, 0.0, 3.0, 1.0];
+        let est_idx = vec![0, 1, 2, 3];
+
+        populate_leaf_tau(&mut tree, &features, &est_idx, &treatment, &outcome);
+
+        let split = tree.split.as_ref().unwrap();
+        assert!(split.left.honest_valid);
+        assert!(
+            (split.left.tau - 10.0).abs() < 1e-9,
+            "left leaf tau should be the honest estimation-sample value (10.0), got {} \
+             (999.0 would mean the training-sample value leaked through)",
+            split.left.tau
+        );
+        assert!(split.right.honest_valid);
+        assert!(
+            (split.right.tau - 2.0).abs() < 1e-9,
+            "right leaf tau should be the honest estimation-sample value (2.0), got {}",
+            split.right.tau
+        );
+    }
+
+    /// A leaf with no treated (or no control) unit among the routed
+    /// estimation points has no honest estimate and must be marked invalid,
+    /// not silently default to 0.0 (a fabricated "no effect" claim).
+    #[test]
+    fn populate_leaf_tau_marks_leaf_invalid_without_both_groups() {
+        let mut leaf = CausalNode { tau: 0.0, honest_valid: false, split: None };
+        let features = array![[0.0], [0.1]];
+        let treatment = vec![1, 1]; // both treated: no control reaches this leaf
+        let outcome = vec![5.0, 6.0];
+        let est_idx = vec![0, 1];
+
+        populate_leaf_tau(&mut leaf, &features, &est_idx, &treatment, &outcome);
+
+        assert!(!leaf.honest_valid, "a leaf with no honest control unit must not be marked valid");
+    }
+
+    /// End-to-end: samples whose leaf receives no honest estimation data are
+    /// excluded from that tree's vote (not given a fabricated tau of 0), and
+    /// a homogeneous true effect is still recovered reasonably by the ATE.
+    #[test]
+    fn honest_forest_recovers_constant_treatment_effect() {
+        let n = 200;
+        let mut rng_features = StdRng::seed_from_u64(11);
+        let mut features_flat = Vec::with_capacity(n);
+        let mut treatment = Vec::with_capacity(n);
+        let mut outcome = Vec::with_capacity(n);
+        for i in 0..n {
+            let x: f64 = rng_features.random::<f64>() * 10.0;
+            let t = i % 2; // balanced treatment assignment
+            // Constant true effect of 5.0, no heterogeneity in x.
+            let noise: f64 = (rng_features.random::<f64>() - 0.5) * 0.5;
+            let y = 5.0 * t as f64 + x * 0.1 + noise;
+            features_flat.push(x);
+            treatment.push(t);
+            outcome.push(y);
+        }
+        let features = Array2::from_shape_vec((n, 1), features_flat).unwrap();
+
+        let cf = CausalForest::new().with_n_estimators(50).with_seed(7);
+        let result = cf.estimate(&features, &treatment, &outcome, &["x".into()]).unwrap();
+
+        assert!(
+            (result.ate - 5.0).abs() < 1.0,
+            "ATE should recover the constant true effect (5.0), got {}",
+            result.ate
+        );
     }
 }
