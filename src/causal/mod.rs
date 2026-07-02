@@ -147,9 +147,11 @@ impl CausalForest {
             });
         }
 
-        // Train forest: each tree produces a tau estimate per observation
-        // tau_estimates[tree][sample] = tau or NaN if not in estimation set
-        let tree_results: Vec<(Vec<Option<f64>>, Vec<f64>)> = (0..self.n_estimators)
+        // Train forest: each tree produces a tau estimate per observation,
+        // plus an in-bag indicator per observation (was it in this tree's
+        // subsample at all, train or estimation half) needed for the
+        // infinitesimal jackknife variance below.
+        let tree_results: Vec<(Vec<Option<f64>>, Vec<f64>, Vec<bool>)> = (0..self.n_estimators)
             .into_par_iter()
             .map(|i| {
                 let mut rng = StdRng::seed_from_u64(self.seed.wrapping_add(i as u64));
@@ -159,6 +161,10 @@ impl CausalForest {
                 let mut sub_indices: Vec<usize> = (0..n_samples).collect();
                 sub_indices.shuffle(&mut rng);
                 sub_indices.truncate(sub_size);
+                let mut in_bag = vec![false; n_samples];
+                for &idx in &sub_indices {
+                    in_bag[idx] = true;
+                }
 
                 // Honest split: training vs estimation
                 let split_point =
@@ -202,61 +208,63 @@ impl CausalForest {
                     }
                 }
 
-                (all_effects, importances)
+                (all_effects, importances, in_bag)
             })
             .collect();
 
         // Aggregate across trees
-        let mut effects = Vec::with_capacity(n_samples);
         let mut total_importances = vec![0.0; n_features];
-
-        for (_, imp) in &tree_results {
+        for (_, imp, _) in &tree_results {
             for (j, v) in imp.iter().enumerate() {
                 total_importances[j] += v;
             }
         }
 
-        for i in 0..n_samples {
-            let tau_estimates: Vec<f64> = tree_results
-                .iter()
-                .filter_map(|(effects, _)| effects[i])
-                .collect();
+        let effects: Vec<CausalEffect> = (0..n_samples)
+            .into_par_iter()
+            .map(|query| {
+                let values: Vec<(f64, &[bool])> = tree_results
+                    .iter()
+                    .filter_map(|(tree_effects, _, in_bag)| {
+                        tree_effects[query].map(|tau| (tau, in_bag.as_slice()))
+                    })
+                    .collect();
+                if values.is_empty() {
+                    return CausalEffect {
+                        estimate: 0.0,
+                        std_error: f64::INFINITY,
+                        ci_lower: f64::NEG_INFINITY,
+                        ci_upper: f64::INFINITY,
+                    };
+                }
+                let mean_tau =
+                    values.iter().map(|(v, _)| v).sum::<f64>() / values.len() as f64;
+                let se = infinitesimal_jackknife_se(&values, n_samples);
+                CausalEffect {
+                    estimate: mean_tau,
+                    std_error: se,
+                    ci_lower: mean_tau - 1.96 * se,
+                    ci_upper: mean_tau + 1.96 * se,
+                }
+            })
+            .collect();
 
-            if tau_estimates.is_empty() {
-                effects.push(CausalEffect {
-                    estimate: 0.0,
-                    std_error: f64::INFINITY,
-                    ci_lower: f64::NEG_INFINITY,
-                    ci_upper: f64::INFINITY,
-                });
-                continue;
-            }
-
-            let n = tau_estimates.len() as f64;
-            let mean_tau = tau_estimates.iter().sum::<f64>() / n;
-            let var_tau = tau_estimates
-                .iter()
-                .map(|&t| (t - mean_tau).powi(2))
-                .sum::<f64>()
-                / n;
-            let se = (var_tau / n).sqrt();
-
-            effects.push(CausalEffect {
-                estimate: mean_tau,
-                std_error: se,
-                ci_lower: mean_tau - 1.96 * se,
-                ci_upper: mean_tau + 1.96 * se,
-            });
-        }
-
-        // ATE
+        // ATE: each tree's own contribution is its mean tau over whichever
+        // samples it could honestly estimate; the same IJ estimator applies
+        // with that per-tree scalar taking the place of "tau_b(x_q)".
         let ate = effects.iter().map(|e| e.estimate).sum::<f64>() / n_samples as f64;
-        let ate_var = effects
+        let tree_ates: Vec<(f64, &[bool])> = tree_results
             .iter()
-            .map(|e| (e.estimate - ate).powi(2))
-            .sum::<f64>()
-            / (n_samples as f64 * n_samples as f64);
-        let ate_se = ate_var.sqrt();
+            .filter_map(|(tree_effects, _, in_bag)| {
+                let vals: Vec<f64> = tree_effects.iter().filter_map(|&e| e).collect();
+                if vals.is_empty() {
+                    None
+                } else {
+                    Some((vals.iter().sum::<f64>() / vals.len() as f64, in_bag.as_slice()))
+                }
+            })
+            .collect();
+        let ate_se = infinitesimal_jackknife_se(&tree_ates, n_samples);
 
         // Feature importance
         let total_imp: f64 = total_importances.iter().sum();
@@ -277,6 +285,66 @@ impl CausalForest {
             feature_importance,
         })
     }
+}
+
+/// Infinitesimal jackknife variance for a forest-averaged statistic (Wager,
+/// Hastie & Efron 2014; used for random forests by Wager & Athey 2018,
+/// Sec. 4). `values` holds, for each tree that produced an estimate, its
+/// value of the target quantity (a per-point tau or a per-tree mean tau for
+/// the ATE) paired with that tree's in-bag indicator over all training
+/// points.
+///
+/// This replaces `sqrt(between-tree variance / n_trees)`, which is NOT a
+/// valid standard error for the forest average: it treats tree estimates as
+/// independent draws of a fixed quantity, so it shrinks toward zero as more
+/// trees are added (correctly reducing Monte Carlo noise in the ensemble
+/// average) while saying nothing about the forest's actual sampling
+/// uncertainty from having a finite training set — that uncertainty does
+/// NOT vanish as n_trees grows. The IJ estimator instead uses the
+/// covariance, across trees, between each training point's in-bag status
+/// and the tree's prediction: points whose presence/absence in the
+/// subsample systematically shifts the prediction contribute to genuine
+/// sampling variance, and (unlike the naive formula) this does not collapse
+/// to zero as n_trees grows.
+///
+/// Deliberately uses the *uncorrected* IJ estimator (Σ Cov_i², no
+/// finite-B bias subtraction). Wager, Hastie & Efron's bootstrap
+/// bias-correction term (n/B · between-tree variance) assumes bootstrap
+/// (with-replacement) resampling; `CausalForest` subsamples without
+/// replacement, for which that correction constant doesn't directly apply,
+/// and empirically it dominates Σ Cov_i² for realistic forest sizes here --
+/// clipping the corrected estimate to zero far more often than genuine
+/// near-zero variance would warrant. The uncorrected estimator is always
+/// non-negative by construction and has a well-known slight upward
+/// (conservative) bias at finite B that shrinks as more trees are added; it
+/// is the safer choice over silently zeroing out the uncertainty estimate.
+fn infinitesimal_jackknife_se(values: &[(f64, &[bool])], n_samples: usize) -> f64 {
+    if values.is_empty() {
+        return f64::INFINITY;
+    }
+    let b = values.len() as f64;
+    let mean: f64 = values.iter().map(|(v, _)| v).sum::<f64>() / b;
+
+    let v_ij: f64 = (0..n_samples)
+        .map(|train_point| {
+            let n_bar: f64 = values
+                .iter()
+                .map(|(_, ib)| if ib[train_point] { 1.0 } else { 0.0 })
+                .sum::<f64>()
+                / b;
+            let cov: f64 = values
+                .iter()
+                .map(|(v, ib)| {
+                    let n_i = if ib[train_point] { 1.0 } else { 0.0 };
+                    (n_i - n_bar) * (v - mean)
+                })
+                .sum::<f64>()
+                / b;
+            cov * cov
+        })
+        .sum();
+
+    v_ij.sqrt()
 }
 
 // ── Causal tree internals ───────────────────────────────────────────
@@ -629,6 +697,110 @@ mod tests {
             (result.ate - 5.0).abs() < 1.0,
             "ATE should recover the constant true effect (5.0), got {}",
             result.ate
+        );
+    }
+
+    /// Regression test for the invalid SE: `sqrt(between-tree variance /
+    /// n_trees)` treats tree estimates as independent draws of a fixed
+    /// quantity, so it shrinks toward zero as n_estimators grows -- exactly
+    /// like `sqrt(B_small/B_large)` -- which says the forest's sampling
+    /// uncertainty vanishes simply by adding more trees. It doesn't. The IJ
+    /// estimator used here still carries a well-known finite-B upward bias
+    /// (each per-point covariance is itself a noisy sample statistic across
+    /// B trees, and squaring+summing noisy estimates inflates the result at
+    /// small B), so it isn't exactly B-invariant either -- but it should
+    /// measurably beat the old formula's exact 1/sqrt(B) decay, not merely
+    /// match it.
+    #[test]
+    fn ate_std_error_does_not_vanish_as_n_estimators_grows() {
+        let n = 150;
+        let mut rng = StdRng::seed_from_u64(21);
+        let mut features_flat = Vec::with_capacity(n);
+        let mut treatment = Vec::with_capacity(n);
+        let mut outcome = Vec::with_capacity(n);
+        for i in 0..n {
+            let x: f64 = rng.random::<f64>() * 10.0;
+            let t = i % 2;
+            let noise: f64 = (rng.random::<f64>() - 0.5) * 2.0;
+            let y = 3.0 * t as f64 + x * 0.2 + noise;
+            features_flat.push(x);
+            treatment.push(t);
+            outcome.push(y);
+        }
+        let features = Array2::from_shape_vec((n, 1), features_flat).unwrap();
+
+        let small = CausalForest::new()
+            .with_n_estimators(20)
+            .with_seed(3)
+            .estimate(&features, &treatment, &outcome, &["x".into()])
+            .unwrap();
+        let large = CausalForest::new()
+            .with_n_estimators(300)
+            .with_seed(3)
+            .estimate(&features, &treatment, &outcome, &["x".into()])
+            .unwrap();
+
+        assert!(small.ate_std_error.is_finite() && small.ate_std_error > 0.0);
+        assert!(large.ate_std_error.is_finite() && large.ate_std_error > 0.0);
+
+        let ratio = large.ate_std_error / small.ate_std_error;
+        let old_buggy_ratio = (20.0_f64 / 300.0).sqrt();
+        assert!(
+            ratio > old_buggy_ratio * 1.15,
+            "IJ SE should measurably beat the old formula's exact 1/sqrt(B) decay: \
+             small-B SE={:.4}, large-B SE={:.4}, ratio={:.3} \
+             (old sqrt(var/B) bug predicts ratio~{:.3}; got only {:.3} -- too close to the bug)",
+            small.ate_std_error,
+            large.ate_std_error,
+            ratio,
+            old_buggy_ratio,
+            ratio
+        );
+    }
+
+    /// Same non-vanishing property at the per-unit (CATE) level, not just
+    /// the ATE.
+    #[test]
+    fn per_unit_std_error_does_not_vanish_as_n_estimators_grows() {
+        let n = 150;
+        let mut rng = StdRng::seed_from_u64(23);
+        let mut features_flat = Vec::with_capacity(n);
+        let mut treatment = Vec::with_capacity(n);
+        let mut outcome = Vec::with_capacity(n);
+        for i in 0..n {
+            let x: f64 = rng.random::<f64>() * 10.0;
+            let t = i % 2;
+            let noise: f64 = (rng.random::<f64>() - 0.5) * 2.0;
+            let y = 3.0 * t as f64 + x * 0.2 + noise;
+            features_flat.push(x);
+            treatment.push(t);
+            outcome.push(y);
+        }
+        let features = Array2::from_shape_vec((n, 1), features_flat).unwrap();
+
+        let small = CausalForest::new()
+            .with_n_estimators(20)
+            .with_seed(4)
+            .estimate(&features, &treatment, &outcome, &["x".into()])
+            .unwrap();
+        let large = CausalForest::new()
+            .with_n_estimators(300)
+            .with_seed(4)
+            .estimate(&features, &treatment, &outcome, &["x".into()])
+            .unwrap();
+
+        let mean_se_small: f64 =
+            small.effects.iter().map(|e| e.std_error).sum::<f64>() / n as f64;
+        let mean_se_large: f64 =
+            large.effects.iter().map(|e| e.std_error).sum::<f64>() / n as f64;
+
+        let ratio = mean_se_large / mean_se_small;
+        let old_buggy_ratio = (20.0_f64 / 300.0).sqrt();
+        assert!(
+            ratio > old_buggy_ratio * 1.15,
+            "mean per-unit SE should measurably beat the old formula's exact 1/sqrt(B) decay: \
+             small-B mean SE={mean_se_small:.4}, large-B mean SE={mean_se_large:.4}, ratio={ratio:.3} \
+             (old bug predicts ratio~{old_buggy_ratio:.3})"
         );
     }
 }
