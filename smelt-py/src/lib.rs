@@ -119,6 +119,80 @@ fn not_fitted() -> PyErr {
     PyRuntimeError::new_err("Model not fitted. Call fit() first.")
 }
 
+/// Defines a PyO3 wrapper class for a smelt-ml learner: the `#[pyclass]`
+/// struct holding hyperparameters + trained state, `new`/`fit`/`predict`,
+/// a `feature_importances_` getter (always safe -- `Learner::feature_importance`
+/// defaults to `None` for learners that don't implement it), and optionally
+/// `predict_proba` for classification-capable learners. Exposes a reasonable
+/// subset of each learner's hyperparameters, matching the hand-written
+/// wrappers above (e.g. `RandomForest` doesn't expose `subsample`/
+/// `colsample_bytree` either) rather than the full Rust builder surface.
+macro_rules! define_learner {
+    (
+        name = $name:ident,
+        params = { $( $field:ident : $ty:ty = $default:expr ),* $(,)? },
+        ctor = |$slf:ident| $ctor_expr:expr,
+        proba = $has_proba:tt $(,)?
+    ) => {
+        #[pyclass]
+        struct $name {
+            trained: Option<Box<dyn TrainedModel>>,
+            is_classif: bool,
+            $( $field: $ty, )*
+        }
+
+        #[pymethods]
+        impl $name {
+            #[new]
+            #[pyo3(signature = ( $( $field = $default ),* ))]
+            fn new( $( $field: $ty ),* ) -> Self {
+                Self { trained: None, is_classif: false, $( $field ),* }
+            }
+
+            fn fit(
+                &mut self,
+                py: Python<'_>,
+                x: PyReadonlyArray2<'_, f64>,
+                y: &Bound<'_, PyAny>,
+            ) -> PyResult<()> {
+                let mut learner = { let $slf = &*self; $ctor_expr };
+                let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+                self.trained = Some(model);
+                self.is_classif = is_classif;
+                Ok(())
+            }
+
+            fn predict<'py>(
+                &self,
+                py: Python<'py>,
+                x: PyReadonlyArray2<'_, f64>,
+            ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+                predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+            }
+
+            #[getter]
+            fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
+                Ok(self.trained.as_ref().ok_or_else(not_fitted)?.feature_importance())
+            }
+        }
+
+        define_learner!(@proba $name, $has_proba);
+    };
+    (@proba $name:ident, true) => {
+        #[pymethods]
+        impl $name {
+            fn predict_proba<'py>(
+                &self,
+                py: Python<'py>,
+                x: PyReadonlyArray2<'_, f64>,
+            ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+                predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+            }
+        }
+    };
+    (@proba $name:ident, false) => {};
+}
+
 // ── XGBoost ────────────────────────────────────────────────────────────
 
 #[pyclass]
@@ -1350,6 +1424,105 @@ impl GeoXGBoost {
     }
 }
 
+// ── Learners added via define_learner! (previously unexposed to Python) ─
+
+define_learner! {
+    name = AdaBoost,
+    params = { n_estimators: usize = 50, learning_rate: f64 = 1.0 },
+    ctor = |slf| smelt_ml::prelude::AdaBoost::default()
+        .with_n_estimators(slf.n_estimators)
+        .with_learning_rate(slf.learning_rate),
+    proba = true,
+}
+
+define_learner! {
+    name = EBM,
+    params = { n_rounds: usize = 100, learning_rate: f64 = 0.01, max_depth: usize = 3, seed: u64 = 42 },
+    ctor = |slf| smelt_ml::prelude::EBM::default()
+        .with_n_rounds(slf.n_rounds)
+        .with_learning_rate(slf.learning_rate)
+        .with_max_depth(slf.max_depth)
+        .with_seed(slf.seed),
+    proba = true,
+}
+
+define_learner! {
+    name = Lasso,
+    params = { alpha: f64 = 1.0 },
+    ctor = |slf| smelt_ml::prelude::Lasso::new(slf.alpha),
+    proba = false,
+}
+
+define_learner! {
+    name = ElasticNet,
+    params = { alpha: f64 = 1.0, l1_ratio: f64 = 0.5 },
+    ctor = |slf| smelt_ml::prelude::ElasticNet::new(slf.alpha, slf.l1_ratio),
+    proba = false,
+}
+
+define_learner! {
+    name = GradientBoosting,
+    params = { n_estimators: usize = 100, learning_rate: f64 = 0.1, max_depth: usize = 3, seed: u64 = 42 },
+    ctor = |slf| smelt_ml::prelude::GradientBoosting::default()
+        .with_n_estimators(slf.n_estimators)
+        .with_learning_rate(slf.learning_rate)
+        .with_max_depth(slf.max_depth)
+        .with_seed(slf.seed),
+    proba = true,
+}
+
+define_learner! {
+    name = HoeffdingTree,
+    params = { grace_period: usize = 200, max_depth: usize = 10 },
+    ctor = |slf| smelt_ml::prelude::HoeffdingTree::default()
+        .with_grace_period(slf.grace_period)
+        .with_max_depth(slf.max_depth),
+    proba = true,
+}
+
+define_learner! {
+    name = LinearSVM,
+    params = { c: f64 = 1.0, max_iter: usize = 1000, learning_rate: f64 = 0.01, seed: u64 = 42 },
+    ctor = |slf| smelt_ml::prelude::LinearSVM::default()
+        .with_c(slf.c)
+        .with_max_iter(slf.max_iter)
+        .with_learning_rate(slf.learning_rate)
+        .with_seed(slf.seed),
+    proba = true,
+}
+
+define_learner! {
+    name = ObliqueTree,
+    params = { max_depth: usize = 10, n_projections: usize = 10, seed: u64 = 42 },
+    ctor = |slf| smelt_ml::prelude::ObliqueTree::default()
+        .with_max_depth(slf.max_depth)
+        .with_n_projections(slf.n_projections)
+        .with_seed(slf.seed),
+    proba = true,
+}
+
+define_learner! {
+    name = QuantileForest,
+    params = { n_estimators: usize = 100, max_depth: usize = 10, min_samples_leaf: usize = 5, seed: u64 = 42 },
+    ctor = |slf| smelt_ml::prelude::QuantileForest::default()
+        .with_n_estimators(slf.n_estimators)
+        .with_max_depth(slf.max_depth)
+        .with_min_samples_leaf(slf.min_samples_leaf)
+        .with_seed(slf.seed),
+    proba = false,
+}
+
+define_learner! {
+    name = QuantileGB,
+    params = { quantile: f64 = 0.5, n_estimators: usize = 100, learning_rate: f64 = 0.1, max_depth: usize = 3, seed: u64 = 42 },
+    ctor = |slf| smelt_ml::prelude::QuantileGB::new(slf.quantile)
+        .with_n_estimators(slf.n_estimators)
+        .with_learning_rate(slf.learning_rate)
+        .with_max_depth(slf.max_depth)
+        .with_seed(slf.seed),
+    proba = false,
+}
+
 // ── SHAP + Permutation Importance (shared helpers) ────────────────────
 
 fn resolve_measure(metric: &str) -> PyResult<Box<dyn Measure>> {
@@ -1617,6 +1790,22 @@ declare_support!(LogisticRegression, classif = true,  regress = false);
 declare_support!(GaussianNB,         classif = true,  regress = false);
 declare_support!(LinearRegression,   classif = false, regress = true);
 declare_support!(Ridge,              classif = false, regress = true);
+
+add_explain_methods!(
+    AdaBoost, EBM, Lasso, ElasticNet, GradientBoosting, HoeffdingTree,
+    LinearSVM, ObliqueTree, QuantileForest, QuantileGB,
+);
+
+declare_support!(AdaBoost,          classif = true,  regress = false);
+declare_support!(EBM,               classif = true,  regress = true);
+declare_support!(Lasso,             classif = false, regress = true);
+declare_support!(ElasticNet,        classif = false, regress = true);
+declare_support!(GradientBoosting,  classif = true,  regress = true);
+declare_support!(HoeffdingTree,     classif = true,  regress = false);
+declare_support!(LinearSVM,         classif = true,  regress = false);
+declare_support!(ObliqueTree,       classif = true,  regress = true);
+declare_support!(QuantileForest,    classif = false, regress = true);
+declare_support!(QuantileGB,        classif = false, regress = true);
 
 // ── RFE ───────────────────────────────────────────────────────────────
 
@@ -2013,6 +2202,16 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<KNearestNeighbors>()?;
     m.add_class::<GaussianNB>()?;
     m.add_class::<GeoXGBoost>()?;
+    m.add_class::<AdaBoost>()?;
+    m.add_class::<EBM>()?;
+    m.add_class::<Lasso>()?;
+    m.add_class::<ElasticNet>()?;
+    m.add_class::<GradientBoosting>()?;
+    m.add_class::<HoeffdingTree>()?;
+    m.add_class::<LinearSVM>()?;
+    m.add_class::<ObliqueTree>()?;
+    m.add_class::<QuantileForest>()?;
+    m.add_class::<QuantileGB>()?;
 
     // Preprocessing
     m.add_class::<StandardScaler>()?;
