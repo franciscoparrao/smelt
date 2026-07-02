@@ -56,6 +56,19 @@ pub struct XGBoost {
     /// and hessian are scaled by its weight — the standard way to fit a weighted
     /// objective. Used by GeoXGBoost to apply the bi-square spatial kernel.
     sample_weight: Option<Vec<f64>>,
+    /// Optional held-out set for early stopping. When set, `early_stopping_rounds`
+    /// monitors loss on this set instead of the training set. Training loss under
+    /// boosting is (near-)monotonically decreasing, so without a validation set
+    /// early stopping rarely plateaus and almost never actually fires — it isn't
+    /// a substitute for evaluating on unseen data.
+    eval_set: Option<(Array2<f64>, EvalTarget)>,
+}
+
+/// Held-out target for early-stopping evaluation, paired with `eval_set`'s
+/// features. Must match the task type the model is trained on.
+enum EvalTarget {
+    Regression(Vec<f64>),
+    Classification(Vec<usize>),
 }
 
 impl Default for XGBoost {
@@ -74,6 +87,7 @@ impl Default for XGBoost {
             early_stopping_rounds: 0,
             seed: 42,
             sample_weight: None,
+            eval_set: None,
         }
     }
 }
@@ -130,6 +144,21 @@ impl XGBoost {
     /// number of training samples; each gradient/hessian is scaled by its weight.
     pub fn with_sample_weights(mut self, w: Vec<f64>) -> Self {
         self.sample_weight = Some(w);
+        self
+    }
+    /// Set a held-out set that `early_stopping_rounds` evaluates on, for
+    /// regression. Without this, early stopping monitors training loss, which
+    /// rarely plateaus under boosting and so rarely actually fires.
+    pub fn with_eval_set_regress(mut self, features: Array2<f64>, target: Vec<f64>) -> Self {
+        self.eval_set = Some((features, EvalTarget::Regression(target)));
+        self
+    }
+    /// Set a held-out set that `early_stopping_rounds` evaluates on, for
+    /// classification (binary or multiclass). Without this, early stopping
+    /// monitors training loss, which rarely plateaus under boosting and so
+    /// rarely actually fires.
+    pub fn with_eval_set_classif(mut self, features: Array2<f64>, target: Vec<usize>) -> Self {
+        self.eval_set = Some((features, EvalTarget::Classification(target)));
         self
     }
 }
@@ -885,6 +914,61 @@ impl XGBoost {
         let tree = builder.build(indices, 0, n, 0);
         (tree, builder.feature_importances)
     }
+
+    /// Validate `self.eval_set` for a regression task and return the
+    /// (features, target) pair to evaluate on for early stopping, if set.
+    fn validate_eval_regress(&self, n_features: usize) -> Result<Option<(&Array2<f64>, &[f64])>> {
+        match &self.eval_set {
+            None => Ok(None),
+            Some((ef, EvalTarget::Regression(et))) => {
+                if ef.ncols() != n_features {
+                    return Err(SmeltError::DimensionMismatch {
+                        expected: n_features,
+                        got: ef.ncols(),
+                    });
+                }
+                if et.len() != ef.nrows() {
+                    return Err(SmeltError::DimensionMismatch {
+                        expected: ef.nrows(),
+                        got: et.len(),
+                    });
+                }
+                Ok(Some((ef, et.as_slice())))
+            }
+            Some((_, EvalTarget::Classification(_))) => Err(SmeltError::InvalidParameter(
+                "eval_set was set via with_eval_set_classif but the model is training a regression task".into(),
+            )),
+        }
+    }
+
+    /// Validate `self.eval_set` for a classification task and return the
+    /// (features, target) pair to evaluate on for early stopping, if set.
+    fn validate_eval_classif(
+        &self,
+        n_features: usize,
+    ) -> Result<Option<(&Array2<f64>, &[usize])>> {
+        match &self.eval_set {
+            None => Ok(None),
+            Some((ef, EvalTarget::Classification(et))) => {
+                if ef.ncols() != n_features {
+                    return Err(SmeltError::DimensionMismatch {
+                        expected: n_features,
+                        got: ef.ncols(),
+                    });
+                }
+                if et.len() != ef.nrows() {
+                    return Err(SmeltError::DimensionMismatch {
+                        expected: ef.nrows(),
+                        got: et.len(),
+                    });
+                }
+                Ok(Some((ef, et.as_slice())))
+            }
+            Some((_, EvalTarget::Regression(_))) => Err(SmeltError::InvalidParameter(
+                "eval_set was set via with_eval_set_regress but the model is training a classification task".into(),
+            )),
+        }
+    }
 }
 
 impl Learner for XGBoost {
@@ -904,6 +988,7 @@ impl Learner for XGBoost {
                 });
             }
         }
+        let eval = self.validate_eval_regress(nf)?;
         let bins = HistBins::build(features, self.n_bins);
         // Weighted mean as the initial prediction when sample weights are set.
         let initial = match &self.sample_weight {
@@ -918,6 +1003,7 @@ impl Learner for XGBoost {
             None => target.iter().sum::<f64>() / ns as f64,
         };
         let mut preds = vec![initial; ns];
+        let mut eval_preds = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
         let mut trees = Vec::with_capacity(self.n_estimators);
         let mut imp = vec![0.0; nf];
         let mut rng = StdRng::seed_from_u64(self.seed);
@@ -940,30 +1026,43 @@ impl Learner for XGBoost {
             for i in 0..ns {
                 preds[i] += self.learning_rate * tree.predict_one(features.row(i));
             }
+            if let (Some(ep), Some((ef, _))) = (&mut eval_preds, eval) {
+                for i in 0..ef.nrows() {
+                    ep[i] += self.learning_rate * tree.predict_one(ef.row(i));
+                }
+            }
             for (j, v) in fi.iter().enumerate() {
                 imp[j] += v;
             }
             trees.push(tree);
 
             if self.early_stopping_rounds > 0 {
-                let loss = match &self.sample_weight {
-                    Some(w) => {
-                        let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
-                        preds
-                            .iter()
-                            .zip(target)
-                            .zip(w)
-                            .map(|((p, y), wi)| wi * (p - y).powi(2))
-                            .sum::<f64>()
-                            / wsum
-                    }
-                    None => {
-                        preds
-                            .iter()
-                            .zip(target)
-                            .map(|(p, y)| (p - y).powi(2))
-                            .sum::<f64>()
-                            / ns as f64
+                // Evaluate on the held-out set when one was provided —
+                // training loss is (near-)monotonically decreasing under
+                // boosting and rarely plateaus, so it's a poor early-stopping
+                // signal on its own.
+                let loss = if let (Some(ep), Some((_, et))) = (&eval_preds, eval) {
+                    ep.iter().zip(et).map(|(p, y)| (p - y).powi(2)).sum::<f64>() / ep.len() as f64
+                } else {
+                    match &self.sample_weight {
+                        Some(w) => {
+                            let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                            preds
+                                .iter()
+                                .zip(target)
+                                .zip(w)
+                                .map(|((p, y), wi)| wi * (p - y).powi(2))
+                                .sum::<f64>()
+                                / wsum
+                        }
+                        None => {
+                            preds
+                                .iter()
+                                .zip(target)
+                                .map(|(p, y)| (p - y).powi(2))
+                                .sum::<f64>()
+                                / ns as f64
+                        }
                     }
                 };
                 if loss < best_loss - 1e-10 {
@@ -1011,6 +1110,7 @@ impl XGBoost {
                 });
             }
         }
+        let eval = self.validate_eval_classif(nf)?;
         let bins = HistBins::build(features, self.n_bins);
         // Weighted positive-class fraction as the initial log-odds when
         // sample weights are set (same objective as XGBoost's base_score).
@@ -1032,6 +1132,7 @@ impl XGBoost {
         };
         let initial = (p_pos / (1.0 - p_pos).max(1e-15)).ln();
         let mut fv = vec![initial; ns];
+        let mut eval_fv = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
         let mut trees = Vec::with_capacity(self.n_estimators);
         let mut imp = vec![0.0; nf];
         let mut rng = StdRng::seed_from_u64(self.seed);
@@ -1059,6 +1160,11 @@ impl XGBoost {
             for i in 0..ns {
                 fv[i] += self.learning_rate * tree.predict_one(features.row(i));
             }
+            if let (Some(efv), Some((ef, _))) = (&mut eval_fv, eval) {
+                for i in 0..ef.nrows() {
+                    efv[i] += self.learning_rate * tree.predict_one(ef.row(i));
+                }
+            }
             for (j, v) in fi.iter().enumerate() {
                 imp[j] += v;
             }
@@ -1066,17 +1172,31 @@ impl XGBoost {
 
             if self.early_stopping_rounds > 0 {
                 let eps = 1e-15;
-                let per_point = |i: usize| {
-                    let p = sigmoid(fv[i]).max(eps).min(1.0 - eps);
-                    let y = target[i] as f64;
-                    -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
-                };
-                let loss = match &self.sample_weight {
-                    Some(w) => {
-                        let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
-                        (0..ns).map(|i| w[i] * per_point(i)).sum::<f64>() / wsum
+                // Evaluate on the held-out set when one was provided —
+                // training loss rarely plateaus under boosting.
+                let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
+                    et.iter()
+                        .zip(efv)
+                        .map(|(&y, &f)| {
+                            let p = sigmoid(f).max(eps).min(1.0 - eps);
+                            let y = y as f64;
+                            -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
+                        })
+                        .sum::<f64>()
+                        / efv.len() as f64
+                } else {
+                    let per_point = |i: usize| {
+                        let p = sigmoid(fv[i]).max(eps).min(1.0 - eps);
+                        let y = target[i] as f64;
+                        -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
+                    };
+                    match &self.sample_weight {
+                        Some(w) => {
+                            let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                            (0..ns).map(|i| w[i] * per_point(i)).sum::<f64>() / wsum
+                        }
+                        None => (0..ns).map(per_point).sum::<f64>() / ns as f64,
                     }
-                    None => (0..ns).map(per_point).sum::<f64>() / ns as f64,
                 };
                 if loss < best_loss - 1e-10 {
                     best_loss = loss;
@@ -1113,6 +1233,7 @@ impl XGBoost {
                 });
             }
         }
+        let eval = self.validate_eval_classif(nf)?;
         let bins = HistBins::build(features, self.n_bins);
         // Weighted per-class frequency as the initial log-prior when sample
         // weights are set.
@@ -1136,6 +1257,8 @@ impl XGBoost {
             }
         };
         let mut fv: Vec<Vec<f64>> = (0..ns).map(|_| initial.clone()).collect();
+        let mut eval_fv: Option<Vec<Vec<f64>>> =
+            eval.map(|(ef, _)| (0..ef.nrows()).map(|_| initial.clone()).collect());
         let mut trees = Vec::with_capacity(self.n_estimators * nc);
         let mut imp = vec![0.0; nf];
         let mut rng = StdRng::seed_from_u64(self.seed);
@@ -1163,6 +1286,11 @@ impl XGBoost {
                 for i in 0..ns {
                     fv[i][c] += self.learning_rate * tree.predict_one(features.row(i));
                 }
+                if let (Some(efv), Some((ef, _))) = (&mut eval_fv, eval) {
+                    for i in 0..ef.nrows() {
+                        efv[i][c] += self.learning_rate * tree.predict_one(ef.row(i));
+                    }
+                }
                 for (j, v) in fi.iter().enumerate() {
                     imp[j] += v;
                 }
@@ -1170,14 +1298,24 @@ impl XGBoost {
             }
             if self.early_stopping_rounds > 0 {
                 let eps = 1e-15;
-                let pn: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
-                let per_point = |i: usize| -pn[i][target[i]].max(eps).ln();
-                let loss: f64 = match &self.sample_weight {
-                    Some(w) => {
-                        let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
-                        (0..ns).map(|i| w[i] * per_point(i)).sum::<f64>() / wsum
+                // Evaluate on the held-out set when one was provided —
+                // training loss rarely plateaus under boosting.
+                let loss: f64 = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
+                    let epn: Vec<Vec<f64>> = efv.iter().map(|f| softmax(f)).collect();
+                    (0..et.len())
+                        .map(|i| -epn[i][et[i]].max(eps).ln())
+                        .sum::<f64>()
+                        / et.len() as f64
+                } else {
+                    let pn: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
+                    let per_point = |i: usize| -pn[i][target[i]].max(eps).ln();
+                    match &self.sample_weight {
+                        Some(w) => {
+                            let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                            (0..ns).map(|i| w[i] * per_point(i)).sum::<f64>() / wsum
+                        }
+                        None => (0..ns).map(per_point).sum::<f64>() / ns as f64,
                     }
-                    None => (0..ns).map(per_point).sum::<f64>() / ns as f64,
                 };
                 if loss < best_loss - 1e-10 {
                     best_loss = loss;
@@ -1348,5 +1486,99 @@ mod weight_tests {
         let task = ClassificationTask::new("wc_mismatch", features, target).unwrap();
         let mut m = XGBoost::new().with_sample_weights(vec![1.0; 5]);
         assert!(m.train_classif(&task).is_err());
+    }
+
+    /// Regression test: early stopping used to monitor training loss, which
+    /// is (near-)monotonically decreasing under boosting and so almost never
+    /// plateaus -- with a deliberately overfittable configuration (many
+    /// estimators, high depth, tiny lambda, small noisy dataset), the
+    /// train-loss-driven variant should overfit and generalize poorly, while
+    /// the eval-set-driven variant should stop once held-out loss stops
+    /// improving and generalize markedly better.
+    #[test]
+    fn eval_set_early_stopping_generalizes_better_than_train_loss_early_stopping() {
+        use rand::Rng;
+
+        let n = 40;
+        let make = |seed: u64| {
+            let mut r = StdRng::seed_from_u64(seed);
+            let mut feats = Vec::with_capacity(n);
+            let mut target = Vec::with_capacity(n);
+            for i in 0..n {
+                let x = i as f64;
+                feats.push(x);
+                target.push(x * 0.1 + r.random::<f64>() * 8.0); // weak signal, heavy noise
+            }
+            (Array2::from_shape_vec((n, 1), feats).unwrap(), target)
+        };
+        let (tr_feat, tr_tgt) = make(100);
+        let (va_feat, va_tgt) = make(200);
+
+        let base = || {
+            XGBoost::new()
+                .with_n_estimators(500)
+                .with_max_depth(10)
+                .with_learning_rate(0.5)
+                .with_lambda(0.0001)
+                .with_early_stopping_rounds(3)
+        };
+        let task = RegressionTask::new("es", tr_feat.clone(), tr_tgt.clone()).unwrap();
+
+        let rmse = |model: &dyn TrainedModel, feat: &Array2<f64>, tgt: &[f64]| {
+            let Prediction::Regression { predicted, .. } = model.predict(feat).unwrap() else {
+                unreachable!()
+            };
+            (predicted.iter().zip(tgt).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+                / tgt.len() as f64)
+                .sqrt()
+        };
+
+        let mut train_loss_stopped = base();
+        let m_train = train_loss_stopped.train_regress(&task).unwrap();
+        let train_loss_val_rmse = rmse(&*m_train, &va_feat, &va_tgt);
+
+        let mut eval_set_stopped = base().with_eval_set_regress(va_feat.clone(), va_tgt.clone());
+        let m_eval = eval_set_stopped.train_regress(&task).unwrap();
+        let eval_set_val_rmse = rmse(&*m_eval, &va_feat, &va_tgt);
+
+        assert!(
+            eval_set_val_rmse < train_loss_val_rmse * 0.9,
+            "eval-set early stopping (val RMSE={eval_set_val_rmse:.3}) should generalize \
+             markedly better than train-loss early stopping (val RMSE={train_loss_val_rmse:.3}) \
+             on this deliberately overfittable configuration"
+        );
+    }
+
+    #[test]
+    fn eval_set_regress_rejects_dimension_mismatch() {
+        let features = Array2::<f64>::zeros((10, 2));
+        let target = vec![0.0; 10];
+        let task = RegressionTask::new("es_dim", features, target).unwrap();
+
+        // Wrong number of eval features (1 col instead of 2).
+        let mut wrong_cols = XGBoost::new()
+            .with_early_stopping_rounds(2)
+            .with_eval_set_regress(Array2::<f64>::zeros((5, 1)), vec![0.0; 5]);
+        assert!(wrong_cols.train_regress(&task).is_err());
+
+        // Wrong eval target length.
+        let mut wrong_len = XGBoost::new()
+            .with_early_stopping_rounds(2)
+            .with_eval_set_regress(Array2::<f64>::zeros((5, 2)), vec![0.0; 3]);
+        assert!(wrong_len.train_regress(&task).is_err());
+    }
+
+    #[test]
+    fn eval_set_task_type_mismatch_is_rejected() {
+        let features = Array2::<f64>::zeros((10, 1));
+        let target = vec![0.0; 10];
+        let task = RegressionTask::new("es_type", features, target).unwrap();
+
+        // A classification eval_set on a regression task must error, not be
+        // silently ignored.
+        let mut mismatched = XGBoost::new()
+            .with_early_stopping_rounds(2)
+            .with_eval_set_classif(Array2::<f64>::zeros((5, 1)), vec![0usize; 5]);
+        assert!(mismatched.train_regress(&task).is_err());
     }
 }
