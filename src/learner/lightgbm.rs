@@ -212,6 +212,11 @@ fn goss_sample(
     sampled_rest.shuffle(rng);
     sampled_rest.truncate(other_n);
 
+    // Amplification factor for the randomly-sampled "small gradient" subset,
+    // so its contribution to the sum of gradients/hessians matches, in
+    // expectation, what the full "other" population would have contributed
+    // (Ke et al. 2017, Algorithm 2) -- this is GOSS's central correction;
+    // without it, the sampled sum is systematically biased low.
     let amplify = if other_n > 0 {
         (1.0 - top_rate) / other_rate.max(0.01)
     } else {
@@ -221,9 +226,14 @@ fn goss_sample(
     let mut selected: Vec<usize> = top_indices.to_vec();
     selected.extend_from_slice(&sampled_rest);
 
-    // Build weight multipliers (1.0 for top, amplify for sampled)
-    let mut weights = vec![1.0; selected.len()];
-    for i in top_n.min(selected.len())..selected.len() {
+    // Scatter weights back to original sample indices (0..n): build_recursive
+    // and find_best_split_hist look up `weights[i]` by original sample id,
+    // not by position within `selected`.
+    let mut weights = vec![0.0; n];
+    for &i in top_indices {
+        weights[i] = 1.0;
+    }
+    for &i in &sampled_rest {
         weights[i] = amplify;
     }
 
@@ -863,19 +873,15 @@ impl Learner for LightGBM {
             let grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
             let hess = vec![1.0; ns];
 
-            let (selected, _weights) =
+            let (selected, weights) =
                 goss_sample(&grads, &hess, self.top_rate, self.other_rate, &mut rng);
             let cols = self.sample_cols(&mut rng, nf);
-
-            // Remap grads/hess for selected indices
-            let _sel_grads: Vec<f64> = selected.iter().map(|&i| grads[i]).collect();
-            let _sel_hess: Vec<f64> = selected.iter().map(|&i| hess[i]).collect();
 
             let tree = build_recursive(
                 &bins,
                 &grads,
                 &hess,
-                &vec![1.0; ns],
+                &weights,
                 &selected,
                 &cols,
                 self.num_leaves,
@@ -934,16 +940,15 @@ impl LightGBM {
                     p * (1.0 - p).max(1e-15)
                 })
                 .collect();
-            let (selected, _weights) =
+            let (selected, weights) =
                 goss_sample(&grads, &hess, self.top_rate, self.other_rate, &mut rng);
             let cols = self.sample_cols(&mut rng, nf);
 
-            let all_weights = vec![1.0; ns]; // weights applied via GOSS selection
             let tree = build_recursive(
                 &bins,
                 &grads,
                 &hess,
-                &all_weights,
+                &weights,
                 &selected,
                 &cols,
                 self.num_leaves,
@@ -999,14 +1004,13 @@ impl LightGBM {
                 let hess: Vec<f64> = (0..ns)
                     .map(|i| (probs[i][c] * (1.0 - probs[i][c])).max(1e-15))
                     .collect();
-                let (selected, _) =
+                let (selected, weights) =
                     goss_sample(&grads, &hess, self.top_rate, self.other_rate, &mut rng);
-                let all_weights = vec![1.0; ns];
                 let tree = build_recursive(
                     &bins,
                     &grads,
                     &hess,
-                    &all_weights,
+                    &weights,
                     &selected,
                     &cols,
                     self.num_leaves,
@@ -1068,5 +1072,67 @@ mod tests {
             / n as f64)
             .sqrt();
         assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
+    }
+
+    /// Regression test for GOSS's central correction (Ke et al. 2017,
+    /// Algorithm 2): previously, all 3 call sites discarded the amplification
+    /// weights goss_sample computed and passed `vec![1.0; ns]` instead, so
+    /// the sampled "small gradient" subset's contribution to the
+    /// gradient/hessian sum was never amplified back up -- systematically
+    /// biasing the sum low by roughly `1 - (top_rate + other_rate)`.
+    ///
+    /// With hess=1 everywhere, the true total hessian mass is exactly `n`.
+    /// The weighted sum over GOSS's selection should approximate that in
+    /// expectation (top points contribute directly with weight 1; the
+    /// randomly-sampled "other" points are scaled by `amplify` so their
+    /// expected contribution reconstructs the full "other" population's
+    /// mass). The old bug would give top_n + other_n ≈ n*(top_rate+other_rate),
+    /// badly biased low.
+    #[test]
+    fn goss_sample_amplification_gives_unbiased_weighted_sum() {
+        let n = 1000;
+        let hess = vec![1.0; n];
+        let mut grads = vec![0.0; n];
+        for g in grads.iter_mut().take(100) {
+            *g = 10.0; // clear top-gradient subset
+        }
+        for g in grads.iter_mut().skip(100) {
+            *g = 0.1; // small-gradient tail
+        }
+
+        let top_rate = 0.2;
+        let other_rate = 0.1;
+        let trials = 200;
+        let mut total = 0.0;
+        for t in 0..trials {
+            let mut rng = StdRng::seed_from_u64(t as u64);
+            let (selected, weights) = goss_sample(&grads, &hess, top_rate, other_rate, &mut rng);
+            total += selected.iter().map(|&i| weights[i] * hess[i]).sum::<f64>();
+        }
+        let avg = total / trials as f64;
+
+        assert!(
+            (avg - n as f64).abs() < n as f64 * 0.15,
+            "average weighted hessian sum ({avg:.1}) should approximate the true \
+             total ({n}) -- the unweighted (buggy) estimate would be ~{:.0}",
+            n as f64 * (top_rate + other_rate)
+        );
+    }
+
+    #[test]
+    fn goss_sample_top_gradients_always_selected_with_unit_weight() {
+        let n = 200;
+        let hess = vec![1.0; n];
+        let mut grads = vec![0.1; n];
+        for g in grads.iter_mut().take(20) {
+            *g = 100.0; // unmistakably the top 20
+        }
+        let mut rng = StdRng::seed_from_u64(0);
+        let (selected, weights) = goss_sample(&grads, &hess, 0.1, 0.1, &mut rng);
+
+        for i in 0..20 {
+            assert!(selected.contains(&i), "top-gradient sample {i} should always be selected");
+            assert_eq!(weights[i], 1.0, "top-gradient samples must have weight 1.0");
+        }
     }
 }
