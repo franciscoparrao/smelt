@@ -7,7 +7,7 @@ use crate::prediction::Prediction;
 use crate::{Result, SmeltError};
 
 /// Trait for evaluation metrics.
-pub trait Measure {
+pub trait Measure: Send + Sync {
     /// Metric identifier (e.g., "classif.accuracy").
     fn id(&self) -> &str;
     /// Compute score. Higher is better for maximize=true, lower for maximize=false.

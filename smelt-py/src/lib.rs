@@ -29,23 +29,51 @@ fn is_integer(y: &Bound<'_, PyAny>) -> bool {
     y.extract::<Vec<i64>>().is_ok()
 }
 
+/// Convert Python integer labels to non-negative `usize` class indices.
+/// Rejects negative labels explicitly instead of letting `v as usize` wrap
+/// (e.g. the SVM convention `y = [-1, 1]` would otherwise become
+/// `18446744073709551615`, silently corrupting the class count downstream).
+fn extract_class_labels(y: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
+    let target: Vec<i64> = y.extract()?;
+    target
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| {
+            usize::try_from(v).map_err(|_| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "negative class label {v} at index {i}; class labels must be non-negative integers"
+                ))
+            })
+        })
+        .collect()
+}
+
+/// Train a learner, releasing the GIL for the (rayon-parallel, potentially
+/// long-running) training call. `y` is extracted into an owned Rust value
+/// first since that requires the GIL; the actual `train_classif`/
+/// `train_regress` call runs under `py.allow_threads` so it doesn't block
+/// other Python threads (e.g. a Jupyter kernel) or Ctrl+C for the duration.
 fn fit_learner(
+    py: Python<'_>,
     learner: &mut dyn Learner,
     features: Array2<f64>,
     y: &Bound<'_, PyAny>,
 ) -> PyResult<(Box<dyn TrainedModel>, bool)> {
     if is_integer(y) {
-        let target: Vec<i64> = y.extract()?;
-        let target: Vec<usize> = target.into_iter().map(|v| v as usize).collect();
+        let target = extract_class_labels(y)?;
         let task = smelt_ml::task::ClassificationTask::new("py", features, target)
             .map_err(smelt_err)?;
-        let model = learner.train_classif(&task).map_err(smelt_err)?;
+        let model = py
+            .allow_threads(|| learner.train_classif(&task))
+            .map_err(smelt_err)?;
         Ok((model, true))
     } else {
         let target: Vec<f64> = y.extract()?;
         let task =
             smelt_ml::task::RegressionTask::new("py", features, target).map_err(smelt_err)?;
-        let model = learner.train_regress(&task).map_err(smelt_err)?;
+        let model = py
+            .allow_threads(|| learner.train_regress(&task))
+            .map_err(smelt_err)?;
         Ok((model, false))
     }
 }
@@ -138,7 +166,12 @@ impl XGBoost {
         }
     }
 
-    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::XGBoost::new()
             .with_n_estimators(self.n_estimators)
             .with_max_depth(self.max_depth)
@@ -149,7 +182,7 @@ impl XGBoost {
             .with_subsample(self.subsample)
             .with_colsample_bytree(self.colsample_bytree)
             .with_seed(self.seed);
-        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -210,14 +243,19 @@ impl CatBoost {
         }
     }
 
-    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::CatBoost::new()
             .with_n_estimators(self.n_estimators)
             .with_depth(self.depth)
             .with_learning_rate(self.learning_rate)
             .with_lambda(self.lambda)
             .with_seed(self.seed);
-        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -265,12 +303,17 @@ impl RandomForest {
         }
     }
 
-    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::RandomForest::new()
             .with_n_estimators(self.n_estimators)
             .with_max_depth(self.max_depth)
             .with_seed(self.seed);
-        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -319,10 +362,15 @@ impl DecisionTree {
         }
     }
 
-    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let mut learner =
             smelt_ml::prelude::DecisionTree::default().with_max_depth(self.max_depth);
-        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -352,9 +400,14 @@ impl LogisticRegression {
         Self { trained: None, is_classif: false }
     }
 
-    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::LogisticRegression::new();
-        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -698,14 +751,19 @@ impl LightGBM {
         Self { trained: None, is_classif: false, n_estimators, num_leaves, learning_rate, max_depth, seed }
     }
 
-    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::LightGBM::new()
             .with_n_estimators(self.n_estimators)
             .with_num_leaves(self.num_leaves)
             .with_learning_rate(self.learning_rate)
             .with_max_depth(self.max_depth)
             .with_seed(self.seed);
-        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -744,12 +802,17 @@ impl ExtraTrees {
         Self { trained: None, is_classif: false, n_estimators, max_depth, seed }
     }
 
-    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::ExtraTrees::new()
             .with_n_estimators(self.n_estimators)
             .with_max_depth(self.max_depth)
             .with_seed(self.seed);
-        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -777,9 +840,14 @@ impl KNearestNeighbors {
         Self { trained: None, is_classif: false, k }
     }
 
-    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::KNearestNeighbors::new(self.k);
-        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -809,9 +877,14 @@ impl GaussianNB {
         Self { trained: None, is_classif: false }
     }
 
-    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::GaussianNB::new();
-        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -843,9 +916,14 @@ impl Ridge {
         Self { trained: None, is_classif: false, alpha }
     }
 
-    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::Ridge::new(self.alpha);
-        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -871,9 +949,14 @@ impl LinearRegression {
         Self { trained: None, is_classif: false }
     }
 
-    fn fit(&mut self, x: PyReadonlyArray2<'_, f64>, y: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::LinearRegression::new();
-        let (model, is_classif) = fit_learner(&mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -935,6 +1018,7 @@ impl GeoXGBoost {
     /// Train the model. `coords` is an (N, 2) array-like of (x, y) per sample.
     fn fit(
         &mut self,
+        py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: Vec<f64>,
         coords: &Bound<'_, PyAny>,
@@ -959,7 +1043,9 @@ impl GeoXGBoost {
         if let Some(a) = self.alpha {
             learner = learner.with_alpha(a);
         }
-        let trained = learner.train_geo(&task).map_err(smelt_err)?;
+        let trained = py
+            .allow_threads(|| learner.train_geo(&task))
+            .map_err(smelt_err)?;
         self.trained = Some(trained);
         Ok(())
     }
@@ -1020,7 +1106,9 @@ impl GeoXGBoost {
             .with_learning_rate(self.learning_rate)
             .with_lambda(self.lambda)
             .with_seed(self.seed);
-        let sel = learner.select_bandwidth(&task, &grid).map_err(smelt_err)?;
+        let sel = py
+            .allow_threads(|| learner.select_bandwidth(&task, &grid))
+            .map_err(smelt_err)?;
 
         // Store the selected bandwidth so the next fit() uses it.
         self.bandwidth = sel.best;
@@ -1202,19 +1290,20 @@ fn shap_impl<'py>(
     let names = feature_names.unwrap_or_else(|| (0..n_feat).map(|i| format!("f{i}")).collect());
 
     let result = if is_classif {
-        let target: Vec<i64> = y.extract()?;
-        let target: Vec<usize> = target.into_iter().map(|v| v as usize).collect();
+        let target = extract_class_labels(y)?;
         let mut task = smelt_ml::task::ClassificationTask::new("shap", features, target)
             .map_err(smelt_err)?;
         task = task.with_feature_names(names.clone()).map_err(smelt_err)?;
-        smelt_ml::importance::shap::tree_shap_classif(model, &task, n_background, target_class)
-            .map_err(smelt_err)?
+        py.allow_threads(|| {
+            smelt_ml::importance::shap::tree_shap_classif(model, &task, n_background, target_class)
+        })
+        .map_err(smelt_err)?
     } else {
         let target: Vec<f64> = y.extract()?;
         let mut task = smelt_ml::task::RegressionTask::new("shap", features, target)
             .map_err(smelt_err)?;
         task = task.with_feature_names(names.clone()).map_err(smelt_err)?;
-        smelt_ml::importance::shap::tree_shap_regress(model, &task, n_background)
+        py.allow_threads(|| smelt_ml::importance::shap::tree_shap_regress(model, &task, n_background))
             .map_err(smelt_err)?
     };
 
@@ -1257,22 +1346,27 @@ fn perm_importance_impl<'py>(
     let measure = resolve_measure(metric)?;
 
     let importances = if is_classif {
-        let target: Vec<i64> = y.extract()?;
-        let target: Vec<usize> = target.into_iter().map(|v| v as usize).collect();
+        let target = extract_class_labels(y)?;
         let mut task = smelt_ml::task::ClassificationTask::new("perm", features, target)
             .map_err(smelt_err)?;
         task = task.with_feature_names(names).map_err(smelt_err)?;
-        smelt_ml::importance::permutation_importance_classif(
-            model, &task, &*measure, n_repeats, seed,
-        ).map_err(smelt_err)?
+        py.allow_threads(|| {
+            smelt_ml::importance::permutation_importance_classif(
+                model, &task, &*measure, n_repeats, seed,
+            )
+        })
+        .map_err(smelt_err)?
     } else {
         let target: Vec<f64> = y.extract()?;
         let mut task = smelt_ml::task::RegressionTask::new("perm", features, target)
             .map_err(smelt_err)?;
         task = task.with_feature_names(names).map_err(smelt_err)?;
-        smelt_ml::importance::permutation_importance_regress(
-            model, &task, &*measure, n_repeats, seed,
-        ).map_err(smelt_err)?
+        py.allow_threads(|| {
+            smelt_ml::importance::permutation_importance_regress(
+                model, &task, &*measure, n_repeats, seed,
+            )
+        })
+        .map_err(smelt_err)?
     };
 
     // Return list of dicts
@@ -1603,16 +1697,17 @@ impl PyBayesianOptimizer {
         let features = to_array2(x);
 
         let result = if is_integer(y) {
-            let target: Vec<i64> = y.extract()?;
-            let target: Vec<usize> = target.into_iter().map(|v| v as usize).collect();
+            let target = extract_class_labels(y)?;
             let task = smelt_ml::task::ClassificationTask::new("bo", features, target)
                 .map_err(smelt_err)?;
-            bo.tune_classif(&task, &cv, &*measure).map_err(smelt_err)?
+            py.allow_threads(|| bo.tune_classif(&task, &cv, &*measure))
+                .map_err(smelt_err)?
         } else {
             let target: Vec<f64> = y.extract()?;
             let task = smelt_ml::task::RegressionTask::new("bo", features, target)
                 .map_err(smelt_err)?;
-            bo.tune_regress(&task, &cv, &*measure).map_err(smelt_err)?
+            py.allow_threads(|| bo.tune_regress(&task, &cv, &*measure))
+                .map_err(smelt_err)?
         };
 
         // Convert TuneResult to Python dict, casting integer params to int
@@ -1707,8 +1802,11 @@ fn rfe<'py>(
         y.extract()?
     };
 
-    selector.fit_supervised(&features, &target_f64).map_err(smelt_err)?;
-    let indices = selector.selected_indices().unwrap();
+    py.allow_threads(|| selector.fit_supervised(&features, &target_f64))
+        .map_err(smelt_err)?;
+    let indices = selector
+        .selected_indices()
+        .ok_or_else(|| PyRuntimeError::new_err("RFE selector was not fitted"))?;
 
     let names: Vec<String> = feature_names.unwrap_or_else(|| (0..n_feat).map(|i| format!("f{i}")).collect());
     let result: Vec<(String, usize)> = indices.iter().map(|&i| (names[i].clone(), i)).collect();
