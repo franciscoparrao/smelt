@@ -334,7 +334,7 @@ let task = CsvLoader::from_path("data.csv")
 - **CSV loading** — with auto label encoding
 - **Input validation** — dimension checks, NaN detection
 - **Model registry** — `learner_from_id("xgboost")` constructs any of the
-  20 non-ensemble learners by name, for data-driven experiment loops
+  21 non-ensemble learners by name, for data-driven experiment loops
 
 ## Architecture
 

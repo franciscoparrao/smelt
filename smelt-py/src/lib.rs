@@ -1502,6 +1502,17 @@ define_learner! {
 }
 
 define_learner! {
+    name = ObliqueForest,
+    params = { n_estimators: usize = 100, max_depth: usize = 10, n_projections: usize = 10, seed: u64 = 42 },
+    ctor = |slf| smelt_ml::prelude::ObliqueForest::default()
+        .with_n_estimators(slf.n_estimators)
+        .with_max_depth(slf.max_depth)
+        .with_n_projections(slf.n_projections)
+        .with_seed(slf.seed),
+    proba = true,
+}
+
+define_learner! {
     name = QuantileForest,
     params = { n_estimators: usize = 100, max_depth: usize = 10, min_samples_leaf: usize = 5, seed: u64 = 42 },
     ctor = |slf| smelt_ml::prelude::QuantileForest::default()
@@ -1793,7 +1804,7 @@ declare_support!(Ridge,              classif = false, regress = true);
 
 add_explain_methods!(
     AdaBoost, EBM, Lasso, ElasticNet, GradientBoosting, HoeffdingTree,
-    LinearSVM, ObliqueTree, QuantileForest, QuantileGB,
+    LinearSVM, ObliqueTree, ObliqueForest, QuantileForest, QuantileGB,
 );
 
 declare_support!(AdaBoost,          classif = true,  regress = false);
@@ -1804,6 +1815,7 @@ declare_support!(GradientBoosting,  classif = true,  regress = true);
 declare_support!(HoeffdingTree,     classif = true,  regress = false);
 declare_support!(LinearSVM,         classif = true,  regress = false);
 declare_support!(ObliqueTree,       classif = true,  regress = true);
+declare_support!(ObliqueForest,     classif = true,  regress = true);
 declare_support!(QuantileForest,    classif = false, regress = true);
 declare_support!(QuantileGB,        classif = false, regress = true);
 
@@ -2210,6 +2222,7 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<HoeffdingTree>()?;
     m.add_class::<LinearSVM>()?;
     m.add_class::<ObliqueTree>()?;
+    m.add_class::<ObliqueForest>()?;
     m.add_class::<QuantileForest>()?;
     m.add_class::<QuantileGB>()?;
 

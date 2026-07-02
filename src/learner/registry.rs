@@ -7,17 +7,20 @@
 use super::{
     AdaBoost, CatBoost, DecisionTree, ElasticNet, ExtraTrees, GaussianNB, GradientBoosting,
     HoeffdingTree, KNearestNeighbors, Lasso, Learner, LightGBM, LinearRegression, LinearSVM,
-    LogisticRegression, ObliqueTree, QuantileForest, QuantileGB, RandomForest, Ridge, XGBoost,
+    LogisticRegression, ObliqueForest, ObliqueTree, QuantileForest, QuantileGB, RandomForest,
+    Ridge, XGBoost,
 };
 use crate::{Result, SmeltError};
 
 /// Construct a learner by its `id()` string, using default hyperparameters.
 ///
-/// Not every learner is registered: ensembles that wrap other learners
-/// ([`super::Bagging`], [`super::Stacking`], [`super::DynamicEnsemble`],
-/// [`super::ObliqueForest`]) need a base-learner factory that has no
-/// sensible default, and [`super::GeoXGBoost`] needs training coordinates
-/// supplied externally. See [`registered_learner_ids`] for the full list.
+/// Not every learner is registered: [`super::Bagging`], [`super::Stacking`]
+/// and [`super::DynamicEnsemble`] wrap *other* learners via a base-learner
+/// factory that has no sensible default, and [`super::GeoXGBoost`] needs
+/// training coordinates supplied externally. [`super::ObliqueForest`], by
+/// contrast, is a self-contained ensemble of its own oblique trees (not
+/// pluggable) and *is* registered. See [`registered_learner_ids`] for the
+/// full list.
 pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
     Ok(match id {
         "adaboost" => Box::new(AdaBoost::default()),
@@ -34,6 +37,7 @@ pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
         "linear_regression" => Box::new(LinearRegression::default()),
         "linear_svm" => Box::new(LinearSVM::default()),
         "logistic_regression" => Box::new(LogisticRegression::default()),
+        "oblique_forest" => Box::new(ObliqueForest::default()),
         "oblique_tree" => Box::new(ObliqueTree::default()),
         "quantile_forest" => Box::new(QuantileForest::default()),
         "quantile_gb" => Box::new(QuantileGB::new(0.5)),
@@ -43,8 +47,8 @@ pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
         other => {
             return Err(SmeltError::InvalidParameter(format!(
                 "unknown learner id \"{other}\" (or not registry-constructible: \
-                 ensembles like bagging/stacking/dynamic_ensemble/oblique_forest need \
-                 a base-learner factory, and geo_xgboost needs training coordinates)"
+                 ensembles like bagging/stacking/dynamic_ensemble need a base-learner \
+                 factory, and geo_xgboost needs training coordinates)"
             )));
         }
     })
@@ -67,6 +71,7 @@ pub fn registered_learner_ids() -> &'static [&'static str] {
         "linear_regression",
         "linear_svm",
         "logistic_regression",
+        "oblique_forest",
         "oblique_tree",
         "quantile_forest",
         "quantile_gb",
@@ -94,8 +99,8 @@ mod tests {
     }
 
     #[test]
-    fn ensemble_ids_are_not_registered() {
-        for id in ["bagging", "stacking", "dynamic_ensemble", "oblique_forest", "geo_xgboost"] {
+    fn factory_based_ensemble_ids_are_not_registered() {
+        for id in ["bagging", "stacking", "dynamic_ensemble", "geo_xgboost"] {
             assert!(
                 learner_from_id(id).is_err(),
                 "{id} should not be registry-constructible"

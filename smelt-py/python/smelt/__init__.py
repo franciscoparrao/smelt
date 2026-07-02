@@ -34,6 +34,7 @@ from smelt._smelt import (
     HoeffdingTree,
     LinearSVM,
     ObliqueTree,
+    ObliqueForest,
     QuantileForest,
     QuantileGB,
     # Preprocessing
@@ -88,7 +89,7 @@ __all__ = [
     "LogisticRegression", "LinearRegression", "Ridge",
     "KNearestNeighbors", "GaussianNB", "GeoXGBoost",
     "AdaBoost", "EBM", "Lasso", "ElasticNet", "GradientBoosting",
-    "HoeffdingTree", "LinearSVM", "ObliqueTree", "QuantileForest", "QuantileGB",
+    "HoeffdingTree", "LinearSVM", "ObliqueTree", "ObliqueForest", "QuantileForest", "QuantileGB",
     "StandardScaler",
     "CrossValidation", "SpatialBlockCV", "SpatialBufferCV", "StratifiedCV", "GroupCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",
