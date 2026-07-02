@@ -1,6 +1,7 @@
 //! Measures: evaluate prediction quality.
 //!
-//! Classification: Accuracy, Precision, Recall, F1Score, LogLoss, AucRoc.
+//! Classification: Accuracy, Precision, Recall, F1Score, LogLoss, AucRoc,
+//! BalancedAccuracy, CohensKappa, Mcc, Brier.
 //! Regression: Rmse, Mae, RSquared, Mape.
 
 use crate::prediction::Prediction;
@@ -393,6 +394,200 @@ fn auc_binary(scores: &[f64], labels: &[bool]) -> Result<f64> {
     }
 
     Ok(auc / (n_pos * n_neg))
+}
+
+/// `n_classes x n_classes` confusion matrix: `matrix[true_class][predicted_class]`.
+fn confusion_matrix(predicted: &[usize], truth: &[usize], nc: usize) -> Vec<Vec<u64>> {
+    let mut m = vec![vec![0u64; nc]; nc];
+    for (&p, &t) in predicted.iter().zip(truth) {
+        m[t][p] += 1;
+    }
+    m
+}
+
+/// Balanced accuracy: macro-average of per-class recall (sensitivity).
+///
+/// Unlike plain [`Accuracy`], a classifier that always predicts the
+/// majority class scores 1/n_classes here instead of the majority
+/// class's prevalence — the right metric for imbalanced datasets.
+pub struct BalancedAccuracy;
+
+impl Measure for BalancedAccuracy {
+    fn id(&self) -> &str {
+        "classif.balanced_accuracy"
+    }
+    fn maximize(&self) -> bool {
+        true
+    }
+
+    fn score(&self, prediction: &Prediction) -> Result<f64> {
+        match prediction {
+            Prediction::Classification {
+                predicted,
+                truth: Some(truth),
+                ..
+            } => {
+                let nc = n_classes(predicted, truth);
+                let counts = class_counts(predicted, truth, nc);
+                let mut sum = 0.0;
+                let mut valid = 0;
+                for &(tp, _, fn_) in &counts {
+                    if tp + fn_ > 0 {
+                        sum += tp as f64 / (tp + fn_) as f64;
+                        valid += 1;
+                    }
+                }
+                Ok(if valid > 0 { sum / valid as f64 } else { 0.0 })
+            }
+            _ => Err(SmeltError::Other(
+                "BalancedAccuracy requires classification prediction with truth".into(),
+            )),
+        }
+    }
+}
+
+/// Cohen's Kappa: agreement between predictions and truth, corrected for
+/// the agreement expected by chance given the observed class marginals.
+/// 1 = perfect agreement, 0 = no better than chance, negative = worse
+/// than chance.
+pub struct CohensKappa;
+
+impl Measure for CohensKappa {
+    fn id(&self) -> &str {
+        "classif.kappa"
+    }
+    fn maximize(&self) -> bool {
+        true
+    }
+
+    fn score(&self, prediction: &Prediction) -> Result<f64> {
+        match prediction {
+            Prediction::Classification {
+                predicted,
+                truth: Some(truth),
+                ..
+            } => {
+                let nc = n_classes(predicted, truth);
+                let cm = confusion_matrix(predicted, truth, nc);
+                let n = predicted.len() as f64;
+                let po: f64 = (0..nc).map(|i| cm[i][i] as f64).sum::<f64>() / n;
+                let row_sum: Vec<f64> = (0..nc).map(|i| cm[i].iter().sum::<u64>() as f64).collect();
+                let col_sum: Vec<f64> = (0..nc)
+                    .map(|j| (0..nc).map(|i| cm[i][j]).sum::<u64>() as f64)
+                    .collect();
+                let pe: f64 = (0..nc).map(|i| row_sum[i] * col_sum[i]).sum::<f64>() / (n * n);
+                Ok(if (1.0 - pe).abs() > f64::EPSILON {
+                    (po - pe) / (1.0 - pe)
+                } else {
+                    // pe == 1 only when every sample falls in one class for both
+                    // predicted and truth marginals, i.e. trivially perfect agreement.
+                    1.0
+                })
+            }
+            _ => Err(SmeltError::Other(
+                "CohensKappa requires classification prediction with truth".into(),
+            )),
+        }
+    }
+}
+
+/// Matthews Correlation Coefficient, generalized to multiclass (Gorodkin,
+/// 2004). Ranges `[-1, 1]`: 1 = perfect prediction, 0 = no better than
+/// random, -1 = total disagreement. Unlike accuracy-based measures it
+/// accounts for all four confusion-matrix quadrants at once, so it stays
+/// informative under class imbalance.
+pub struct Mcc;
+
+impl Measure for Mcc {
+    fn id(&self) -> &str {
+        "classif.mcc"
+    }
+    fn maximize(&self) -> bool {
+        true
+    }
+
+    fn score(&self, prediction: &Prediction) -> Result<f64> {
+        match prediction {
+            Prediction::Classification {
+                predicted,
+                truth: Some(truth),
+                ..
+            } => {
+                let nc = n_classes(predicted, truth);
+                let cm = confusion_matrix(predicted, truth, nc); // cm[true][pred]
+                let n = predicted.len() as f64;
+                let c: f64 = (0..nc).map(|i| cm[i][i] as f64).sum();
+                // t_k = true occurrences of class k (row sum); p_k = predicted occurrences (col sum).
+                let t: Vec<f64> = (0..nc).map(|i| cm[i].iter().sum::<u64>() as f64).collect();
+                let p: Vec<f64> = (0..nc)
+                    .map(|j| (0..nc).map(|i| cm[i][j]).sum::<u64>() as f64)
+                    .collect();
+                let sum_tp: f64 = t.iter().zip(&p).map(|(ti, pi)| ti * pi).sum();
+                let sum_t2: f64 = t.iter().map(|ti| ti * ti).sum();
+                let sum_p2: f64 = p.iter().map(|pi| pi * pi).sum();
+                let numerator = c * n - sum_tp;
+                let denominator = ((n * n - sum_p2) * (n * n - sum_t2)).sqrt();
+                Ok(if denominator > f64::EPSILON {
+                    numerator / denominator
+                } else {
+                    // A degenerate marginal (predictions or truth collapse to one
+                    // class) makes the correlation undefined; mlr3/sklearn return 0.
+                    0.0
+                })
+            }
+            _ => Err(SmeltError::Other(
+                "MCC requires classification prediction with truth".into(),
+            )),
+        }
+    }
+}
+
+/// Brier score: mean squared error between predicted class probabilities
+/// and the one-hot true label, summed over classes. Lower is better (0 =
+/// perfect, matching sklearn's multiclass Brier score convention).
+pub struct Brier;
+
+impl Measure for Brier {
+    fn id(&self) -> &str {
+        "classif.brier"
+    }
+    fn maximize(&self) -> bool {
+        false
+    }
+
+    fn score(&self, prediction: &Prediction) -> Result<f64> {
+        match prediction {
+            Prediction::Classification {
+                truth: Some(truth),
+                probabilities: Some(probs),
+                ..
+            } => {
+                let n = truth.len() as f64;
+                let sum: f64 = truth
+                    .iter()
+                    .zip(probs)
+                    .map(|(&t, p)| {
+                        p.iter()
+                            .enumerate()
+                            .map(|(c, &pc)| {
+                                let indicator = if c == t { 1.0 } else { 0.0 };
+                                (pc - indicator).powi(2)
+                            })
+                            .sum::<f64>()
+                    })
+                    .sum::<f64>()
+                    / n;
+                Ok(sum)
+            }
+            Prediction::Classification {
+                probabilities: None,
+                ..
+            } => Err(SmeltError::Other("Brier requires probabilities".into())),
+            _ => Err(SmeltError::Other(
+                "Brier requires classification prediction with truth and probabilities".into(),
+            )),
+        }
+    }
 }
 
 // ── Regression metrics ──────────────────────────────────────────────

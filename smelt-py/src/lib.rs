@@ -686,6 +686,50 @@ fn recall_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
     smelt_ml::prelude::Recall.score(&pred).map_err(smelt_err)
 }
 
+#[pyfunction]
+fn balanced_accuracy_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
+    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred = Prediction::classification_with_truth(pred_u, y_true);
+    smelt_ml::prelude::BalancedAccuracy
+        .score(&pred)
+        .map_err(smelt_err)
+}
+
+#[pyfunction]
+fn cohens_kappa_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
+    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred = Prediction::classification_with_truth(pred_u, y_true);
+    smelt_ml::prelude::CohensKappa.score(&pred).map_err(smelt_err)
+}
+
+#[pyfunction]
+fn mcc_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
+    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred = Prediction::classification_with_truth(pred_u, y_true);
+    smelt_ml::prelude::Mcc.score(&pred).map_err(smelt_err)
+}
+
+/// Brier score. `y_proba` is 2D: `[[p0, p1, ...], ...]` (per-class probabilities).
+#[pyfunction]
+fn brier_score(y_true: Vec<usize>, y_proba: Vec<Vec<f64>>) -> PyResult<f64> {
+    let pred_class: Vec<usize> = y_proba
+        .iter()
+        .map(|p| {
+            p.iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(idx, _)| idx)
+                .ok_or_else(|| PyRuntimeError::new_err("y_proba contains an empty row"))
+        })
+        .collect::<PyResult<Vec<usize>>>()?;
+    let pred = Prediction::Classification {
+        predicted: pred_class,
+        truth: Some(y_true),
+        probabilities: Some(y_proba),
+    };
+    smelt_ml::prelude::Brier.score(&pred).map_err(smelt_err)
+}
+
 /// AUC-ROC score. Accepts y_proba as either:
 /// - 2D: [[p0, p1], ...] (per-class probabilities)
 /// - 1D: [p1, ...] (probability of positive class, sklearn-compatible)
@@ -1989,6 +2033,10 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(precision_score, m)?)?;
     m.add_function(wrap_pyfunction!(recall_score, m)?)?;
     m.add_function(wrap_pyfunction!(auc_roc_score, m)?)?;
+    m.add_function(wrap_pyfunction!(balanced_accuracy_score, m)?)?;
+    m.add_function(wrap_pyfunction!(cohens_kappa_score, m)?)?;
+    m.add_function(wrap_pyfunction!(mcc_score, m)?)?;
+    m.add_function(wrap_pyfunction!(brier_score, m)?)?;
 
     // Stats
     m.add_function(wrap_pyfunction!(wilcoxon_signed_rank, m)?)?;

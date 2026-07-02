@@ -2158,6 +2158,105 @@ fn auc_direction() {
     assert!(AucRoc.maximize());
 }
 
+// ── BalancedAccuracy / CohensKappa / MCC / Brier tests ───────────────
+
+#[test]
+fn balanced_accuracy_penalizes_majority_class_collapse() {
+    // 9 negatives, 1 positive; predicting all-negative gets 90% plain
+    // accuracy but should score 0.5 balanced accuracy (chance-level on
+    // the minority class).
+    let predicted = vec![0usize; 10];
+    let mut truth = vec![0usize; 9];
+    truth.push(1);
+    let pred = Prediction::classification_with_truth(predicted, truth);
+
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!((acc - 0.9).abs() < 1e-10);
+
+    let bacc = BalancedAccuracy.score(&pred).unwrap();
+    assert!(
+        (bacc - 0.5).abs() < 1e-10,
+        "expected balanced accuracy 0.5, got {bacc}"
+    );
+    assert!(BalancedAccuracy.maximize());
+}
+
+#[test]
+fn cohens_kappa_known_value() {
+    // 5 zeros, 5 ones; 8/10 correct, symmetric confusion matrix
+    // [[4,1],[1,4]] => po=0.8, pe=0.5 => kappa=(0.8-0.5)/(1-0.5)=0.6.
+    let predicted = vec![0, 0, 0, 0, 1, 0, 1, 1, 1, 1];
+    let truth = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    let pred = Prediction::classification_with_truth(predicted, truth);
+    let kappa = CohensKappa.score(&pred).unwrap();
+    assert!(
+        (kappa - 0.6).abs() < 1e-10,
+        "expected kappa=0.6, got {kappa}"
+    );
+}
+
+#[test]
+fn cohens_kappa_perfect_agreement() {
+    let pred = Prediction::classification_with_truth(vec![0, 1, 0, 1, 1], vec![0, 1, 0, 1, 1]);
+    let kappa = CohensKappa.score(&pred).unwrap();
+    assert!((kappa - 1.0).abs() < 1e-10);
+    assert!(CohensKappa.maximize());
+}
+
+#[test]
+fn mcc_known_value() {
+    // Same confusion matrix as the kappa test: TP=4, FN=1, FP=1, TN=4
+    // (class 1 as positive) => MCC = (16-1)/sqrt(5*5*5*5) = 0.6.
+    let predicted = vec![0, 0, 0, 0, 1, 0, 1, 1, 1, 1];
+    let truth = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    let pred = Prediction::classification_with_truth(predicted, truth);
+    let mcc = Mcc.score(&pred).unwrap();
+    assert!((mcc - 0.6).abs() < 1e-10, "expected mcc=0.6, got {mcc}");
+}
+
+#[test]
+fn mcc_perfect_and_random() {
+    let perfect = Prediction::classification_with_truth(vec![0, 1, 0, 1], vec![0, 1, 0, 1]);
+    assert!((Mcc.score(&perfect).unwrap() - 1.0).abs() < 1e-10);
+
+    // Degenerate: model always predicts class 0 => predicted marginal is
+    // constant => denominator is 0 => defined as 0 (mlr3/sklearn convention).
+    let degenerate = Prediction::classification_with_truth(vec![0, 0, 0, 0], vec![0, 1, 0, 1]);
+    assert!((Mcc.score(&degenerate).unwrap() - 0.0).abs() < 1e-10);
+    assert!(Mcc.maximize());
+}
+
+#[test]
+fn brier_known_value() {
+    let pred = Prediction::Classification {
+        predicted: vec![0, 1],
+        truth: Some(vec![0, 1]),
+        probabilities: Some(vec![vec![0.9, 0.1], vec![0.2, 0.8]]),
+    };
+    // sample0: (0.9-1)^2+(0.1-0)^2=0.02; sample1: (0.2-0)^2+(0.8-1)^2=0.08
+    // mean = 0.05
+    let brier = Brier.score(&pred).unwrap();
+    assert!((brier - 0.05).abs() < 1e-10, "expected 0.05, got {brier}");
+}
+
+#[test]
+fn brier_perfect_is_zero() {
+    let pred = Prediction::Classification {
+        predicted: vec![0, 1],
+        truth: Some(vec![0, 1]),
+        probabilities: Some(vec![vec![1.0, 0.0], vec![0.0, 1.0]]),
+    };
+    let brier = Brier.score(&pred).unwrap();
+    assert!(brier.abs() < 1e-10);
+    assert!(!Brier.maximize());
+}
+
+#[test]
+fn brier_requires_probabilities() {
+    let pred = Prediction::classification_with_truth(vec![0, 1], vec![0, 1]);
+    assert!(Brier.score(&pred).is_err());
+}
+
 // ── R² tests ───────────────────────────────────────────────────────
 
 #[test]

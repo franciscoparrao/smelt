@@ -79,7 +79,8 @@ pub mod prelude {
         QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, XGBoost,
     };
     pub use crate::measure::{
-        Accuracy, AucRoc, F1Score, LogLoss, Mae, Mape, Measure, Precision, RSquared, Recall, Rmse,
+        Accuracy, AucRoc, BalancedAccuracy, Brier, CohensKappa, F1Score, LogLoss, Mae, Mape, Mcc,
+        Measure, Precision, RSquared, Recall, Rmse,
     };
     pub use crate::prediction::Prediction;
     pub use crate::preprocess::{

@@ -43,6 +43,10 @@ from smelt._smelt import (
     precision_score,
     recall_score,
     auc_roc_score,
+    balanced_accuracy_score,
+    cohens_kappa_score,
+    mcc_score,
+    brier_score,
     # Stats
     wilcoxon_signed_rank,
     bootstrap_ci,
@@ -77,6 +81,7 @@ __all__ = [
     "CrossValidation", "SpatialBlockCV", "SpatialBufferCV", "StratifiedCV", "GroupCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",
     "f1_score", "precision_score", "recall_score", "auc_roc_score",
+    "balanced_accuracy_score", "cohens_kappa_score", "mcc_score", "brier_score",
     "wilcoxon_signed_rank", "bootstrap_ci", "sign_test",
     "filter_variance", "filter_correlation", "filter_anova_f",
     "filter_information_gain", "filter_mutual_information",
