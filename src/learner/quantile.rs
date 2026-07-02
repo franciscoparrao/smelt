@@ -7,8 +7,8 @@ use crate::learner::tree::TreeBuilder;
 use crate::learner::tree::{LeafValue, Node};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::task::{ClassificationTask, RegressionTask, Task};
-use crate::{Result, SmeltError};
+use crate::Result;
+use crate::task::{RegressionTask, Task};
 use ndarray::Array2;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -108,11 +108,6 @@ impl Learner for QuantileGB {
         "quantile_gb"
     }
 
-    fn train_classif(&mut self, _: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "QuantileGB only supports regression".into(),
-        ))
-    }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();

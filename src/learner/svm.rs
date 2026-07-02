@@ -2,8 +2,8 @@
 
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::task::{ClassificationTask, RegressionTask, Task};
-use crate::{Result, SmeltError};
+use crate::Result;
+use crate::task::{ClassificationTask, Task};
 use ndarray::{Array1, Array2};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -244,11 +244,5 @@ impl Learner for LinearSVM {
             n_classes,
             feature_names: task.feature_names().to_vec(),
         }))
-    }
-
-    fn train_regress(&mut self, _: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "LinearSVM does not support regression".into(),
-        ))
     }
 }

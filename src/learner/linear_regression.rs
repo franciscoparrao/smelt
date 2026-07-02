@@ -4,7 +4,7 @@
 
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::task::{RegressionTask, Task};
 use crate::{Result, SmeltError};
 use ndarray::{Array1, Array2};
 
@@ -143,12 +143,6 @@ impl TrainedModel for TrainedLinearRegression {
 impl Learner for LinearRegression {
     fn id(&self) -> &str {
         "linear_regression"
-    }
-
-    fn train_classif(&mut self, _task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "LinearRegression does not support classification".into(),
-        ))
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {

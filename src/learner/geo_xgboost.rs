@@ -15,7 +15,7 @@ use crate::learner::xgboost::XGBoost;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::resample::{CrossValidation, Resample};
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::task::{RegressionTask, Task};
 use crate::{Result, SmeltError};
 use ndarray::Array2;
 use rayon::prelude::*;
@@ -433,12 +433,6 @@ impl TrainedModel for TrainedGeoXGBoost {
 impl Learner for GeoXGBoost {
     fn id(&self) -> &str {
         "geo_xgboost"
-    }
-
-    fn train_classif(&mut self, _: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "GeoXGBoost only supports regression".into(),
-        ))
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {

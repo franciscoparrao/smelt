@@ -26,9 +26,9 @@ pub mod svm;
 pub mod tree;
 pub mod xgboost;
 
-use crate::Result;
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask};
+use crate::{Result, SmeltError};
 use ndarray::Array2;
 
 pub use adaboost::AdaBoost;
@@ -56,15 +56,30 @@ pub use tree::random_forest::RandomForest;
 pub use xgboost::XGBoost;
 
 /// Core trait for classification learners.
+///
+/// Most learners only implement one of `train_classif`/`train_regress` (e.g.
+/// `LinearRegression` is regression-only, `GaussianNB` is classification-only);
+/// the other falls back to the default, which reports unsupported via `Result`
+/// rather than requiring every learner to write out an identical error stub.
 pub trait Learner: Send + Sync {
     /// Unique learner identifier (e.g., "classif.decision_tree").
     fn id(&self) -> &str;
 
     /// Train on a classification task, returning a trained model.
-    fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>>;
+    fn train_classif(&mut self, _task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        Err(SmeltError::InvalidParameter(format!(
+            "{} does not support classification",
+            self.id()
+        )))
+    }
 
     /// Train on a regression task, returning a trained model.
-    fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>>;
+    fn train_regress(&mut self, _task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        Err(SmeltError::InvalidParameter(format!(
+            "{} does not support regression",
+            self.id()
+        )))
+    }
 }
 
 /// A trained model that can make predictions.

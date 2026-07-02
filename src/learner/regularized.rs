@@ -2,7 +2,7 @@
 
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::task::{RegressionTask, Task};
 use crate::{Result, SmeltError};
 use ndarray::{Array1, Array2};
 use serde::{Deserialize, Serialize};
@@ -136,12 +136,6 @@ fn solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
 impl Learner for Ridge {
     fn id(&self) -> &str {
         "ridge"
-    }
-
-    fn train_classif(&mut self, _: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "Ridge does not support classification".into(),
-        ))
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
@@ -294,12 +288,6 @@ impl Learner for Lasso {
         "lasso"
     }
 
-    fn train_classif(&mut self, _: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "Lasso does not support classification".into(),
-        ))
-    }
-
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         let x = task.features();
         let y = task.target();
@@ -378,12 +366,6 @@ impl Default for ElasticNet {
 impl Learner for ElasticNet {
     fn id(&self) -> &str {
         "elastic_net"
-    }
-
-    fn train_classif(&mut self, _: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "ElasticNet does not support classification".into(),
-        ))
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {

@@ -5,8 +5,8 @@
 use crate::learner::math::sigmoid;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::task::{ClassificationTask, RegressionTask, Task};
-use crate::{Result, SmeltError};
+use crate::Result;
+use crate::task::{ClassificationTask, Task};
 use ndarray::{Array1, Array2};
 
 /// Logistic Regression learner.
@@ -280,11 +280,5 @@ impl Learner for LogisticRegression {
             scale_means: means,
             scale_stds: stds,
         }))
-    }
-
-    fn train_regress(&mut self, _task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "LogisticRegression does not support regression".into(),
-        ))
     }
 }

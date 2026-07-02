@@ -11,8 +11,8 @@
 
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::task::{ClassificationTask, RegressionTask, Task};
-use crate::{Result, SmeltError};
+use crate::Result;
+use crate::task::{ClassificationTask, Task};
 use ndarray::Array2;
 
 /// Dynamic Ensemble Selection (KNORA-E).
@@ -187,11 +187,5 @@ impl Learner for DynamicEnsemble {
             n_classes,
             k: self.k_neighbors.min(task.n_samples()),
         }))
-    }
-
-    fn train_regress(&mut self, _: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "DynamicEnsemble supports classification only".into(),
-        ))
     }
 }

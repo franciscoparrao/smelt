@@ -11,8 +11,8 @@
 
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::task::{ClassificationTask, RegressionTask, Task};
-use crate::{Result, SmeltError};
+use crate::Result;
+use crate::task::{ClassificationTask, Task};
 use ndarray::Array2;
 use std::collections::HashMap;
 
@@ -405,12 +405,6 @@ impl Learner for HoeffdingTree {
             n_features: self.n_features,
             n_classes,
         }))
-    }
-
-    fn train_regress(&mut self, _task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "HoeffdingTree currently supports classification only".into(),
-        ))
     }
 }
 

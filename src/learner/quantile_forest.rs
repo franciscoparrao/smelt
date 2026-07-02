@@ -7,8 +7,8 @@
 
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::task::{ClassificationTask, RegressionTask, Task};
-use crate::{Result, SmeltError};
+use crate::Result;
+use crate::task::{RegressionTask, Task};
 use ndarray::Array2;
 use rand::Rng;
 use rand::SeedableRng;
@@ -272,12 +272,6 @@ impl TrainedModel for TrainedQuantileForest {
 impl Learner for QuantileForest {
     fn id(&self) -> &str {
         "quantile_forest"
-    }
-
-    fn train_classif(&mut self, _: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "QuantileForest only supports regression".into(),
-        ))
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {

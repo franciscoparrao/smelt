@@ -2,8 +2,8 @@
 
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::task::{ClassificationTask, RegressionTask, Task};
-use crate::{Result, SmeltError};
+use crate::Result;
+use crate::task::{ClassificationTask, Task};
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 
@@ -263,11 +263,5 @@ impl Learner for AdaBoost {
             n_classes,
             feature_names: task.feature_names().to_vec(),
         }))
-    }
-
-    fn train_regress(&mut self, _: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
-        Err(SmeltError::Other(
-            "AdaBoost does not support regression".into(),
-        ))
     }
 }
