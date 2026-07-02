@@ -1179,4 +1179,35 @@ mod weight_tests {
         let mut m = XGBoost::new().with_sample_weights(vec![1.0; 5]);
         assert!(m.train_regress(&task).is_err());
     }
+
+    /// Regression test for the histogram binning boundary bug (src/learner/histogram.rs):
+    /// a binary feature that perfectly determines the target used to be unsplittable
+    /// once n > n_bins forced histogram mode (the two values collapsed into one bin),
+    /// so the model collapsed to predicting the global mean.
+    #[test]
+    fn binary_feature_is_splittable_in_histogram_mode() {
+        let n = 600; // > default n_bins (256) forces histogram (non-exact) mode
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            let bit = (i % 2) as f64;
+            features[[i, 0]] = bit;
+            target[i] = bit * 10.0;
+        }
+        let task = RegressionTask::new("binary", features.clone(), target.clone()).unwrap();
+        let mut model = XGBoost::new().with_n_estimators(20).with_learning_rate(0.5);
+        let trained = model.train_regress(&task).unwrap();
+        let pred = match trained.predict(&features).unwrap() {
+            Prediction::Regression { predicted, .. } => predicted,
+            _ => unreachable!(),
+        };
+        let rmse = (pred
+            .iter()
+            .zip(&target)
+            .map(|(p, t)| (p - t).powi(2))
+            .sum::<f64>()
+            / n as f64)
+            .sqrt();
+        assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
+    }
 }

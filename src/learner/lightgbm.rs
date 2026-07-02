@@ -1034,3 +1034,39 @@ impl LightGBM {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for the histogram binning boundary bug (src/learner/histogram.rs):
+    /// LightGBM always uses histogram splits, so a binary feature that perfectly
+    /// determines the target used to be unsplittable (both values collapsed into
+    /// bin 0), making the model predict the global mean regardless of n.
+    #[test]
+    fn binary_feature_is_splittable() {
+        let n = 600;
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            let bit = (i % 2) as f64;
+            features[[i, 0]] = bit;
+            target[i] = bit * 10.0;
+        }
+        let task = RegressionTask::new("binary", features.clone(), target.clone()).unwrap();
+        let mut model = LightGBM::new().with_n_estimators(20).with_learning_rate(0.5);
+        let trained = model.train_regress(&task).unwrap();
+        let pred = match trained.predict(&features).unwrap() {
+            Prediction::Regression { predicted, .. } => predicted,
+            _ => unreachable!(),
+        };
+        let rmse = (pred
+            .iter()
+            .zip(&target)
+            .map(|(p, t)| (p - t).powi(2))
+            .sum::<f64>()
+            / n as f64)
+            .sqrt();
+        assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
+    }
+}

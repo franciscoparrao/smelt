@@ -52,7 +52,7 @@ impl HistBins {
                 bounds.push(vals[idx as usize]);
                 idx += step;
             }
-            if bounds.is_empty() || *bounds.last().unwrap() < vals[n_unique - 1] {
+            if bounds.is_empty() || *bounds.last().unwrap() <= vals[n_unique - 1] {
                 bounds.push(f64::INFINITY);
             }
 
@@ -93,5 +93,46 @@ impl HistBins {
     #[inline]
     pub fn get_bin(&self, feature: usize, sample: usize) -> u8 {
         self.cols[feature][sample]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test: a binary {0,1} feature must land in two distinct bins.
+    /// Previously the boundary-generation loop only pushed the INFINITY sentinel
+    /// when the last generated boundary was strictly less than the max value;
+    /// with n_unique <= n_bins the last boundary equals the max exactly, so the
+    /// sentinel was skipped and both values fell into bin 0 — making binary
+    /// (and other low-cardinality, e.g. one-hot) features unsplittable.
+    #[test]
+    fn binary_feature_gets_two_bins() {
+        let features = Array2::from_shape_vec((4, 1), vec![0.0, 1.0, 0.0, 1.0]).unwrap();
+        let bins = HistBins::build(&features, 256);
+        assert_eq!(bins.n_bins(0), 2, "binary feature must produce 2 bins");
+        assert_ne!(
+            bins.get_bin(0, 0),
+            bins.get_bin(0, 1),
+            "0.0 and 1.0 must land in different bins"
+        );
+    }
+
+    /// Same failure mode for any low-cardinality feature (n_unique <= n_bins):
+    /// every distinct value must be separable from its neighbor.
+    #[test]
+    fn low_cardinality_feature_separates_all_values() {
+        let features = Array2::from_shape_vec((5, 1), vec![1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
+        let bins = HistBins::build(&features, 256);
+        let assigned: Vec<u8> = (0..5).map(|i| bins.get_bin(0, i)).collect();
+        for i in 1..5 {
+            assert_ne!(
+                assigned[i - 1],
+                assigned[i],
+                "distinct values {} and {} collapsed into the same bin",
+                i,
+                i + 1
+            );
+        }
     }
 }

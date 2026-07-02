@@ -755,6 +755,37 @@ mod tests {
             "CatBoost diverged: max_pred={max_abs}, y_max={y_max}"
         );
     }
+
+    /// Regression test for the histogram binning boundary bug (src/learner/histogram.rs):
+    /// CatBoost always uses histogram splits (64 bins hardcoded), so any feature with
+    /// <=64 unique values used to lose its top-2 values to the same bin. A binary
+    /// feature perfectly determining the target must remain splittable.
+    #[test]
+    fn binary_feature_is_splittable() {
+        let n = 600;
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            let bit = (i % 2) as f64;
+            features[[i, 0]] = bit;
+            target[i] = bit * 10.0;
+        }
+        let task = RegressionTask::new("binary", features.clone(), target.clone()).unwrap();
+        let mut model = CatBoost::new().with_n_estimators(20).with_learning_rate(0.5);
+        let trained = model.train_regress(&task).unwrap();
+        let pred = trained.predict(&features).unwrap();
+        let Prediction::Regression { predicted, .. } = pred else {
+            panic!("expected regression")
+        };
+        let rmse = (predicted
+            .iter()
+            .zip(&target)
+            .map(|(p, t)| (p - t).powi(2))
+            .sum::<f64>()
+            / n as f64)
+            .sqrt();
+        assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
+    }
 }
 
 /// Build final target encoding map for prediction-time categorical handling.
