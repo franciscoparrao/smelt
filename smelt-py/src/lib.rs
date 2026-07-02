@@ -105,7 +105,7 @@ fn predict_proba_values<'py>(
             ..
         } => {
             let n = probs.len();
-            let k = probs[0].len();
+            let k = probs.first().map_or(0, |row| row.len());
             let flat: Vec<f64> = probs.iter().flatten().copied().collect();
             let arr = Array2::from_shape_vec((n, k), flat)
                 .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
@@ -659,10 +659,10 @@ fn auc_roc_score(y_true: Vec<usize>, y_proba: &Bound<'_, PyAny>) -> PyResult<f64
             p.iter()
                 .enumerate()
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap()
-                .0
+                .map(|(idx, _)| idx)
+                .ok_or_else(|| PyRuntimeError::new_err("y_proba contains an empty row"))
         })
-        .collect();
+        .collect::<PyResult<Vec<usize>>>()?;
     let pred = Prediction::Classification {
         predicted: pred_class,
         truth: Some(y_true),
@@ -1608,19 +1608,28 @@ fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::tuning::Para
             let dtype: String = inner_dict.get_item("type")?
                 .ok_or_else(|| PyRuntimeError::new_err(format!("Missing 'type' for param '{name}'")))?
                 .extract()?;
+            let required = |field: &str| -> PyResult<Bound<'_, PyAny>> {
+                inner_dict
+                    .get_item(field)?
+                    .ok_or_else(|| {
+                        PyRuntimeError::new_err(format!(
+                            "param '{name}' of type '{dtype}' requires '{field}'"
+                        ))
+                    })
+            };
             match dtype.as_str() {
                 "uniform" => {
-                    let low: f64 = inner_dict.get_item("low")?.unwrap().extract()?;
-                    let high: f64 = inner_dict.get_item("high")?.unwrap().extract()?;
+                    let low: f64 = required("low")?.extract()?;
+                    let high: f64 = required("high")?.extract()?;
                     space.insert(name, ParamDistribution::Uniform(low, high));
                 }
                 "log_uniform" | "loguniform" => {
-                    let low: f64 = inner_dict.get_item("low")?.unwrap().extract()?;
-                    let high: f64 = inner_dict.get_item("high")?.unwrap().extract()?;
+                    let low: f64 = required("low")?.extract()?;
+                    let high: f64 = required("high")?.extract()?;
                     space.insert(name, ParamDistribution::LogUniform(low, high));
                 }
                 "choice" => {
-                    let choices: Vec<f64> = inner_dict.get_item("values")?.unwrap().extract()?;
+                    let choices: Vec<f64> = required("values")?.extract()?;
                     space.insert(name, ParamDistribution::Choice(choices));
                 }
                 _ => return Err(PyRuntimeError::new_err(format!("Unknown param type: {dtype}"))),
