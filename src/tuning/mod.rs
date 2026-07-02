@@ -10,6 +10,7 @@ pub use grid_search::GridSearch;
 pub use hyperband::Hyperband;
 pub use random_search::RandomSearch;
 
+use crate::{Result, SmeltError};
 use std::collections::HashMap;
 
 /// A single set of hyperparameter values.
@@ -52,7 +53,12 @@ impl TuneResult {
         results: Vec<(ParamSet, f64)>,
         measure_id: String,
         maximize: bool,
-    ) -> Self {
+    ) -> Result<Self> {
+        if results.is_empty() {
+            return Err(SmeltError::InvalidParameter(
+                "tuning produced no candidates to select from (n_iter=0 or an empty grid?)".into(),
+            ));
+        }
         let best_idx = if maximize {
             results
                 .iter()
@@ -62,7 +68,7 @@ impl TuneResult {
                         .partial_cmp(&b.1.1)
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
-                .unwrap()
+                .expect("checked non-empty above")
                 .0
         } else {
             results
@@ -73,17 +79,17 @@ impl TuneResult {
                         .partial_cmp(&b.1.1)
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
-                .unwrap()
+                .expect("checked non-empty above")
                 .0
         };
 
-        Self {
+        Ok(Self {
             best_params: results[best_idx].0.clone(),
             best_score: results[best_idx].1,
             all_results: results,
             measure_id,
             maximize,
-        }
+        })
     }
 }
 

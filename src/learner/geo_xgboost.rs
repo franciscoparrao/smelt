@@ -354,7 +354,7 @@ impl TrainedGeoXGBoost {
                 .iter()
                 .enumerate()
                 .map(|(j, &c)| (j, dist(new_coords[i], c)))
-                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(j, _)| j)
                 .unwrap_or(0);
 

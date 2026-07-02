@@ -71,11 +71,7 @@ impl GridSearch {
             results.push((params, mean_score));
         }
 
-        Ok(TuneResult::select_best(
-            results,
-            measure.id().to_string(),
-            measure.maximize(),
-        ))
+        TuneResult::select_best(results, measure.id().to_string(), measure.maximize())
     }
 
     /// Tune for regression. Returns the best hyperparameter configuration.
@@ -95,10 +91,6 @@ impl GridSearch {
             results.push((params, mean_score));
         }
 
-        Ok(TuneResult::select_best(
-            results,
-            measure.id().to_string(),
-            measure.maximize(),
-        ))
+        TuneResult::select_best(results, measure.id().to_string(), measure.maximize())
     }
 }

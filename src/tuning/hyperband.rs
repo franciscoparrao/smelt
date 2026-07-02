@@ -159,11 +159,7 @@ impl Hyperband {
             }
         }
 
-        Ok(TuneResult::select_best(
-            all_results,
-            measure.id().to_string(),
-            maximize,
-        ))
+        TuneResult::select_best(all_results, measure.id().to_string(), maximize)
     }
 
     /// Tune for regression using successive halving.
@@ -213,10 +209,6 @@ impl Hyperband {
             }
         }
 
-        Ok(TuneResult::select_best(
-            all_results,
-            measure.id().to_string(),
-            maximize,
-        ))
+        TuneResult::select_best(all_results, measure.id().to_string(), maximize)
     }
 }

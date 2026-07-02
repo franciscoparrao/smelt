@@ -112,11 +112,7 @@ impl RandomSearch {
             results.push((params, mean_score));
         }
 
-        Ok(TuneResult::select_best(
-            results,
-            measure.id().to_string(),
-            measure.maximize(),
-        ))
+        TuneResult::select_best(results, measure.id().to_string(), measure.maximize())
     }
 
     /// Tune for regression.
@@ -137,10 +133,6 @@ impl RandomSearch {
             results.push((params, mean_score));
         }
 
-        Ok(TuneResult::select_best(
-            results,
-            measure.id().to_string(),
-            measure.maximize(),
-        ))
+        TuneResult::select_best(results, measure.id().to_string(), measure.maximize())
     }
 }

@@ -21,7 +21,7 @@
 //! let xgb_scores  = vec![0.92, 0.89, 0.91, 0.90, 0.93];
 //! let rf_scores   = vec![0.88, 0.87, 0.89, 0.86, 0.90];
 //!
-//! let w = wilcoxon_signed_rank(&xgb_scores, &rf_scores);
+//! let w = wilcoxon_signed_rank(&xgb_scores, &rf_scores).unwrap();
 //! assert!(w.p_value < 0.05); // XGBoost significantly better
 //!
 //! // Bootstrap 95% CI for XGBoost accuracy
@@ -96,8 +96,10 @@ pub struct NemenyiResult {
 ///
 /// # Returns
 /// `TestResult` with the W statistic and two-sided p-value.
-pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> TestResult {
-    assert_eq!(a.len(), b.len(), "Samples must have equal length");
+pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> Result<TestResult> {
+    if a.len() != b.len() {
+        return Err(SmeltError::DimensionMismatch { expected: a.len(), got: b.len() });
+    }
     let n = a.len();
 
     // Compute differences, exclude zeros
@@ -114,12 +116,12 @@ pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> TestResult {
     let nr = diffs.len(); // effective n (excluding ties at zero)
 
     if nr == 0 {
-        return TestResult {
+        return Ok(TestResult {
             test: "Wilcoxon signed-rank",
             statistic: 0.0,
             p_value: 1.0,
             significant: false,
-        };
+        });
     }
 
     // Rank by absolute difference
@@ -170,12 +172,12 @@ pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> TestResult {
     // Two-sided p-value from standard normal
     let p_value = 2.0 * standard_normal_cdf(-z);
 
-    TestResult {
+    Ok(TestResult {
         test: "Wilcoxon signed-rank",
         statistic: w,
         p_value,
         significant: p_value < 0.05,
-    }
+    })
 }
 
 // ── Sign test ──────────────────────────────────────────────────────
@@ -184,8 +186,10 @@ pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> TestResult {
 ///
 /// Tests H0: P(A > B) = P(B > A) = 0.5.
 /// Simpler than Wilcoxon (ignores magnitude), but valid for very small n.
-pub fn sign_test(a: &[f64], b: &[f64]) -> TestResult {
-    assert_eq!(a.len(), b.len(), "Samples must have equal length");
+pub fn sign_test(a: &[f64], b: &[f64]) -> Result<TestResult> {
+    if a.len() != b.len() {
+        return Err(SmeltError::DimensionMismatch { expected: a.len(), got: b.len() });
+    }
 
     let mut n_plus = 0usize;
     let mut n_minus = 0usize;
@@ -199,12 +203,12 @@ pub fn sign_test(a: &[f64], b: &[f64]) -> TestResult {
 
     let n = n_plus + n_minus;
     if n == 0 {
-        return TestResult {
+        return Ok(TestResult {
             test: "Sign test",
             statistic: 0.0,
             p_value: 1.0,
             significant: false,
-        };
+        });
     }
 
     let k = n_plus.min(n_minus);
@@ -212,12 +216,12 @@ pub fn sign_test(a: &[f64], b: &[f64]) -> TestResult {
     let p_value = 2.0 * binomial_cdf(k, n, 0.5);
     let p_value = p_value.min(1.0);
 
-    TestResult {
+    Ok(TestResult {
         test: "Sign test",
         statistic: k as f64,
         p_value,
         significant: p_value < 0.05,
-    }
+    })
 }
 
 // ── Friedman test ──────────────────────────────────────────────────
@@ -237,17 +241,22 @@ pub fn sign_test(a: &[f64], b: &[f64]) -> TestResult {
 /// let dt  = vec![0.80, 0.82, 0.79, 0.81, 0.83];
 /// let rf  = vec![0.90, 0.88, 0.91, 0.89, 0.92];
 /// let xgb = vec![0.92, 0.89, 0.93, 0.91, 0.94];
-/// let result = friedman_test(&[&dt, &rf, &xgb]);
+/// let result = friedman_test(&[&dt, &rf, &xgb]).unwrap();
 /// assert!(result.significant);
 /// ```
-pub fn friedman_test(scores: &[&[f64]]) -> FriedmanResult {
+pub fn friedman_test(scores: &[&[f64]]) -> Result<FriedmanResult> {
     let k = scores.len(); // number of models
-    assert!(k >= 3, "Friedman test requires at least 3 models");
+    if k < 3 {
+        return Err(SmeltError::InvalidParameter(format!(
+            "friedman_test requires at least 3 models, got {k}"
+        )));
+    }
     let n = scores[0].len(); // number of folds/datasets
-    assert!(
-        scores.iter().all(|s| s.len() == n),
-        "All models must have the same number of scores"
-    );
+    if !scores.iter().all(|s| s.len() == n) {
+        return Err(SmeltError::InvalidParameter(
+            "friedman_test: all models must have the same number of scores".into(),
+        ));
+    }
 
     // Rank within each fold (1 = best, k = worst)
     // For "higher is better" metrics, invert: rank 1 = highest score
@@ -285,12 +294,12 @@ pub fn friedman_test(scores: &[&[f64]]) -> FriedmanResult {
     let df = k_f - 1.0;
     let p_value = 1.0 - chi_squared_cdf(chi2, df);
 
-    FriedmanResult {
+    Ok(FriedmanResult {
         statistic: chi2,
         p_value,
         significant: p_value < 0.05,
         avg_ranks,
-    }
+    })
 }
 
 // ── Nemenyi post-hoc test ──────────────────────────────────────────
@@ -348,9 +357,13 @@ pub fn nemenyi_posthoc(friedman: &FriedmanResult, n: usize, k: usize) -> Nemenyi
 /// * `pred_a` - Predictions from model A
 /// * `pred_b` - Predictions from model B
 /// * `truth` - True labels
-pub fn mcnemar_test(pred_a: &[usize], pred_b: &[usize], truth: &[usize]) -> TestResult {
-    assert_eq!(pred_a.len(), pred_b.len());
-    assert_eq!(pred_a.len(), truth.len());
+pub fn mcnemar_test(pred_a: &[usize], pred_b: &[usize], truth: &[usize]) -> Result<TestResult> {
+    if pred_a.len() != pred_b.len() {
+        return Err(SmeltError::DimensionMismatch { expected: pred_a.len(), got: pred_b.len() });
+    }
+    if pred_a.len() != truth.len() {
+        return Err(SmeltError::DimensionMismatch { expected: pred_a.len(), got: truth.len() });
+    }
 
     // Count discordant pairs
     let mut b_count = 0usize; // A correct, B wrong
@@ -370,24 +383,24 @@ pub fn mcnemar_test(pred_a: &[usize], pred_b: &[usize], truth: &[usize]) -> Test
     let c = c_count as f64;
 
     if b + c < 1.0 {
-        return TestResult {
+        return Ok(TestResult {
             test: "McNemar",
             statistic: 0.0,
             p_value: 1.0,
             significant: false,
-        };
+        });
     }
 
     // McNemar's chi-squared with continuity correction
     let chi2 = ((b - c).abs() - 1.0).max(0.0).powi(2) / (b + c);
     let p_value = 1.0 - chi_squared_cdf(chi2, 1.0);
 
-    TestResult {
+    Ok(TestResult {
         test: "McNemar",
         statistic: chi2,
         p_value,
         significant: p_value < 0.05,
-    }
+    })
 }
 
 // ── Bootstrap confidence interval ──────────────────────────────────
@@ -540,18 +553,19 @@ pub fn compare_models(
     scores_b: &[f64],
 ) -> Result<String> {
     if scores_a.len() != scores_b.len() {
-        return Err(SmeltError::Other(
-            "Score vectors must have equal length".into(),
-        ));
+        return Err(SmeltError::DimensionMismatch {
+            expected: scores_a.len(),
+            got: scores_b.len(),
+        });
     }
     if scores_a.is_empty() {
-        return Err(SmeltError::Other("Score vectors must not be empty".into()));
+        return Err(SmeltError::EmptyDataset);
     }
 
     let mean_a = scores_a.iter().sum::<f64>() / scores_a.len() as f64;
     let mean_b = scores_b.iter().sum::<f64>() / scores_b.len() as f64;
 
-    let w = wilcoxon_signed_rank(scores_a, scores_b);
+    let w = wilcoxon_signed_rank(scores_a, scores_b)?;
     let ci_a = bootstrap_ci(scores_a, 0.95, 10000, 42);
     let ci_b = bootstrap_ci(scores_b, 0.95, 10000, 43);
 
@@ -588,7 +602,7 @@ mod tests {
     fn test_wilcoxon_significant() {
         let a = vec![0.92, 0.89, 0.91, 0.90, 0.93, 0.91, 0.90, 0.92, 0.89, 0.91];
         let b = vec![0.82, 0.84, 0.81, 0.83, 0.80, 0.82, 0.81, 0.83, 0.79, 0.82];
-        let result = wilcoxon_signed_rank(&a, &b);
+        let result = wilcoxon_signed_rank(&a, &b).unwrap();
         assert!(result.p_value < 0.01, "Should be highly significant");
         assert!(result.significant);
     }
@@ -597,7 +611,7 @@ mod tests {
     fn test_wilcoxon_not_significant() {
         let a = vec![0.90, 0.89, 0.91, 0.90, 0.89];
         let b = vec![0.89, 0.90, 0.90, 0.91, 0.90];
-        let result = wilcoxon_signed_rank(&a, &b);
+        let result = wilcoxon_signed_rank(&a, &b).unwrap();
         assert!(!result.significant);
     }
 
@@ -605,7 +619,7 @@ mod tests {
     fn test_sign_test() {
         let a = vec![0.9, 0.8, 0.7, 0.85, 0.95];
         let b = vec![0.85, 0.75, 0.65, 0.80, 0.90];
-        let result = sign_test(&a, &b);
+        let result = sign_test(&a, &b).unwrap();
         // All 5 pairs favor a → p = 2 * binom(0, 5, 0.5) = 0.0625
         assert!(result.p_value < 0.1);
     }
@@ -615,7 +629,7 @@ mod tests {
         let dt = vec![0.80, 0.82, 0.79, 0.81, 0.83];
         let rf = vec![0.90, 0.88, 0.91, 0.89, 0.92];
         let xgb = vec![0.92, 0.89, 0.93, 0.91, 0.94];
-        let result = friedman_test(&[&dt, &rf, &xgb]);
+        let result = friedman_test(&[&dt, &rf, &xgb]).unwrap();
         assert!(
             result.significant,
             "3 models with clear ordering should be significant"
@@ -647,7 +661,7 @@ mod tests {
         for i in 5..25 {
             pred_b[i] = 1;
         }
-        let result = mcnemar_test(&pred_a, &pred_b, &truth);
+        let result = mcnemar_test(&pred_a, &pred_b, &truth).unwrap();
         assert!(
             result.significant,
             "20 vs 5 discordant should be significant"
@@ -659,7 +673,7 @@ mod tests {
         let dt = vec![0.80, 0.82, 0.79, 0.81, 0.83];
         let rf = vec![0.90, 0.88, 0.91, 0.89, 0.92];
         let xgb = vec![0.92, 0.89, 0.93, 0.91, 0.94];
-        let friedman = friedman_test(&[&dt, &rf, &xgb]);
+        let friedman = friedman_test(&[&dt, &rf, &xgb]).unwrap();
         let nemenyi = nemenyi_posthoc(&friedman, 5, 3);
         assert!(nemenyi.critical_difference > 0.0);
         // DT vs XGBoost should be significant

@@ -697,14 +697,14 @@ impl TestResult {
 }
 
 #[pyfunction]
-fn wilcoxon_signed_rank(a: Vec<f64>, b: Vec<f64>) -> TestResult {
-    let r = smelt_ml::stats::wilcoxon_signed_rank(&a, &b);
-    TestResult {
+fn wilcoxon_signed_rank(a: Vec<f64>, b: Vec<f64>) -> PyResult<TestResult> {
+    let r = smelt_ml::stats::wilcoxon_signed_rank(&a, &b).map_err(smelt_err)?;
+    Ok(TestResult {
         test: r.test.to_string(),
         statistic: r.statistic,
         p_value: r.p_value,
         significant: r.significant,
-    }
+    })
 }
 
 #[pyfunction]
@@ -720,14 +720,14 @@ fn bootstrap_ci(
 }
 
 #[pyfunction]
-fn sign_test(a: Vec<f64>, b: Vec<f64>) -> TestResult {
-    let r = smelt_ml::stats::sign_test(&a, &b);
-    TestResult {
+fn sign_test(a: Vec<f64>, b: Vec<f64>) -> PyResult<TestResult> {
+    let r = smelt_ml::stats::sign_test(&a, &b).map_err(smelt_err)?;
+    Ok(TestResult {
         test: r.test.to_string(),
         statistic: r.statistic,
         p_value: r.p_value,
         significant: r.significant,
-    }
+    })
 }
 
 // ── LightGBM ───────────────────────────────────────────────────────────

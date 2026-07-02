@@ -120,11 +120,7 @@ impl BayesianOptimizer {
             history.push((params, score));
         }
 
-        Ok(TuneResult::select_best(
-            history,
-            measure.id().to_string(),
-            maximize,
-        ))
+        TuneResult::select_best(history, measure.id().to_string(), maximize)
     }
 
     /// Tune for regression.
@@ -151,11 +147,7 @@ impl BayesianOptimizer {
             history.push((params, score));
         }
 
-        Ok(TuneResult::select_best(
-            history,
-            measure.id().to_string(),
-            maximize,
-        ))
+        TuneResult::select_best(history, measure.id().to_string(), maximize)
     }
 
     /// Sample a random parameter set from the space.
