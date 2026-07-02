@@ -54,6 +54,15 @@ impl<'a> CQR<'a> {
         cal_targets: &[f64],
         alpha: f64,
     ) -> Result<Self> {
+        if !(alpha > 0.0 && alpha < 1.0) {
+            return Err(SmeltError::InvalidParameter(format!(
+                "conformal alpha must be in (0, 1), got {alpha}"
+            )));
+        }
+        if cal_targets.is_empty() {
+            return Err(SmeltError::EmptyDataset);
+        }
+
         let lower_pred = lower_model.predict(cal_features)?;
         let upper_pred = upper_model.predict(cal_features)?;
 
@@ -75,10 +84,13 @@ impl<'a> CQR<'a> {
             .collect();
         scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Quantile of conformity scores
+        // Quantile of conformity scores. If the required rank exceeds n, the
+        // calibration set is too small to guarantee 1-alpha coverage at any
+        // finite correction — widen to infinity rather than silently
+        // clamping to the largest observed score.
         let n = scores.len();
-        let q_idx = ((n as f64 + 1.0) * (1.0 - alpha)).ceil() as usize;
-        let correction = scores[q_idx.min(n) - 1];
+        let q_rank = ((n as f64 + 1.0) * (1.0 - alpha)).ceil() as usize;
+        let correction = if q_rank > n { f64::INFINITY } else { scores[q_rank - 1] };
 
         Ok(Self {
             lower_model,

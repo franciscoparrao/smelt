@@ -73,6 +73,15 @@ impl<'a> ConformalRegressor<'a> {
         cal_targets: &[f64],
         alpha: f64,
     ) -> Result<Self> {
+        if !(alpha > 0.0 && alpha < 1.0) {
+            return Err(crate::SmeltError::InvalidParameter(format!(
+                "conformal alpha must be in (0, 1), got {alpha}"
+            )));
+        }
+        if cal_targets.is_empty() {
+            return Err(crate::SmeltError::EmptyDataset);
+        }
+
         let pred = model.predict(cal_features)?;
         let predicted = match &pred {
             Prediction::Regression { predicted, .. } => predicted,
@@ -91,11 +100,18 @@ impl<'a> ConformalRegressor<'a> {
             .collect();
         residuals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Quantile: ceil((n+1)(1-alpha)) / n
+        // Quantile rank: ceil((n+1)(1-alpha)). If this exceeds n, the
+        // calibration set is too small to guarantee 1-alpha coverage at any
+        // finite width — the only choice consistent with the coverage
+        // guarantee (Vovk et al.) is an infinite interval, not silently
+        // clamping to the largest observed residual.
         let n = residuals.len();
-        let q_idx = ((n as f64 + 1.0) * (1.0 - alpha)).ceil() as usize;
-        let q_idx = q_idx.min(n) - 1;
-        let quantile_residual = residuals[q_idx.min(n - 1)];
+        let q_rank = ((n as f64 + 1.0) * (1.0 - alpha)).ceil() as usize;
+        let quantile_residual = if q_rank > n {
+            f64::INFINITY
+        } else {
+            residuals[q_rank - 1]
+        };
 
         Ok(Self {
             model,
@@ -168,6 +184,15 @@ impl<'a> ConformalClassifier<'a> {
         cal_targets: &[usize],
         alpha: f64,
     ) -> Result<Self> {
+        if !(alpha > 0.0 && alpha < 1.0) {
+            return Err(crate::SmeltError::InvalidParameter(format!(
+                "conformal alpha must be in (0, 1), got {alpha}"
+            )));
+        }
+        if cal_targets.is_empty() {
+            return Err(crate::SmeltError::EmptyDataset);
+        }
+
         let pred = model.predict(cal_features)?;
         let probabilities = match &pred {
             Prediction::Classification {
@@ -182,16 +207,25 @@ impl<'a> ConformalClassifier<'a> {
         };
 
         // Nonconformity score: 1 - P(true class)
-        let mut scores: Vec<f64> = probabilities
-            .iter()
-            .zip(cal_targets)
-            .map(|(probs, &t)| 1.0 - probs[t])
-            .collect();
+        let mut scores: Vec<f64> = Vec::with_capacity(cal_targets.len());
+        for (probs, &t) in probabilities.iter().zip(cal_targets) {
+            let p_true = probs.get(t).ok_or_else(|| {
+                crate::SmeltError::InvalidParameter(format!(
+                    "calibration label {t} is out of range for a model with {} classes",
+                    probs.len()
+                ))
+            })?;
+            scores.push(1.0 - p_true);
+        }
         scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
+        // Quantile rank: ceil((n+1)(1-alpha)). If this exceeds n, the
+        // calibration set is too small to guarantee 1-alpha coverage — fall
+        // back to the most conservative score (include every class) rather
+        // than an out-of-bounds index.
         let n = scores.len();
-        let q_idx = ((n as f64 + 1.0) * (1.0 - alpha)).ceil() as usize;
-        let quantile_score = scores[q_idx.min(n) - 1];
+        let q_rank = ((n as f64 + 1.0) * (1.0 - alpha)).ceil() as usize;
+        let quantile_score = if q_rank > n { 1.0 } else { scores[q_rank - 1] };
 
         Ok(Self {
             model,

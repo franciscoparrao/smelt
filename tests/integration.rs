@@ -2992,6 +2992,69 @@ fn conformal_regression_coverage() {
 }
 
 #[test]
+fn conformal_rejects_alpha_out_of_range() {
+    use smelt_ml::conformal::ConformalRegressor;
+
+    let features = array![[1.0], [2.0], [3.0], [4.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0];
+    let task = RegressionTask::new("cf", features, target).unwrap();
+    let mut dt = DecisionTree::default();
+    let model = dt.train_regress(&task).unwrap();
+
+    let cal_features = array![[1.0], [2.0]];
+    let cal_targets = vec![2.0, 4.0];
+
+    for bad_alpha in [0.0, 1.0, 1.5, -0.1] {
+        assert!(
+            ConformalRegressor::calibrate(&*model, &cal_features, &cal_targets, bad_alpha)
+                .is_err(),
+            "alpha={bad_alpha} should be rejected"
+        );
+    }
+}
+
+#[test]
+fn conformal_rejects_empty_calibration_set() {
+    use smelt_ml::conformal::ConformalRegressor;
+
+    let features = array![[1.0], [2.0]];
+    let target = vec![2.0, 4.0];
+    let task = RegressionTask::new("cf", features, target).unwrap();
+    let mut dt = DecisionTree::default();
+    let model = dt.train_regress(&task).unwrap();
+
+    let empty_features = Array2::<f64>::zeros((0, 1));
+    let empty_targets: Vec<f64> = vec![];
+    assert!(
+        ConformalRegressor::calibrate(&*model, &empty_features, &empty_targets, 0.1).is_err()
+    );
+}
+
+/// Regression test: previously, when the calibration set was too small to
+/// support the requested confidence level (`ceil((n+1)(1-alpha)) > n`), the
+/// quantile index computation underflowed (`0usize - 1`), which panics in
+/// debug builds and silently wraps to an out-of-bounds-but-clamped index in
+/// release builds — either way losing the 1-alpha coverage guarantee without
+/// telling the caller. It must now widen to an infinite interval instead.
+#[test]
+fn conformal_tiny_calibration_set_widens_instead_of_panicking() {
+    use smelt_ml::conformal::ConformalRegressor;
+
+    let features = array![[1.0], [2.0]];
+    let target = vec![2.0, 4.0];
+    let task = RegressionTask::new("cf", features, target).unwrap();
+    let mut dt = DecisionTree::default();
+    let model = dt.train_regress(&task).unwrap();
+
+    // n=1, alpha=0.01 -> ceil((1+1)*0.99) = 2 > n=1: no finite quantile
+    // exists that guarantees 99% coverage from a single calibration point.
+    let cal_features = array![[1.0]];
+    let cal_targets = vec![2.0];
+    let cf = ConformalRegressor::calibrate(&*model, &cal_features, &cal_targets, 0.01).unwrap();
+    assert!(cf.interval_width().is_infinite());
+}
+
+#[test]
 fn conformal_classification_sets() {
     use smelt_ml::conformal::ConformalClassifier;
 
@@ -3013,6 +3076,60 @@ fn conformal_classification_sets() {
     for s in &sets {
         assert!(!s.prediction_set.is_empty());
     }
+}
+
+/// Golden coverage test: with a properly-sized calibration set, split
+/// conformal prediction must deliver empirical coverage close to the
+/// nominal 1-alpha target. This directly exercises the quantile-index
+/// arithmetic (ceil((n+1)(1-alpha))) that previously underflowed for small
+/// calibration sets — a coverage check here would have caught it, unlike a
+/// smoke test that only asserts `lower <= upper`.
+#[test]
+fn conformal_regression_empirical_coverage_near_target() {
+    use rand::prelude::*;
+    use smelt_ml::conformal::ConformalRegressor;
+
+    let mut rng = StdRng::seed_from_u64(11);
+    let n_train = 400;
+    let n_cal = 200;
+    let n_test = 500;
+    let alpha = 0.1; // target 90% coverage
+
+    let make_data = |n: usize, rng: &mut StdRng| {
+        let mut feats = Vec::with_capacity(n);
+        let mut target = Vec::with_capacity(n);
+        for _ in 0..n {
+            let x: f64 = rng.random::<f64>() * 10.0;
+            let noise: f64 = (rng.random::<f64>() - 0.5) * 2.0;
+            feats.push(x);
+            target.push(2.0 * x + noise);
+        }
+        (Array2::from_shape_vec((n, 1), feats).unwrap(), target)
+    };
+
+    let (tr_features, tr_target) = make_data(n_train, &mut rng);
+    let (cal_features, cal_target) = make_data(n_cal, &mut rng);
+    let (te_features, te_target) = make_data(n_test, &mut rng);
+
+    let task = RegressionTask::new("cov", tr_features, tr_target).unwrap();
+    let mut xgb = XGBoost::new().with_n_estimators(50).with_seed(11);
+    let model = xgb.train_regress(&task).unwrap();
+
+    let cf = ConformalRegressor::calibrate(&*model, &cal_features, &cal_target, alpha).unwrap();
+    let intervals = cf.predict(&te_features).unwrap();
+
+    let covered = intervals
+        .iter()
+        .zip(&te_target)
+        .filter(|&(iv, &y)| y >= iv.lower && y <= iv.upper)
+        .count();
+    let coverage = covered as f64 / n_test as f64;
+
+    assert!(
+        coverage >= 1.0 - alpha - 0.05,
+        "empirical coverage {coverage:.3} should be close to target {:.3}",
+        1.0 - alpha
+    );
 }
 
 // ── Stacking tests ─────────────────────────────────────────────────
