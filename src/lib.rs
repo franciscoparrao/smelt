@@ -77,6 +77,7 @@ pub mod prelude {
         KNearestNeighbors, Lasso, Learner, TrainedGeoXGBoost,
         LightGBM, LinearRegression, LinearSVM, LogisticRegression, ObliqueForest, ObliqueTree,
         QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, XGBoost,
+        learner_from_id, registered_learner_ids,
     };
     pub use crate::measure::{
         Accuracy, AucRoc, BalancedAccuracy, Brier, CohensKappa, F1Score, LogLoss, Mae, Mape, Mcc,
