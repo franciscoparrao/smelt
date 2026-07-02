@@ -1003,8 +1003,33 @@ impl XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
+        if let Some(w) = &self.sample_weight {
+            if w.len() != ns {
+                return Err(SmeltError::DimensionMismatch {
+                    expected: ns,
+                    got: w.len(),
+                });
+            }
+        }
         let bins = HistBins::build(features, self.n_bins);
-        let p_pos = target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64;
+        // Weighted positive-class fraction as the initial log-odds when
+        // sample weights are set (same objective as XGBoost's base_score).
+        let p_pos = match &self.sample_weight {
+            Some(w) => {
+                let wsum: f64 = w.iter().sum();
+                if wsum > 0.0 {
+                    target
+                        .iter()
+                        .zip(w)
+                        .map(|(&t, wi)| if t == 1 { *wi } else { 0.0 })
+                        .sum::<f64>()
+                        / wsum
+                } else {
+                    target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64
+                }
+            }
+            None => target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64,
+        };
         let initial = (p_pos / (1.0 - p_pos).max(1e-15)).ln();
         let mut fv = vec![initial; ns];
         let mut trees = Vec::with_capacity(self.n_estimators);
@@ -1013,13 +1038,21 @@ impl XGBoost {
         let (mut best_loss, mut no_improve, mut best_n) = (f64::INFINITY, 0usize, 0usize);
 
         for round in 0..self.n_estimators {
-            let grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
-            let hess: Vec<f64> = (0..ns)
+            let mut grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
+            let mut hess: Vec<f64> = (0..ns)
                 .map(|i| {
                     let p = sigmoid(fv[i]);
                     p * (1.0 - p).max(1e-15)
                 })
                 .collect();
+            if let Some(w) = &self.sample_weight {
+                // Scale gradient and hessian by the sample weight, matching
+                // the weighted-least-squares mechanism used in train_regress.
+                for i in 0..ns {
+                    grads[i] *= w[i];
+                    hess[i] *= w[i];
+                }
+            }
             let (mut idx, cols) = self.sample(&mut rng, ns, nf);
             let (tree, fi) =
                 self.build_one_tree(features, &bins, &grads, &hess, &mut idx, cols, nf);
@@ -1033,14 +1066,18 @@ impl XGBoost {
 
             if self.early_stopping_rounds > 0 {
                 let eps = 1e-15;
-                let loss: f64 = (0..ns)
-                    .map(|i| {
-                        let p = sigmoid(fv[i]).max(eps).min(1.0 - eps);
-                        let y = target[i] as f64;
-                        -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
-                    })
-                    .sum::<f64>()
-                    / ns as f64;
+                let per_point = |i: usize| {
+                    let p = sigmoid(fv[i]).max(eps).min(1.0 - eps);
+                    let y = target[i] as f64;
+                    -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
+                };
+                let loss = match &self.sample_weight {
+                    Some(w) => {
+                        let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                        (0..ns).map(|i| w[i] * per_point(i)).sum::<f64>() / wsum
+                    }
+                    None => (0..ns).map(per_point).sum::<f64>() / ns as f64,
+                };
                 if loss < best_loss - 1e-10 {
                     best_loss = loss;
                     best_n = round + 1;
@@ -1068,15 +1105,36 @@ impl XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf, nc) = (task.n_samples(), task.n_features(), task.n_classes());
-        let bins = HistBins::build(features, self.n_bins);
-        let mut cc = vec![0usize; nc];
-        for &t in target {
-            cc[t] += 1;
+        if let Some(w) = &self.sample_weight {
+            if w.len() != ns {
+                return Err(SmeltError::DimensionMismatch {
+                    expected: ns,
+                    got: w.len(),
+                });
+            }
         }
-        let initial: Vec<f64> = cc
-            .iter()
-            .map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln())
-            .collect();
+        let bins = HistBins::build(features, self.n_bins);
+        // Weighted per-class frequency as the initial log-prior when sample
+        // weights are set.
+        let initial: Vec<f64> = match &self.sample_weight {
+            Some(w) => {
+                let mut wc = vec![0.0; nc];
+                for (&t, &wi) in target.iter().zip(w) {
+                    wc[t] += wi;
+                }
+                let wsum: f64 = w.iter().sum::<f64>().max(1e-15);
+                wc.iter().map(|&c| (c / wsum).max(1e-15).ln()).collect()
+            }
+            None => {
+                let mut cc = vec![0usize; nc];
+                for &t in target {
+                    cc[t] += 1;
+                }
+                cc.iter()
+                    .map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln())
+                    .collect()
+            }
+        };
         let mut fv: Vec<Vec<f64>> = (0..ns).map(|_| initial.clone()).collect();
         let mut trees = Vec::with_capacity(self.n_estimators * nc);
         let mut imp = vec![0.0; nf];
@@ -1087,12 +1145,18 @@ impl XGBoost {
             let probs: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
             let (idx_base, cols) = self.sample(&mut rng, ns, nf);
             for c in 0..nc {
-                let grads: Vec<f64> = (0..ns)
+                let mut grads: Vec<f64> = (0..ns)
                     .map(|i| probs[i][c] - if target[i] == c { 1.0 } else { 0.0 })
                     .collect();
-                let hess: Vec<f64> = (0..ns)
+                let mut hess: Vec<f64> = (0..ns)
                     .map(|i| (probs[i][c] * (1.0 - probs[i][c])).max(1e-15))
                     .collect();
+                if let Some(w) = &self.sample_weight {
+                    for i in 0..ns {
+                        grads[i] *= w[i];
+                        hess[i] *= w[i];
+                    }
+                }
                 let mut idx = idx_base.clone();
                 let (tree, fi) =
                     self.build_one_tree(features, &bins, &grads, &hess, &mut idx, cols.clone(), nf);
@@ -1107,10 +1171,14 @@ impl XGBoost {
             if self.early_stopping_rounds > 0 {
                 let eps = 1e-15;
                 let pn: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
-                let loss: f64 = (0..ns)
-                    .map(|i| -pn[i][target[i]].max(eps).ln())
-                    .sum::<f64>()
-                    / ns as f64;
+                let per_point = |i: usize| -pn[i][target[i]].max(eps).ln();
+                let loss: f64 = match &self.sample_weight {
+                    Some(w) => {
+                        let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                        (0..ns).map(|i| w[i] * per_point(i)).sum::<f64>() / wsum
+                    }
+                    None => (0..ns).map(per_point).sum::<f64>() / ns as f64,
+                };
                 if loss < best_loss - 1e-10 {
                     best_loss = loss;
                     best_n = (round + 1) * nc;
@@ -1209,5 +1277,76 @@ mod weight_tests {
             / n as f64)
             .sqrt();
         assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
+    }
+
+    /// Regression test: `with_sample_weights` was documented as
+    /// "regression"-only and silently ignored in train_classif/train_binary/
+    /// train_multiclass -- a user who set weights and trained a classifier
+    /// got an unweighted model with no error or warning.
+    #[test]
+    fn sample_weights_shift_binary_classification_toward_heavy_group() {
+        let n = 20;
+        let features = Array2::<f64>::zeros((n, 1)); // constant feature: no split possible
+        let target: Vec<usize> = (0..n).map(|i| if i < n / 2 { 0 } else { 1 }).collect();
+        let task = ClassificationTask::new("wc", features.clone(), target).unwrap();
+
+        let mut unweighted = XGBoost::new().with_n_estimators(30).with_learning_rate(0.3);
+        let m0 = unweighted.train_classif(&task).unwrap();
+        let p0 = match m0.predict(&features).unwrap() {
+            Prediction::Classification { probabilities: Some(p), .. } => p[0][1],
+            _ => unreachable!(),
+        };
+        assert!((0.3..=0.7).contains(&p0), "unweighted P(class=1) should be ~0.5, got {p0}");
+
+        // Weight the class=1 group 9x heavier -> weighted positive fraction = 0.9.
+        let w: Vec<f64> = (0..n).map(|i| if i < n / 2 { 1.0 } else { 9.0 }).collect();
+        let mut weighted = XGBoost::new()
+            .with_n_estimators(30)
+            .with_learning_rate(0.3)
+            .with_sample_weights(w);
+        let m1 = weighted.train_classif(&task).unwrap();
+        let p1 = match m1.predict(&features).unwrap() {
+            Prediction::Classification { probabilities: Some(p), .. } => p[0][1],
+            _ => unreachable!(),
+        };
+        assert!(p1 > 0.75, "weighted P(class=1) should be pulled toward 0.9, got {p1}");
+    }
+
+    #[test]
+    fn sample_weights_shift_multiclass_toward_heavy_group() {
+        let n = 30;
+        let features = Array2::<f64>::zeros((n, 1)); // constant feature: no split possible
+        let target: Vec<usize> = (0..n).map(|i| i % 3).collect(); // classes 0,1,2 evenly
+        let task = ClassificationTask::new("wmc", features.clone(), target.clone()).unwrap();
+
+        let mut unweighted = XGBoost::new().with_n_estimators(30).with_learning_rate(0.3);
+        let m0 = unweighted.train_classif(&task).unwrap();
+        let p0 = match m0.predict(&features).unwrap() {
+            Prediction::Classification { probabilities: Some(p), .. } => p[0][2],
+            _ => unreachable!(),
+        };
+        assert!((0.15..=0.5).contains(&p0), "unweighted P(class=2) should be ~1/3, got {p0}");
+
+        // Weight class=2 examples 9x heavier -> should dominate the posterior.
+        let w: Vec<f64> = target.iter().map(|&t| if t == 2 { 9.0 } else { 1.0 }).collect();
+        let mut weighted = XGBoost::new()
+            .with_n_estimators(30)
+            .with_learning_rate(0.3)
+            .with_sample_weights(w);
+        let m1 = weighted.train_classif(&task).unwrap();
+        let p1 = match m1.predict(&features).unwrap() {
+            Prediction::Classification { probabilities: Some(p), .. } => p[0][2],
+            _ => unreachable!(),
+        };
+        assert!(p1 > 0.6, "weighted P(class=2) should dominate, got {p1}");
+    }
+
+    #[test]
+    fn sample_weights_classif_length_mismatch_errors() {
+        let features = Array2::<f64>::zeros((10, 1));
+        let target = vec![0usize, 1, 0, 1, 0, 1, 0, 1, 0, 1];
+        let task = ClassificationTask::new("wc_mismatch", features, target).unwrap();
+        let mut m = XGBoost::new().with_sample_weights(vec![1.0; 5]);
+        assert!(m.train_classif(&task).is_err());
     }
 }
