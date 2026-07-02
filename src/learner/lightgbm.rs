@@ -5,9 +5,9 @@
 //! - **Leaf-wise (best-first) tree growth**: always splits the leaf with highest gain
 //! - Histogram-based splits with NaN handling
 //!
-//! **Not implemented**: Exclusive Feature Bundling (EFB), weighted GOSS histogram
-//! pass, GPU training, distributed computation. This implementation does not match
-//! the official library's performance; it is included for API completeness and the
+//! **Not implemented**: Exclusive Feature Bundling (EFB), GPU training,
+//! distributed computation. This implementation does not match the official
+//! library's performance; it is included for API completeness and the
 //! leaf-wise growth strategy.
 //!
 //! Reference: Ke, G. et al. (2017). LightGBM: A Highly Efficient Gradient Boosting
@@ -242,10 +242,7 @@ fn goss_sample(
 
 // ── Leaf-wise tree building ─────────────────────────────────────────
 
-#[allow(dead_code)]
 struct LeafCandidate {
-    indices: Vec<usize>,
-    depth: usize,
     gain: f64,
     feature: usize,
     threshold: f64,
@@ -253,7 +250,6 @@ struct LeafCandidate {
     split_bin: usize,
 }
 
-#[allow(dead_code)]
 /// Per-feature cached histogram: (bin_g, bin_h, nan_g, nan_h)
 type LeafHist = Vec<(Vec<f64>, Vec<f64>, f64, f64)>;
 
@@ -344,8 +340,6 @@ fn find_best_from_cache(
                 }
             }
             best.map(|(bin, gain, nan_left)| LeafCandidate {
-                indices: Vec::new(),
-                depth: 0,
                 gain,
                 feature: feat,
                 threshold: bins.boundaries[feat][bin],
@@ -375,6 +369,31 @@ fn subtract_leaf_hists(parent: &LeafHist, child: &LeafHist) -> LeafHist {
         .collect()
 }
 
+/// A node in the tree being grown leaf-wise. `Leaf` nodes are candidates for
+/// splitting (tracked in `active_leaves` below, indexed by position in the
+/// arena); once split, a `Leaf` slot is replaced in-place by a `Split` slot
+/// pointing at two freshly-appended `Leaf` children.
+enum ArenaNode {
+    Leaf {
+        indices: Vec<usize>,
+        depth: usize,
+        hist: LeafHist,
+    },
+    Split {
+        feature: usize,
+        threshold: f64,
+        nan_left: bool,
+        left: usize,
+        right: usize,
+    },
+}
+
+/// Leaf-wise (best-first) tree growth (Ke et al. 2017): at each step, split
+/// whichever *leaf* (not whichever depth level) has the highest gain, using
+/// cached per-leaf histograms with subtraction (scan the smaller child,
+/// derive the larger one as parent-minus-smaller) rather than rescanning
+/// from scratch. Grows until `num_leaves` leaves exist or no leaf has a
+/// positive-gain split left.
 fn build_leaf_wise_tree(
     bins: &Bins,
     grads: &[f64],
@@ -388,16 +407,18 @@ fn build_leaf_wise_tree(
     min_child_weight: f64,
     feature_importances: &mut Vec<f64>,
 ) -> LGBNode {
-    // Each leaf: (indices, depth, cached histogram)
     let root_hist = build_leaf_hist(bins, grads, hess, weights, &indices, col_indices);
-    let mut leaves: Vec<(Vec<usize>, usize, LeafHist)> = vec![(indices, 0, root_hist)];
+    let mut arena: Vec<ArenaNode> = vec![ArenaNode::Leaf { indices, depth: 0, hist: root_hist }];
+    let mut active_leaves: Vec<usize> = vec![0];
+    let mut leaf_count = 1usize;
 
-    while leaves.len() < num_leaves {
-        // Find best split from CACHED histograms (no re-scanning!)
-        let mut best_leaf_idx = None;
-        let mut best_split: Option<LeafCandidate> = None;
+    while leaf_count < num_leaves {
+        let mut best: Option<(usize, LeafCandidate)> = None;
 
-        for (li, (leaf_indices, depth, cached)) in leaves.iter().enumerate() {
+        for &li in &active_leaves {
+            let ArenaNode::Leaf { indices: leaf_indices, depth, hist } = &arena[li] else {
+                unreachable!("active_leaves only ever references Leaf arena slots")
+            };
             if let Some(md) = max_depth
                 && *depth >= md
             {
@@ -406,311 +427,117 @@ fn build_leaf_wise_tree(
             if leaf_indices.len() < 2 {
                 continue;
             }
-
             let h_sum: f64 = leaf_indices.iter().map(|&i| hess[i] * weights[i]).sum();
             if h_sum < min_child_weight {
                 continue;
             }
-
-            if let Some(cand) =
-                find_best_from_cache(bins, cached, col_indices, lambda, min_child_weight)
+            if let Some(cand) = find_best_from_cache(bins, hist, col_indices, lambda, min_child_weight)
             {
-                let is_better = match &best_split {
+                let is_better = match &best {
                     None => true,
-                    Some(prev) => cand.gain > prev.gain,
+                    Some((_, prev)) => cand.gain > prev.gain,
                 };
                 if is_better {
-                    best_leaf_idx = Some(li);
-                    best_split = Some(cand);
+                    best = Some((li, cand));
                 }
             }
         }
 
-        match (best_leaf_idx, best_split) {
-            (Some(li), Some(split)) => {
-                feature_importances[split.feature] += split.gain;
+        let Some((li, split)) = best else { break };
+        feature_importances[split.feature] += split.gain;
 
-                let (leaf_indices, depth, parent_hist) = leaves.remove(li);
-                let feat = split.feature;
-                let bin_thr = split.split_bin;
-                let nan_left = split.nan_left;
-
-                let mut left_idx = Vec::new();
-                let mut right_idx = Vec::new();
-                for &idx in &leaf_indices {
-                    let b = bins.get_bin(feat, idx);
-                    let goes_left = if b == NAN_BIN {
-                        nan_left
-                    } else {
-                        (b as usize) <= bin_thr
-                    };
-                    if goes_left {
-                        left_idx.push(idx);
-                    } else {
-                        right_idx.push(idx);
-                    }
-                }
-
-                if left_idx.is_empty() || right_idx.is_empty() {
-                    break;
-                }
-
-                // Histogram subtraction: scan smaller, subtract for larger
-                let (smaller_idx, larger_idx, smaller_is_left) =
-                    if left_idx.len() <= right_idx.len() {
-                        (&left_idx, &right_idx, true)
-                    } else {
-                        (&right_idx, &left_idx, false)
-                    };
-
-                let smaller_hist =
-                    build_leaf_hist(bins, grads, hess, weights, smaller_idx, col_indices);
-                let larger_hist = subtract_leaf_hists(&parent_hist, &smaller_hist);
-
-                if smaller_is_left {
-                    leaves.push((left_idx, depth + 1, smaller_hist));
-                    leaves.push((right_idx, depth + 1, larger_hist));
-                } else {
-                    leaves.push((left_idx, depth + 1, larger_hist));
-                    leaves.push((right_idx, depth + 1, smaller_hist));
-                }
-            }
-            _ => break,
-        }
-    }
-
-    // Build tree from final leaves
-    if leaves.len() == 1 {
-        let (indices, _, _) = &leaves[0];
-        return LGBNode::Leaf {
-            weight: leaf_weight(grads, hess, weights, indices, lambda),
+        let placeholder = ArenaNode::Split {
+            feature: split.feature,
+            threshold: split.threshold,
+            nan_left: split.nan_left,
+            left: usize::MAX,
+            right: usize::MAX,
         };
-    }
-
-    // For simplicity with leaf-wise: rebuild as a single tree from the splits recorded
-    // Actually, we need a recursive approach. Let me use a simpler strategy:
-    // Build depth-first but prioritize by gain (approximate leaf-wise behavior)
-    build_recursive(
-        bins,
-        grads,
-        hess,
-        weights,
-        &leaves
-            .into_iter()
-            .flat_map(|(idx, _, _)| idx)
-            .collect::<Vec<_>>(),
-        col_indices,
-        num_leaves,
-        max_depth.unwrap_or(usize::MAX),
-        0,
-        lambda,
-        min_child_weight,
-        feature_importances,
-        &mut 0,
-    )
-}
-
-fn build_recursive(
-    bins: &Bins,
-    grads: &[f64],
-    hess: &[f64],
-    weights: &[f64],
-    indices: &[usize],
-    col_indices: &[usize],
-    max_leaves: usize,
-    max_depth: usize,
-    depth: usize,
-    lambda: f64,
-    min_child_weight: f64,
-    importances: &mut Vec<f64>,
-    leaf_count: &mut usize,
-) -> LGBNode {
-    let h_sum: f64 = indices.iter().map(|&i| hess[i] * weights[i]).sum();
-
-    if depth >= max_depth
-        || indices.len() < 2
-        || h_sum < min_child_weight
-        || *leaf_count >= max_leaves
-    {
-        *leaf_count += 1;
-        return LGBNode::Leaf {
-            weight: leaf_weight(grads, hess, weights, indices, lambda),
+        let (leaf_indices, depth, parent_hist) = match std::mem::replace(&mut arena[li], placeholder)
+        {
+            ArenaNode::Leaf { indices, depth, hist } => (indices, depth, hist),
+            ArenaNode::Split { .. } => unreachable!(),
         };
-    }
 
-    match find_best_split_hist(
-        bins,
-        grads,
-        hess,
-        weights,
-        indices,
-        col_indices,
-        lambda,
-        min_child_weight,
-    ) {
-        Some(split) if split.gain > 0.0 => {
-            importances[split.feature] += split.gain;
-
-            let mut left_idx = Vec::new();
-            let mut right_idx = Vec::new();
-            for &idx in indices {
-                let b = bins.get_bin(split.feature, idx);
-                let goes_left = if b == NAN_BIN {
-                    split.nan_left
-                } else {
-                    (b as usize) <= split.split_bin
-                };
-                if goes_left {
-                    left_idx.push(idx);
-                } else {
-                    right_idx.push(idx);
-                }
-            }
-
-            if left_idx.is_empty() || right_idx.is_empty() {
-                *leaf_count += 1;
-                return LGBNode::Leaf {
-                    weight: leaf_weight(grads, hess, weights, indices, lambda),
-                };
-            }
-
-            let left = build_recursive(
-                bins,
-                grads,
-                hess,
-                weights,
-                &left_idx,
-                col_indices,
-                max_leaves,
-                max_depth,
-                depth + 1,
-                lambda,
-                min_child_weight,
-                importances,
-                leaf_count,
-            );
-            let right = build_recursive(
-                bins,
-                grads,
-                hess,
-                weights,
-                &right_idx,
-                col_indices,
-                max_leaves,
-                max_depth,
-                depth + 1,
-                lambda,
-                min_child_weight,
-                importances,
-                leaf_count,
-            );
-
-            LGBNode::Split {
-                feature: split.feature,
-                threshold: split.threshold,
-                nan_left: split.nan_left,
-                left: Box::new(left),
-                right: Box::new(right),
+        let mut left_idx = Vec::new();
+        let mut right_idx = Vec::new();
+        for &idx in &leaf_indices {
+            let b = bins.get_bin(split.feature, idx);
+            let goes_left = if b == NAN_BIN {
+                split.nan_left
+            } else {
+                (b as usize) <= split.split_bin
+            };
+            if goes_left {
+                left_idx.push(idx);
+            } else {
+                right_idx.push(idx);
             }
         }
-        _ => {
-            *leaf_count += 1;
-            LGBNode::Leaf {
-                weight: leaf_weight(grads, hess, weights, indices, lambda),
-            }
+
+        if left_idx.is_empty() || right_idx.is_empty() {
+            // Degenerate split (shouldn't happen given find_best_from_cache
+            // only proposes splits with points on both sides, but guard
+            // anyway): revert the slot to a leaf and stop trying to split it.
+            arena[li] = ArenaNode::Leaf { indices: leaf_indices, depth, hist: parent_hist };
+            active_leaves.retain(|&x| x != li);
+            continue;
         }
+
+        // Histogram subtraction: scan the smaller child, derive the larger
+        // one as parent-minus-smaller.
+        let (smaller_idx, larger_idx, smaller_is_left) = if left_idx.len() <= right_idx.len() {
+            (&left_idx, &right_idx, true)
+        } else {
+            (&right_idx, &left_idx, false)
+        };
+        let _ = larger_idx; // only used to decide which side got the subtraction
+        let smaller_hist = build_leaf_hist(bins, grads, hess, weights, smaller_idx, col_indices);
+        let larger_hist = subtract_leaf_hists(&parent_hist, &smaller_hist);
+        let (left_hist, right_hist) = if smaller_is_left {
+            (smaller_hist, larger_hist)
+        } else {
+            (larger_hist, smaller_hist)
+        };
+
+        let left_arena_idx = arena.len();
+        arena.push(ArenaNode::Leaf { indices: left_idx, depth: depth + 1, hist: left_hist });
+        let right_arena_idx = arena.len();
+        arena.push(ArenaNode::Leaf { indices: right_idx, depth: depth + 1, hist: right_hist });
+        if let ArenaNode::Split { left, right, .. } = &mut arena[li] {
+            *left = left_arena_idx;
+            *right = right_arena_idx;
+        }
+
+        active_leaves.retain(|&x| x != li);
+        active_leaves.push(left_arena_idx);
+        active_leaves.push(right_arena_idx);
+        leaf_count += 1; // one leaf became a split; two leaves replace it: net +1
     }
-}
 
-fn find_best_split_hist(
-    bins: &Bins,
-    grads: &[f64],
-    hess: &[f64],
-    weights: &[f64],
-    indices: &[usize],
-    col_indices: &[usize],
-    lambda: f64,
-    min_child_weight: f64,
-) -> Option<LeafCandidate> {
-    let results: Vec<Option<LeafCandidate>> = col_indices
-        .par_iter()
-        .map(|&feat| {
-            let nb = bins.boundaries[feat].len();
-            let mut bin_g = vec![0.0; nb];
-            let mut bin_h = vec![0.0; nb];
-            let mut nan_g = 0.0;
-            let mut nan_h = 0.0;
-
-            for &idx in indices {
-                let b = bins.get_bin(feat, idx);
-                let w = weights[idx];
-                if b == NAN_BIN {
-                    nan_g += grads[idx] * w;
-                    nan_h += hess[idx] * w;
-                } else {
-                    bin_g[b as usize] += grads[idx] * w;
-                    bin_h[b as usize] += hess[idx] * w;
-                }
-            }
-
-            let total_g: f64 = bin_g.iter().sum::<f64>() + nan_g;
-            let total_h: f64 = bin_h.iter().sum::<f64>() + nan_h;
-            let mut best_gain = 0.0;
-            let mut best: Option<(usize, f64, bool)> = None;
-
-            let (mut gl, mut hl) = (0.0, 0.0);
-            for bin in 0..nb.saturating_sub(1) {
-                gl += bin_g[bin];
-                hl += bin_h[bin];
-                let (gr, hr) = (total_g - gl, total_h - hl);
-                if hl < min_child_weight || hr < min_child_weight {
-                    continue;
-                }
-                let gain = 0.5
-                    * (gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
-                        - total_g * total_g / (total_h + lambda));
-                if gain > best_gain {
-                    best_gain = gain;
-                    best = Some((bin, gain, false));
-                }
-            }
-
-            if nan_h > 0.0 {
-                let (mut gl, mut hl) = (nan_g, nan_h);
-                for bin in 0..nb.saturating_sub(1) {
-                    gl += bin_g[bin];
-                    hl += bin_h[bin];
-                    let (gr, hr) = (total_g - gl, total_h - hl);
-                    if hl < min_child_weight || hr < min_child_weight {
-                        continue;
-                    }
-                    let gain = 0.5
-                        * (gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
-                            - total_g * total_g / (total_h + lambda));
-                    if gain > best_gain {
-                        best_gain = gain;
-                        best = Some((bin, gain, true));
-                    }
-                }
-            }
-
-            best.map(|(bin, gain, nan_left)| LeafCandidate {
-                indices: Vec::new(),
-                depth: 0,
-                gain,
-                feature: feat,
-                threshold: bins.boundaries[feat][bin],
+    fn to_lgb_node(
+        arena: &mut [Option<ArenaNode>],
+        idx: usize,
+        grads: &[f64],
+        hess: &[f64],
+        weights: &[f64],
+        lambda: f64,
+    ) -> LGBNode {
+        match arena[idx].take().expect("each arena slot is converted exactly once") {
+            ArenaNode::Leaf { indices, .. } => LGBNode::Leaf {
+                weight: leaf_weight(grads, hess, weights, &indices, lambda),
+            },
+            ArenaNode::Split { feature, threshold, nan_left, left, right } => LGBNode::Split {
+                feature,
+                threshold,
                 nan_left,
-                split_bin: bin,
-            })
-        })
-        .collect();
-
-    results.into_iter().flatten().max_by(|a, b| {
-        a.gain
-            .partial_cmp(&b.gain)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    })
+                left: Box::new(to_lgb_node(arena, left, grads, hess, weights, lambda)),
+                right: Box::new(to_lgb_node(arena, right, grads, hess, weights, lambda)),
+            },
+        }
+    }
+    let mut arena_opt: Vec<Option<ArenaNode>> = arena.into_iter().map(Some).collect();
+    to_lgb_node(&mut arena_opt, 0, grads, hess, weights, lambda)
 }
 
 fn leaf_weight(
@@ -877,20 +704,18 @@ impl Learner for LightGBM {
                 goss_sample(&grads, &hess, self.top_rate, self.other_rate, &mut rng);
             let cols = self.sample_cols(&mut rng, nf);
 
-            let tree = build_recursive(
+            let tree = build_leaf_wise_tree(
                 &bins,
                 &grads,
                 &hess,
                 &weights,
-                &selected,
+                selected,
                 &cols,
                 self.num_leaves,
-                self.max_depth.unwrap_or(usize::MAX),
-                0,
+                self.max_depth,
                 self.lambda,
                 self.min_child_weight,
                 &mut imp,
-                &mut 0,
             );
 
             for i in 0..ns {
@@ -944,20 +769,18 @@ impl LightGBM {
                 goss_sample(&grads, &hess, self.top_rate, self.other_rate, &mut rng);
             let cols = self.sample_cols(&mut rng, nf);
 
-            let tree = build_recursive(
+            let tree = build_leaf_wise_tree(
                 &bins,
                 &grads,
                 &hess,
                 &weights,
-                &selected,
+                selected,
                 &cols,
                 self.num_leaves,
-                self.max_depth.unwrap_or(usize::MAX),
-                0,
+                self.max_depth,
                 self.lambda,
                 self.min_child_weight,
                 &mut imp,
-                &mut 0,
             );
 
             for i in 0..ns {
@@ -1006,20 +829,18 @@ impl LightGBM {
                     .collect();
                 let (selected, weights) =
                     goss_sample(&grads, &hess, self.top_rate, self.other_rate, &mut rng);
-                let tree = build_recursive(
+                let tree = build_leaf_wise_tree(
                     &bins,
                     &grads,
                     &hess,
                     &weights,
-                    &selected,
+                    selected,
                     &cols,
                     self.num_leaves,
-                    self.max_depth.unwrap_or(usize::MAX),
-                    0,
+                    self.max_depth,
                     self.lambda,
                     self.min_child_weight,
                     &mut imp,
-                    &mut 0,
                 );
                 for i in 0..ns {
                     fv[i][c] += self.learning_rate * tree.predict_one(features.row(i));
@@ -1133,6 +954,65 @@ mod tests {
         for i in 0..20 {
             assert!(selected.contains(&i), "top-gradient sample {i} should always be selected");
             assert_eq!(weights[i], 1.0, "top-gradient samples must have weight 1.0");
+        }
+    }
+
+    fn count_leaves(node: &LGBNode) -> usize {
+        match node {
+            LGBNode::Leaf { .. } => 1,
+            LGBNode::Split { left, right, .. } => count_leaves(left) + count_leaves(right),
+        }
+    }
+
+    /// Regression test for the leaf-wise growth that was silently discarded:
+    /// `build_leaf_wise_tree` used to perform the real best-first search
+    /// (cached histograms, subtraction, picking the globally best-gain leaf
+    /// each round) but then threw the result away and rebuilt the tree from
+    /// scratch via depth-first `build_recursive` on the flattened leaf
+    /// indices -- a structurally different algorithm. The fix keeps the
+    /// actual arena of splits built during the search and converts it
+    /// directly into an `LGBNode` tree, so asking for N leaves must produce
+    /// exactly N leaves (not "however many depth-first-with-a-counter
+    /// happens to produce").
+    #[test]
+    fn leaf_wise_growth_produces_exactly_the_requested_leaf_count() {
+        let n = 200;
+        let nf = 3;
+        let mut feats = Vec::with_capacity(n * nf);
+        let mut grads = Vec::with_capacity(n);
+        for i in 0..n {
+            let x0 = (i % 20) as f64;
+            let x1 = ((i * 7) % 13) as f64;
+            let x2 = ((i * 3) % 17) as f64;
+            feats.extend_from_slice(&[x0, x1, x2]);
+            grads.push(x0 * 2.0 - x1 + x2 * 0.5 - 10.0);
+        }
+        let features = Array2::from_shape_vec((n, nf), feats).unwrap();
+        let bins = HistBins::build(&features, 32);
+        let hess = vec![1.0; n];
+        let weights = vec![1.0; n];
+        let cols: Vec<usize> = (0..nf).collect();
+
+        for &num_leaves in &[2usize, 4, 8, 16] {
+            let mut imp_local = vec![0.0; nf];
+            let tree = build_leaf_wise_tree(
+                &bins,
+                &grads,
+                &hess,
+                &weights,
+                (0..n).collect(),
+                &cols,
+                num_leaves,
+                None,
+                1.0,
+                1.0,
+                &mut imp_local,
+            );
+            let leaves = count_leaves(&tree);
+            assert_eq!(
+                leaves, num_leaves,
+                "requesting {num_leaves} leaves should produce exactly that many, got {leaves}"
+            );
         }
     }
 }
