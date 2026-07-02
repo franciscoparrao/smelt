@@ -34,13 +34,32 @@ src/
 ├── lib.rs          # Public API + prelude
 ├── error.rs        # SmeltError enum (thiserror)
 ├── task/mod.rs     # Task, ClassificationTask, RegressionTask
-├── learner/mod.rs  # Learner trait, TrainedModel trait
+├── learner/        # Learner trait, TrainedModel trait, learner_from_id registry,
+│                   # 26 learners (tree/, xgboost, lightgbm, catboost, geo_xgboost,
+│                   # oblique, stacking, bagging, des, ebm, quantile*, regularized, ...)
 ├── prediction/     # Prediction enum (Classification/Regression)
-├── measure/        # Accuracy, RMSE, MAE (+ trait Measure)
-├── resample/       # CrossValidation, Holdout (+ trait Resample)
-├── preprocess/     # TODO: StandardScaler, MinMaxScaler, OneHotEncoder
-└── tuning/         # TODO: GridSearch, RandomSearch, BayesianOpt
+├── measure/        # Accuracy, F1, AUC-ROC, BalancedAccuracy, Kappa, MCC, Brier,
+│                   # RMSE, MAE, R², MAPE (+ trait Measure)
+├── resample/       # CrossValidation, Holdout, SpatialBlockCV, SpatialBufferCV,
+│                   # StratifiedCV, GroupCV (+ trait Resample)
+├── preprocess/     # StandardScaler, MinMaxScaler, Imputer, OneHot/LabelEncoder,
+│                   # SMOTE, Adasyn, PCA, FilterSelector, RFE, Pipeline
+├── tuning/         # GridSearch, RandomSearch, BayesianOptimizer, Hyperband
+├── cluster/        # KMeans, DBSCAN, IsolationForest
+├── causal/         # CausalForest (honest splitting, CATE/ATE, jackknife SE)
+├── conformal/      # ConformalRegressor/Classifier, CQR
+├── survival/       # RandomSurvivalForest
+├── importance/     # permutation importance, permutation-SHAP
+├── multilabel/, multioutput/  # ClassifierChain, RegressorChain
+├── stats.rs        # Wilcoxon, sign test, Friedman, Nemenyi, McNemar, bootstrap CI
+├── data/           # CsvLoader
+├── serialize.rs    # SerializableModel (JSON, versioned envelope)
+├── benchmark.rs, benchmark_design.rs  # resample+measure loop, multi-learner tables
+└── validate.rs     # dimension/NaN checks shared across public entry points
 ```
+
+`smelt-py/` (PyO3 bindings) exposes a subset of the above as `smelt` on PyPI —
+see Fase 3 item 15 below for the gap between what's in Rust and what's bound.
 
 ## Build & Test
 
@@ -61,42 +80,34 @@ cargo doc --open     # Generate docs
 
 ## Implementation Roadmap
 
-### Phase 1 — Core (current)
-- [x] Task system (Classification + Regression)
-- [x] Learner + TrainedModel traits
-- [x] Prediction enum
-- [x] Measures: Accuracy, RMSE, MAE
-- [x] Resampling: CrossValidation, Holdout
+The original Phase 1-6 plan below (core → first learners → ensembles →
+preprocessing → tuning → advanced) is **done** — 26 learners, full
+preprocessing pipeline, 4 tuning methods, spatial CV, serialization, and
+Python bindings (`smelt-py`) all exist and are tested. Kept for history;
+current work tracked in `docs/auditoria_motor_2026-07-01.md` (engine
+audit + 4-phase remediation plan — Fase 0/1/2 done, Fase 3 "paridad
+competitiva" in progress):
 
-### Phase 2 — First Learners
-- [ ] Decision Tree (CART)
-- [ ] K-Nearest Neighbors
-- [ ] Logistic Regression
-- [ ] Linear Regression (OLS)
-- [ ] Benchmark pipeline (resample + measure loop)
+- [x] Phase 1 — Core: Task system, Learner/TrainedModel traits, Prediction, Measures, Resampling
+- [x] Phase 2 — First learners: Decision Tree, KNN, Logistic/Linear Regression, benchmark pipeline
+- [x] Phase 3 — Ensembles: Random Forest, Gradient Boosting, Bagging
+- [x] Phase 4 — Preprocessing: scalers, encoders, imputation, Pipeline chaining
+- [x] Phase 5 — Tuning: GridSearch, RandomSearch, Bayesian Optimization, Hyperband
+- [x] Phase 6 — Advanced: permutation/SHAP importance, spatial CV, CSV loading, serde serialization, PyO3 bindings
 
-### Phase 3 — Ensembles
-- [ ] Random Forest
-- [ ] Gradient Boosting (XGBoost-style)
-- [ ] Bagging
-
-### Phase 4 — Preprocessing
-- [ ] StandardScaler, MinMaxScaler
-- [ ] OneHotEncoder, LabelEncoder
-- [ ] Missing value imputation
-- [ ] Pipeline chaining (preprocess → learner)
-
-### Phase 5 — Tuning
-- [ ] GridSearch
-- [ ] RandomSearch
-- [ ] Bayesian Optimization
-
-### Phase 6 — Advanced
-- [ ] Feature importance (permutation, SHAP-like)
-- [ ] Spatial cross-validation (for geo applications)
-- [ ] CSV/Parquet data loading
-- [ ] Model serialization (serde)
-- [ ] Python bindings (PyO3) — expose as `smelt-py`
+### Fase 3 remaining (paridad competitiva, see the audit doc for full detail)
+- [x] Missing measures: BalancedAccuracy, CohensKappa, MCC, Brier
+- [x] Model registry (`learner_from_id`)
+- [x] Consistent parallel `predict` (multiclass XGBoost/CatBoost, all of LightGBM)
+- [ ] Categorical features + NaN support in `Task`/splits; early stopping with a
+      real validation set; monotone constraints; custom objectives (largest item —
+      touches `Task`, `CsvLoader`, histogram binning, and split-finding in all 3
+      boosting engines at once; needs its own scoping pass before starting)
+- [ ] Python: `define_learner!` macro, close the ~14 learners not yet bound,
+      `get_params`/`set_params`, split `smelt-py/src/lib.rs` (1800+ lines)
+- [ ] Parquet/Arrow loading, `f32` histograms, sparse data support
+- [ ] `README.md`/this file kept current as features land (this section itself
+      was stale for a long time — reconciled 2026-07-02)
 
 ## Dependencies
 

@@ -7,13 +7,13 @@ A machine learning framework for Rust, inspired by [mlr3](https://mlr3.mlr-org.c
 
 The name refers to smelting — refining raw data into useful models.
 
-**21 supervised learners** | **Clustering** | **Causal Inference** | **XGBoost from scratch** | **Spatial ML** | **Conformal Prediction** | **4 tuning methods** | **200+ tests**
+**26 supervised learners** | **Clustering** | **Causal Inference** | **XGBoost/LightGBM/CatBoost from scratch** | **Spatial ML** | **Conformal Prediction** | **4 tuning methods** | **300+ tests**
 
 ## Quick Start
 
 ```toml
 [dependencies]
-smelt-ml = "0.6"
+smelt-ml = "1.3"
 ndarray = "0.16"
 ```
 
@@ -238,6 +238,8 @@ let task = CsvLoader::from_path("data.csv")
 | Gradient Boosting | x | x | MSE/log-loss, multiclass softmax |
 | Extra Trees | x | x | Random thresholds, no bootstrap |
 | **XGBoost** | x | x | Newton, histogram, NaN, early stopping |
+| **LightGBM** | x | x | GOSS sampling, histogram splits |
+| **CatBoost** | x | x | Ordered target statistics for categoricals |
 | **Geographical-XGBoost** | | x | Spatial kernel, local+global ensemble |
 | **Oblique Tree** | x | x | Sparse projection splits |
 | **Oblique Forest (SPORF)** | x | x | Ensemble of oblique trees, parallel |
@@ -247,8 +249,11 @@ let task = CsvLoader::from_path("data.csv")
 | Elastic Net | | x | L1+L2, coordinate descent |
 | AdaBoost | x | | SAMME with weighted stumps |
 | Linear SVM | x | | SGD + hinge loss, OVR multiclass |
+| Hoeffding Tree | x | | Incremental / streaming induction |
 | **Stacking (Super Learner)** | x | x | Meta-ensemble, out-of-fold |
+| **Dynamic Ensemble (KNORA-E)** | x | | Per-instance competence selection |
 | **Quantile GB** | | x | Pinball loss, prediction intervals |
+| **Quantile Forest** | | x | Full conditional distribution per leaf |
 | **EBM** | x | x | Interpretable GAM, shape functions |
 | Bagging (any learner) | x | x | Generic bootstrap wrapper |
 
@@ -275,6 +280,10 @@ let task = CsvLoader::from_path("data.csv")
 | F1 Score (macro) | Classification | maximize |
 | Log Loss | Classification | minimize |
 | AUC-ROC | Classification | maximize |
+| Balanced Accuracy | Classification | maximize |
+| Cohen's Kappa | Classification | maximize |
+| Matthews Correlation Coefficient | Classification | maximize |
+| Brier Score | Classification | minimize |
 | RMSE | Regression | minimize |
 | MAE | Regression | minimize |
 | R-squared | Regression | maximize |
@@ -313,6 +322,8 @@ let task = CsvLoader::from_path("data.csv")
 | Holdout | Simple train/test split |
 | SpatialBlockCV | Geospatial block partitioning |
 | SpatialBufferCV | Geospatial with exclusion buffer |
+| StratifiedCV | K-fold preserving per-fold class balance |
+| GroupCV | K-fold keeping each group entirely in one fold |
 
 ## Additional Features
 
@@ -322,6 +333,8 @@ let task = CsvLoader::from_path("data.csv")
 - **Model serialization** — save/load as JSON
 - **CSV loading** — with auto label encoding
 - **Input validation** — dimension checks, NaN detection
+- **Model registry** — `learner_from_id("xgboost")` constructs any of the
+  20 non-ensemble learners by name, for data-driven experiment loops
 
 ## Architecture
 
