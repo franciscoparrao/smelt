@@ -122,14 +122,16 @@ fn main() {
     let ebm_result =
         benchmark::resample_regress(&mut ebm, &task, &ho, &[&Rmse, &RSquared]).unwrap();
 
-    // G-XGBoost: train on full data, measure on training (fair comparison later)
+    // G-XGBoost: train on full data, measure on training (fair comparison later).
+    // Fitted values via the local models: predict_spatial with the training
+    // coords (predict() alone is global-only, see TrainedGeoXGBoost docs).
     let mut gxgb = GeoXGBoost::new(coords.clone())
         .with_bandwidth(5)
         .with_n_estimators(50)
         .with_max_depth(3);
-    let gxgb_model = gxgb.train_regress(&task).unwrap();
+    let gxgb_model = gxgb.train_geo(&task).unwrap();
     let gxgb_pred = gxgb_model
-        .predict(&features)
+        .predict_spatial(&features, &coords)
         .unwrap()
         .with_truth_regress(target.clone());
     let gxgb_rmse = Rmse.score(&gxgb_pred).unwrap();

@@ -137,8 +137,9 @@ fn main() {
     let gxgb_model = gxgb.train_geo(&tr_task).unwrap();
     let gxgb_train_time = t0.elapsed();
 
-    // In-sample predictions (local models, via TrainedModel trait)
-    let gxgb_train_pred = gxgb_model.predict(&tr_feat).unwrap();
+    // In-sample predictions (local models, via predict_spatial with the
+    // training coords — predict() alone is global-only by design)
+    let gxgb_train_pred = gxgb_model.predict_spatial(&tr_feat, &tr_coords).unwrap();
     let gxgb_train_vals = match &gxgb_train_pred {
         Prediction::Regression { predicted, .. } => predicted.clone(),
         _ => panic!("Expected regression"),

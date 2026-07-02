@@ -320,6 +320,11 @@ impl TrainedGeoXGBoost {
     /// For each new coordinate, finds the closest training point and uses
     /// its local model blended with the global model via the stored alpha weight.
     /// This matches the behavior of the Python `predict_gxgb` function.
+    ///
+    /// To get **in-sample fitted values** (the training-set predictions that
+    /// exercise each point's own local model), call this with the training
+    /// features and [`Self::coords`] — each point then matches itself exactly
+    /// (distance 0).
     pub fn predict_spatial(
         &self,
         features: &Array2<f64>,
@@ -375,47 +380,18 @@ impl TrainedGeoXGBoost {
 }
 
 impl TrainedModel for TrainedGeoXGBoost {
+    /// Global-model-only prediction.
+    ///
+    /// The `TrainedModel` trait has no notion of spatial coordinates, so this
+    /// method cannot know whether `features` is the training set, a genuinely
+    /// new dataset, or a new dataset that coincidentally has the same number
+    /// of rows as the training set — matching on row count would silently
+    /// apply the wrong local model to unrelated points. To get spatially-aware
+    /// predictions (including "fitted values" on the training set, by passing
+    /// the training coordinates back), use [`TrainedGeoXGBoost::predict_spatial`].
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
         crate::validate::check_n_features(features, self.feature_names.len())?;
-
-        // For prediction on new data: find nearest local model for each sample
-        // (requires coordinates — use the training coords to match)
-        // If n_samples matches training, use corresponding local model.
-        // Otherwise, use global model only.
-
-        let n_samples = features.nrows();
-
-        if n_samples == self.local_models.len() {
-            // Predict on training data: use each point's own local model
-            let global_pred = self.global_model.predict(features)?;
-            let global_vals = match &global_pred {
-                Prediction::Regression { predicted, .. } => predicted.clone(),
-                _ => return Err(SmeltError::Other("Expected regression".into())),
-            };
-
-            let mut predicted = Vec::with_capacity(n_samples);
-            for i in 0..n_samples {
-                let ensemble = match &self.local_models[i] {
-                    Some(local_model) => {
-                        let row = features.select(ndarray::Axis(0), &[i]);
-                        let local_pred = local_model.predict(&row)?;
-                        let local_val = match &local_pred {
-                            Prediction::Regression { predicted, .. } => predicted[0],
-                            _ => return Err(SmeltError::Other("Expected regression".into())),
-                        };
-                        let alpha = self.alphas[i];
-                        alpha * local_val + (1.0 - alpha) * global_vals[i]
-                    }
-                    None => global_vals[i],
-                };
-                predicted.push(ensemble);
-            }
-
-            Ok(Prediction::regression(predicted))
-        } else {
-            // New data: use global model (or find nearest local model)
-            self.global_model.predict(features)
-        }
+        self.global_model.predict(features)
     }
 
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
@@ -621,6 +597,35 @@ mod tests {
         assert_eq!(sel.scores.len(), candidates.len());
         // Every reported LOO criterion is finite (each candidate was evaluated).
         assert!(sel.scores.iter().all(|&(_, r)| r.is_finite()));
+    }
+
+    /// Regression test: `predict()` (the `TrainedModel` trait method) must be
+    /// global-only, never keyed off row count. Previously, `predict()` checked
+    /// `features.nrows() == local_models.len()` and, if so, applied each
+    /// training point's local model by row *position* — silently wrong for
+    /// any dataset that happens to have the same row count as training but
+    /// is not, in fact, the training set (no coordinates to verify against).
+    #[test]
+    fn predict_is_global_only_never_positional_local_models() {
+        let (task, coords) = toy_task(4); // 16 points
+        let features = task.features().clone();
+        let mut gxgb = GeoXGBoost::new(coords).with_n_estimators(20).with_bandwidth(4);
+        let model = gxgb.train_geo(&task).unwrap();
+
+        // Same row count as training (16), predicted through the trait method.
+        let via_trait = TrainedModel::predict(&model, &features).unwrap();
+        let Prediction::Regression { predicted: via_trait_vals, .. } = via_trait else {
+            panic!("expected regression");
+        };
+
+        // Must match the global model's own prediction exactly — no local
+        // model or alpha blending involved, regardless of row count matching.
+        let global_only = model.global_model.predict(&features).unwrap();
+        let Prediction::Regression { predicted: global_vals, .. } = global_only else {
+            panic!("expected regression");
+        };
+
+        assert_eq!(via_trait_vals, global_vals, "predict() must equal the global model alone");
     }
 
     #[test]

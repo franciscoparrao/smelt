@@ -54,6 +54,7 @@ fn main() {
     let te_feat = features.select(Axis(0), test_idx).to_owned();
     let te_tgt: Vec<f64> = test_idx.iter().map(|&i| target[i]).collect();
     let tr_coords: Vec<(f64, f64)> = train_idx.iter().map(|&i| coords[i]).collect();
+    let te_coords: Vec<(f64, f64)> = test_idx.iter().map(|&i| coords[i]).collect();
 
     let tr_task = RegressionTask::new("train", tr_feat.clone(), tr_tgt.clone()).unwrap();
 
@@ -79,20 +80,22 @@ fn main() {
         .score(&rf_pred.with_truth_regress(te_tgt.clone()))
         .unwrap();
 
-    // GeoXGBoost (with spatial kernel)
+    // GeoXGBoost (with spatial kernel). predict() alone is global-only by
+    // design (see TrainedGeoXGBoost docs) — predict_spatial with explicit
+    // coords is required for any spatially-aware prediction, in-sample or not.
     let mut gxgb = GeoXGBoost::new(tr_coords.clone())
         .with_bandwidth(50)
         .with_n_estimators(100)
         .with_max_depth(4)
         .with_learning_rate(0.1);
-    let gxgb_model = gxgb.train_regress(&tr_task).unwrap();
+    let gxgb_model = gxgb.train_geo(&tr_task).unwrap();
     // In-sample prediction (GeoXGBoost uses local models for training points)
-    let gxgb_train_pred = gxgb_model.predict(&tr_feat).unwrap();
+    let gxgb_train_pred = gxgb_model.predict_spatial(&tr_feat, &tr_coords).unwrap();
     let gxgb_train_rmse = Rmse
         .score(&gxgb_train_pred.with_truth_regress(tr_tgt.clone()))
         .unwrap();
-    // Out-of-sample (global model only for new locations)
-    let gxgb_pred = gxgb_model.predict(&te_feat).unwrap();
+    // Out-of-sample, spatially-aware (nearest local model per test point)
+    let gxgb_pred = gxgb_model.predict_spatial(&te_feat, &te_coords).unwrap();
     let gxgb_rmse = Rmse
         .score(&gxgb_pred.with_truth_regress(te_tgt.clone()))
         .unwrap();
@@ -118,7 +121,7 @@ fn main() {
         "  GeoXGBoost (train, local) RMSE: {:.4}  (spatial adaptation)",
         gxgb_train_rmse
     );
-    println!("  GeoXGBoost (test, global) RMSE: {:.4}", gxgb_rmse);
+    println!("  GeoXGBoost (test, spatial) RMSE: {:.4}", gxgb_rmse);
     let coord_improvement = (1.0 - xgb_c_rmse / xgb_rmse) * 100.0;
     println!(
         "\n  → Coords improve XGBoost by {:.1}% (spatial signal is strong)",

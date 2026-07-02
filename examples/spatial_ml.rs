@@ -52,9 +52,11 @@ fn main() {
     let mut gxgb = GeoXGBoost::new(coords.clone())
         .with_bandwidth(4)
         .with_n_estimators(50);
-    let gxgb_model = gxgb.train_regress(&task).unwrap();
+    let gxgb_model = gxgb.train_geo(&task).unwrap();
+    // Fitted values via the local models: predict_spatial with the training
+    // coords (predict() alone is global-only, see TrainedGeoXGBoost docs).
     let gxgb_pred = gxgb_model
-        .predict(&features)
+        .predict_spatial(&features, &coords)
         .unwrap()
         .with_truth_regress(target.clone());
     let gxgb_rmse = Rmse.score(&gxgb_pred).unwrap();

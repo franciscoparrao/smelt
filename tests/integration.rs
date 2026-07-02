@@ -3288,12 +3288,17 @@ fn geo_xgboost_basic_regression() {
     let coords: Vec<(f64, f64)> = (0..10).map(|i| (i as f64, 0.0)).collect();
     let task = RegressionTask::new("geo", features.clone(), target.clone()).unwrap();
 
-    let mut gxgb = GeoXGBoost::new(coords)
+    let mut gxgb = GeoXGBoost::new(coords.clone())
         .with_bandwidth(4)
         .with_n_estimators(50)
         .with_max_depth(3);
-    let model = gxgb.train_regress(&task).unwrap();
-    let pred = model.predict(&features).unwrap().with_truth_regress(target);
+    let model = gxgb.train_geo(&task).unwrap();
+    // Fitted values: predict_spatial with the training coords exercises each
+    // point's own local model (predict() alone is global-only by design).
+    let pred = model
+        .predict_spatial(&features, &coords)
+        .unwrap()
+        .with_truth_regress(target);
 
     let rmse = Rmse.score(&pred).unwrap();
     assert!(
@@ -3337,12 +3342,13 @@ fn geo_xgboost_spatial_heterogeneity() {
     let task = RegressionTask::new("hetero", features.clone(), target.clone()).unwrap();
 
     // G-XGBoost should handle this better than global XGBoost
-    let mut gxgb = GeoXGBoost::new(coords)
+    let mut gxgb = GeoXGBoost::new(coords.clone())
         .with_bandwidth(4)
         .with_n_estimators(50);
-    let model = gxgb.train_regress(&task).unwrap();
+    let model = gxgb.train_geo(&task).unwrap();
+    // Fitted values via the local models (predict() alone is global-only).
     let pred = model
-        .predict(&features)
+        .predict_spatial(&features, &coords)
         .unwrap()
         .with_truth_regress(target.clone());
     let gxgb_rmse = Rmse.score(&pred).unwrap();
@@ -3419,15 +3425,15 @@ fn geo_xgboost_fixed_alpha() {
         .with_alpha(0.0)
         .with_n_estimators(30)
         .with_bandwidth(3);
-    let m0 = g0.train_regress(&task).unwrap();
-    let p0 = m0.predict(&features).unwrap();
+    let m0 = g0.train_geo(&task).unwrap();
+    let p0 = m0.predict_spatial(&features, &coords).unwrap();
 
-    let mut g1 = GeoXGBoost::new(coords)
+    let mut g1 = GeoXGBoost::new(coords.clone())
         .with_alpha(1.0)
         .with_n_estimators(30)
         .with_bandwidth(3);
-    let m1 = g1.train_regress(&task).unwrap();
-    let p1 = m1.predict(&features).unwrap();
+    let m1 = g1.train_geo(&task).unwrap();
+    let p1 = m1.predict_spatial(&features, &coords).unwrap();
 
     // Both should produce valid predictions
     assert_eq!(p0.n_samples(), 8);

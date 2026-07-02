@@ -171,11 +171,16 @@ let intervals = cf.predict(&new_features).unwrap();
 Spatially local regression — [Grekousis (2025)](https://doi.org/10.1007/s10109-025-00465-4):
 
 ```rust
-let mut gxgb = GeoXGBoost::new(coords)
+let mut gxgb = GeoXGBoost::new(coords.clone())
     .with_bandwidth(30)
     .with_n_estimators(100);
-let model = gxgb.train_regress(&task).unwrap();
+let model = gxgb.train_geo(&task).unwrap();
+// predict_spatial finds each point's nearest local model — pass the
+// training coords back to get in-sample fitted values.
+let fitted = model.predict_spatial(task.features(), &coords).unwrap();
 ```
+
+`train_regress` (the `Learner` trait method) also works and returns `Box<dyn TrainedModel>`, but its `predict()` is global-model-only — spatial predictions always require `predict_spatial` with explicit coordinates.
 
 Also: `SpatialBlockCV` and `SpatialBufferCV` for spatially-aware cross-validation.
 

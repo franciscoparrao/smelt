@@ -66,6 +66,7 @@ fn main() {
 
     let test_features = features_no_coords.select(Axis(0), test_idx).to_owned();
     let test_target: Vec<f64> = test_idx.iter().map(|&i| target[i]).collect();
+    let test_coords: Vec<(f64, f64)> = test_idx.iter().map(|&i| coords[i]).collect();
 
     let train_task =
         RegressionTask::new("train", train_features.clone(), train_target.clone()).unwrap();
@@ -107,14 +108,18 @@ fn main() {
         .score(&xgb_pred.with_truth_regress(test_target.clone()))
         .unwrap();
 
-    // GeoXGBoost
+    // GeoXGBoost — predict_spatial with the test coords gives genuine
+    // spatially-aware out-of-sample prediction (predict() alone is
+    // global-only, see TrainedGeoXGBoost docs).
     let mut gxgb = GeoXGBoost::new(train_coords.clone())
         .with_bandwidth(30)
         .with_n_estimators(100)
         .with_max_depth(4)
         .with_learning_rate(0.1);
-    let gxgb_model = gxgb.train_regress(&train_task).unwrap();
-    let gxgb_pred = gxgb_model.predict(&test_features).unwrap();
+    let gxgb_model = gxgb.train_geo(&train_task).unwrap();
+    let gxgb_pred = gxgb_model
+        .predict_spatial(&test_features, &test_coords)
+        .unwrap();
     let gxgb_rmse = Rmse
         .score(&gxgb_pred.with_truth_regress(test_target.clone()))
         .unwrap();
