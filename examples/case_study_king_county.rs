@@ -46,7 +46,7 @@ fn main() {
 
     // ── Holdout split ──────────────────────────────────────────────────
     let holdout = Holdout::new(0.8).with_seed(42);
-    let splits = holdout.splits(n);
+    let splits = holdout.splits(n).unwrap();
     let (train_idx, test_idx) = &splits[0];
 
     let tr_feat = features.select(Axis(0), train_idx).to_owned();
@@ -132,7 +132,7 @@ fn main() {
     println!("\n─── Spatial Leakage: Random CV vs Spatial Block CV ───\n");
 
     let random_cv = CrossValidation::new(5).with_seed(42);
-    let random_splits = random_cv.splits(n);
+    let random_splits = random_cv.splits(n).unwrap();
     let mut random_rmses = Vec::new();
     for (tr, te) in &random_splits {
         let trf = features.select(Axis(0), tr).to_owned();
@@ -151,7 +151,7 @@ fn main() {
     let random_mean = random_rmses.iter().sum::<f64>() / random_rmses.len() as f64;
 
     let spatial_cv = SpatialBlockCV::new(4, coords.clone());
-    let spatial_splits = spatial_cv.splits(n);
+    let spatial_splits = spatial_cv.splits(n).unwrap();
     let mut spatial_rmses = Vec::new();
     for (tr, te) in &spatial_splits {
         if tr.is_empty() || te.is_empty() {
@@ -181,7 +181,7 @@ fn main() {
     println!("─── Conformal Prediction ───\n");
 
     let cal_split = Holdout::new(0.75).with_seed(99);
-    let cal_splits = cal_split.splits(train_idx.len());
+    let cal_splits = cal_split.splits(train_idx.len()).unwrap();
     let (tr2_local, cal_local) = &cal_splits[0];
     let tr2_idx: Vec<usize> = tr2_local.iter().map(|&i| train_idx[i]).collect();
     let cal_idx: Vec<usize> = cal_local.iter().map(|&i| train_idx[i]).collect();

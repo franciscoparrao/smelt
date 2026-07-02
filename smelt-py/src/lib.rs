@@ -489,9 +489,9 @@ impl CrossValidation {
         }
     }
 
-    fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
+    fn splits(&self, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {
         use smelt_ml::prelude::Resample;
-        self.inner.splits(n_samples)
+        self.inner.splits(n_samples).map_err(smelt_err)
     }
 }
 
@@ -548,9 +548,9 @@ impl SpatialBlockCV {
         })
     }
 
-    fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
+    fn splits(&self, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {
         use smelt_ml::prelude::Resample;
-        self.inner.splits(n_samples)
+        self.inner.splits(n_samples).map_err(smelt_err)
     }
 }
 
@@ -582,9 +582,59 @@ impl SpatialBufferCV {
         })
     }
 
-    fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
+    fn splits(&self, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {
         use smelt_ml::prelude::Resample;
-        self.inner.splits(n_samples)
+        self.inner.splits(n_samples).map_err(smelt_err)
+    }
+}
+
+// ── StratifiedCV ───────────────────────────────────────────────────────
+
+#[pyclass]
+struct StratifiedCV {
+    inner: smelt_ml::prelude::StratifiedCV,
+}
+
+#[pymethods]
+impl StratifiedCV {
+    /// Stratified k-fold: each fold preserves the overall class proportions.
+    /// `labels` are the classification target values (0-indexed class ids).
+    #[new]
+    #[pyo3(signature = (n_folds, labels, seed=42))]
+    fn new(n_folds: usize, labels: Vec<usize>, seed: u64) -> Self {
+        Self {
+            inner: smelt_ml::prelude::StratifiedCV::new(n_folds, labels).with_seed(seed),
+        }
+    }
+
+    fn splits(&self, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {
+        use smelt_ml::prelude::Resample;
+        self.inner.splits(n_samples).map_err(smelt_err)
+    }
+}
+
+// ── GroupCV ────────────────────────────────────────────────────────────
+
+#[pyclass]
+struct GroupCV {
+    inner: smelt_ml::prelude::GroupCV,
+}
+
+#[pymethods]
+impl GroupCV {
+    /// Group k-fold: every sample sharing a group id stays in the same
+    /// fold, so a group never spans both train and test.
+    #[new]
+    #[pyo3(signature = (n_folds, groups, seed=42))]
+    fn new(n_folds: usize, groups: Vec<usize>, seed: u64) -> Self {
+        Self {
+            inner: smelt_ml::prelude::GroupCV::new(n_folds, groups).with_seed(seed),
+        }
+    }
+
+    fn splits(&self, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {
+        use smelt_ml::prelude::Resample;
+        self.inner.splits(n_samples).map_err(smelt_err)
     }
 }
 
@@ -1927,6 +1977,8 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<CrossValidation>()?;
     m.add_class::<SpatialBlockCV>()?;
     m.add_class::<SpatialBufferCV>()?;
+    m.add_class::<StratifiedCV>()?;
+    m.add_class::<GroupCV>()?;
 
     // Measures
     m.add_function(wrap_pyfunction!(accuracy_score, m)?)?;

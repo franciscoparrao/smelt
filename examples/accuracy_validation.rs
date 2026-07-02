@@ -25,7 +25,7 @@ fn cv_classif(
 ) -> f64 {
     let cv = CrossValidation::new(5).with_seed(42);
     let task = ClassificationTask::new("cv", features.clone(), target.to_vec()).unwrap();
-    let splits = cv.splits(task.n_samples());
+    let splits = cv.splits(task.n_samples()).unwrap();
 
     let mut scores = Vec::new();
     for (train_idx, test_idx) in &splits {
@@ -54,7 +54,7 @@ fn cv_regress(
     name: &str,
 ) -> f64 {
     let cv = CrossValidation::new(5).with_seed(42);
-    let splits = cv.splits(features.nrows());
+    let splits = cv.splits(features.nrows()).unwrap();
 
     let mut scores = Vec::new();
     for (train_idx, test_idx) in &splits {

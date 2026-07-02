@@ -190,7 +190,7 @@ fn measure_direction() {
 #[test]
 fn cross_validation_splits() {
     let cv = CrossValidation::new(5);
-    let splits = cv.splits(100);
+    let splits = cv.splits(100).unwrap();
     assert_eq!(splits.len(), 5);
 
     for (train, test) in &splits {
@@ -207,7 +207,7 @@ fn cross_validation_splits() {
 #[test]
 fn holdout_split_ratio() {
     let ho = Holdout::new(0.7);
-    let splits = ho.splits(100);
+    let splits = ho.splits(100).unwrap();
     assert_eq!(splits.len(), 1);
     let (train, test) = &splits[0];
     assert_eq!(train.len(), 70);
@@ -217,8 +217,8 @@ fn holdout_split_ratio() {
 #[test]
 fn resample_deterministic() {
     let cv = CrossValidation::new(3).with_seed(123);
-    let s1 = cv.splits(50);
-    let s2 = cv.splits(50);
+    let s1 = cv.splits(50).unwrap();
+    let s2 = cv.splits(50).unwrap();
     assert_eq!(s1, s2);
 }
 
@@ -380,7 +380,7 @@ fn full_pipeline_classif_with_cv() {
     let task = ClassificationTask::new("pipeline", features.clone(), target.clone()).unwrap();
 
     let cv = CrossValidation::new(4).with_seed(42);
-    let splits = cv.splits(task.n_samples());
+    let splits = cv.splits(task.n_samples()).unwrap();
 
     let mut scores = Vec::new();
     for (train_idx, test_idx) in &splits {
@@ -425,7 +425,7 @@ fn full_pipeline_regress_with_holdout() {
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
 
     let ho = Holdout::new(0.8).with_seed(42);
-    let splits = ho.splits(features.nrows());
+    let splits = ho.splits(features.nrows()).unwrap();
     let (train_idx, test_idx) = &splits[0];
 
     let train_features = features.select(ndarray::Axis(0), train_idx);
@@ -1838,7 +1838,7 @@ fn importance_has_std_dev() {
 fn spatial_block_splits_cover_all() {
     let coords: Vec<(f64, f64)> = (0..20).map(|i| (i as f64, (i % 5) as f64)).collect();
     let cv = SpatialBlockCV::new(4, coords);
-    let splits = cv.splits(20);
+    let splits = cv.splits(20).unwrap();
 
     assert_eq!(splits.len(), 4);
 
@@ -1867,7 +1867,7 @@ fn spatial_block_spatial_separation() {
     }
 
     let cv = SpatialBlockCV::new(2, coords.clone());
-    let splits = cv.splits(20);
+    let splits = cv.splits(20).unwrap();
 
     // In at least one split, test should be dominated by one cluster
     let has_separated = splits.iter().any(|(_, test)| {
@@ -1886,7 +1886,7 @@ fn spatial_buffer_removes_nearby() {
     // Tight cluster at (0,0) and one point far at (100,100)
     let coords = vec![(0.0, 0.0), (0.1, 0.0), (0.0, 0.1), (100.0, 100.0)];
     let cv = SpatialBufferCV::new(2, coords, 1.0).with_seed(42);
-    let splits = cv.splits(4);
+    let splits = cv.splits(4).unwrap();
 
     for (train, test) in &splits {
         // If test contains point from cluster, nearby train points should be removed

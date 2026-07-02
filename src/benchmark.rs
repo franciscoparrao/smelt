@@ -38,7 +38,7 @@ pub fn resample_classif(
     resampling: &dyn Resample,
     measures: &[&dyn Measure],
 ) -> Result<BenchmarkResult> {
-    let splits = resampling.splits(task.n_samples());
+    let splits = resampling.splits(task.n_samples())?;
     let features = task.features();
     let target = task.target();
     let mut scores = Vec::with_capacity(splits.len());
@@ -74,7 +74,7 @@ pub fn resample_regress(
     resampling: &dyn Resample,
     measures: &[&dyn Measure],
 ) -> Result<BenchmarkResult> {
-    let splits = resampling.splits(task.n_samples());
+    let splits = resampling.splits(task.n_samples())?;
     let features = task.features();
     let target = task.target();
     let mut scores = Vec::with_capacity(splits.len());

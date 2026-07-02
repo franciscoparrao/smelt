@@ -135,7 +135,7 @@ impl Learner for Stacking {
         let n_classes = task.n_classes();
 
         let cv = CrossValidation::new(self.cv_folds).with_seed(self.cv_seed);
-        let splits = cv.splits(n_samples);
+        let splits = cv.splits(n_samples)?;
 
         // Build out-of-fold predictions (level-1 features)
         let n_meta_cols = n_base * n_classes;
@@ -194,7 +194,7 @@ impl Learner for Stacking {
         let n_base = self.base_factories.len();
 
         let cv = CrossValidation::new(self.cv_folds).with_seed(self.cv_seed);
-        let splits = cv.splits(n_samples);
+        let splits = cv.splits(n_samples)?;
 
         let mut oof_meta = Array2::zeros((n_samples, n_base));
 

@@ -31,7 +31,7 @@ fn main() {
 
     // Split 80/20
     let holdout = Holdout::new(0.8).with_seed(42);
-    let splits = holdout.splits(n);
+    let splits = holdout.splits(n).unwrap();
     let (train_idx, test_idx) = &splits[0];
 
     let train_features = features.select(ndarray::Axis(0), train_idx);

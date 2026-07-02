@@ -32,6 +32,8 @@ from smelt._smelt import (
     CrossValidation,
     SpatialBlockCV,
     SpatialBufferCV,
+    StratifiedCV,
+    GroupCV,
     # Measures
     accuracy_score,
     rmse_score,
@@ -72,7 +74,7 @@ __all__ = [
     "LogisticRegression", "LinearRegression", "Ridge",
     "KNearestNeighbors", "GaussianNB", "GeoXGBoost",
     "StandardScaler",
-    "CrossValidation", "SpatialBlockCV", "SpatialBufferCV",
+    "CrossValidation", "SpatialBlockCV", "SpatialBufferCV", "StratifiedCV", "GroupCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",
     "f1_score", "precision_score", "recall_score", "auc_roc_score",
     "wilcoxon_signed_rank", "bootstrap_ci", "sign_test",

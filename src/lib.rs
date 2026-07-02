@@ -87,7 +87,7 @@ pub mod prelude {
         PCA, Pipeline, RFE, Smote, StandardScaler, Transformer,
     };
     pub use crate::resample::{
-        CrossValidation, Holdout, Resample, SpatialBlockCV, SpatialBufferCV,
+        CrossValidation, GroupCV, Holdout, Resample, SpatialBlockCV, SpatialBufferCV, StratifiedCV,
     };
     pub use crate::serialize::{SerializableModel, load_json, save_json};
     pub use crate::task::{ClassificationTask, RegressionTask, Task};

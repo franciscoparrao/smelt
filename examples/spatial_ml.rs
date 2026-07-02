@@ -70,7 +70,7 @@ fn main() {
     // 3. Spatial Cross-Validation
     println!("=== Spatial Cross-Validation ===");
     let spatial_cv = SpatialBlockCV::new(2, coords);
-    let splits = spatial_cv.splits(task.n_samples());
+    let splits = spatial_cv.splits(task.n_samples()).unwrap();
 
     for (i, (train, test)) in splits.iter().enumerate() {
         println!(

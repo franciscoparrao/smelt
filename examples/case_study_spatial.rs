@@ -57,7 +57,7 @@ fn main() {
     // ── Step 2: Train/Test split (80/20) ───────────────────────────────────
 
     let holdout = Holdout::new(0.8).with_seed(42);
-    let splits = holdout.splits(task.n_samples());
+    let splits = holdout.splits(task.n_samples()).unwrap();
     let (train_idx, test_idx) = &splits[0];
 
     let train_features = features_no_coords.select(Axis(0), train_idx).to_owned();
@@ -136,7 +136,7 @@ fn main() {
 
     // Random 5-fold CV
     let random_cv = CrossValidation::new(5).with_seed(42);
-    let random_splits = random_cv.splits(task_no_coords.n_samples());
+    let random_splits = random_cv.splits(task_no_coords.n_samples()).unwrap();
     let mut random_rmses = Vec::new();
     for (tr, te) in &random_splits {
         let tr_feat = features_no_coords.select(Axis(0), tr).to_owned();
@@ -157,7 +157,7 @@ fn main() {
 
     // Spatial Block 5-fold CV (prevents spatial autocorrelation leakage)
     let spatial_cv = SpatialBlockCV::new(5, coords.clone());
-    let spatial_splits = spatial_cv.splits(task_no_coords.n_samples());
+    let spatial_splits = spatial_cv.splits(task_no_coords.n_samples()).unwrap();
     let mut spatial_rmses = Vec::new();
     for (tr, te) in &spatial_splits {
         if tr.is_empty() || te.is_empty() {
@@ -196,7 +196,7 @@ fn main() {
 
     // Split: use 60% for training, 20% for calibration, 20% for testing
     let cal_holdout = Holdout::new(0.75).with_seed(123);
-    let cal_splits = cal_holdout.splits(train_idx.len());
+    let cal_splits = cal_holdout.splits(train_idx.len()).unwrap();
     let (tr2_idx_local, cal_idx_local) = &cal_splits[0];
 
     let tr2_idx: Vec<usize> = tr2_idx_local.iter().map(|&i| train_idx[i]).collect();

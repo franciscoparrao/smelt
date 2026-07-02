@@ -1,6 +1,7 @@
 //! Spatial cross-validation strategies for geospatial data.
 
 use super::Resample;
+use crate::{Result, SmeltError};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
@@ -19,7 +20,7 @@ use rand::seq::SliceRandom;
 /// let coords = vec![(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0),
 ///                   (2.0, 2.0), (3.0, 2.0), (2.0, 3.0), (3.0, 3.0)];
 /// let cv = SpatialBlockCV::new(2, coords);
-/// let splits = cv.splits(8);
+/// let splits = cv.splits(8).unwrap();
 /// assert_eq!(splits.len(), 2);
 /// ```
 pub struct SpatialBlockCV {
@@ -34,14 +35,18 @@ impl SpatialBlockCV {
 }
 
 impl Resample for SpatialBlockCV {
-    fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
-        assert_eq!(
-            self.coords.len(),
-            n_samples,
-            "coords length ({}) must match n_samples ({})",
-            self.coords.len(),
-            n_samples
-        );
+    fn splits(&self, n_samples: usize) -> Result<Vec<(Vec<usize>, Vec<usize>)>> {
+        if self.coords.len() != n_samples {
+            return Err(SmeltError::DimensionMismatch {
+                expected: n_samples,
+                got: self.coords.len(),
+            });
+        }
+        if self.n_folds < 1 {
+            return Err(SmeltError::InvalidParameter(
+                "SpatialBlockCV requires at least 1 fold".into(),
+            ));
+        }
 
         // Compute bounding box
         let (mut min_x, mut min_y) = (f64::INFINITY, f64::INFINITY);
@@ -70,7 +75,7 @@ impl Resample for SpatialBlockCV {
             })
             .collect();
 
-        (0..self.n_folds)
+        Ok((0..self.n_folds)
             .map(|fold| {
                 let test: Vec<usize> = (0..n_samples)
                     .filter(|&i| cell_assignments[i] == fold)
@@ -80,7 +85,7 @@ impl Resample for SpatialBlockCV {
                     .collect();
                 (train, test)
             })
-            .collect()
+            .collect())
     }
 }
 
@@ -97,7 +102,7 @@ impl Resample for SpatialBlockCV {
 ///
 /// let coords = vec![(0.0, 0.0), (0.1, 0.0), (10.0, 10.0), (10.1, 10.0)];
 /// let cv = SpatialBufferCV::new(2, coords, 1.0).with_seed(42);
-/// let splits = cv.splits(4);
+/// let splits = cv.splits(4).unwrap();
 /// ```
 pub struct SpatialBufferCV {
     n_folds: usize,
@@ -127,14 +132,19 @@ fn euclidean_dist(a: (f64, f64), b: (f64, f64)) -> f64 {
 }
 
 impl Resample for SpatialBufferCV {
-    fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
-        assert_eq!(
-            self.coords.len(),
-            n_samples,
-            "coords length ({}) must match n_samples ({})",
-            self.coords.len(),
-            n_samples
-        );
+    fn splits(&self, n_samples: usize) -> Result<Vec<(Vec<usize>, Vec<usize>)>> {
+        if self.coords.len() != n_samples {
+            return Err(SmeltError::DimensionMismatch {
+                expected: n_samples,
+                got: self.coords.len(),
+            });
+        }
+        if self.n_folds < 1 || n_samples < self.n_folds {
+            return Err(SmeltError::InvalidParameter(format!(
+                "SpatialBufferCV requires n_folds in 1..=n_samples, got n_folds={}, n_samples={n_samples}",
+                self.n_folds
+            )));
+        }
 
         // Standard k-fold shuffle
         let mut indices: Vec<usize> = (0..n_samples).collect();
@@ -143,7 +153,7 @@ impl Resample for SpatialBufferCV {
 
         let fold_size = n_samples / self.n_folds;
 
-        (0..self.n_folds)
+        Ok((0..self.n_folds)
             .map(|fold| {
                 let test_start = fold * fold_size;
                 let test_end = if fold == self.n_folds - 1 {
@@ -168,6 +178,6 @@ impl Resample for SpatialBufferCV {
 
                 (train, test)
             })
-            .collect()
+            .collect())
     }
 }

@@ -592,7 +592,7 @@ impl GeoXGBoost {
         let features = task.features();
 
         let fold_errors: Vec<Result<Vec<(usize, f64)>>> = cv
-            .splits(n_samples)
+            .splits(n_samples)?
             .into_par_iter()
             .map(|(train_idx, test_idx)| -> Result<Vec<(usize, f64)>> {
                 let fold_features = features.select(ndarray::Axis(0), &train_idx);

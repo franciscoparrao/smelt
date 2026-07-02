@@ -1,17 +1,24 @@
-//! Resampling strategies: cross-validation, holdout, bootstrap, spatial.
+//! Resampling strategies: cross-validation, holdout, bootstrap, spatial,
+//! stratified, group.
 
 pub mod spatial;
+pub mod stratified;
 
+use crate::{Result, SmeltError};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 
 pub use spatial::{SpatialBlockCV, SpatialBufferCV};
+pub use stratified::{GroupCV, StratifiedCV};
 
 /// Trait for resampling strategies.
 pub trait Resample {
-    /// Generate train/test index splits.
-    fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)>;
+    /// Generate train/test index splits. Fails if `n_samples` is
+    /// inconsistent with this strategy's own configuration (e.g. a
+    /// coordinate/group/label vector supplied at construction time whose
+    /// length doesn't match, or a fold count that doesn't divide sensibly).
+    fn splits(&self, n_samples: usize) -> Result<Vec<(Vec<usize>, Vec<usize>)>>;
 }
 
 /// K-fold cross-validation.
@@ -37,13 +44,25 @@ impl CrossValidation {
 }
 
 impl Resample for CrossValidation {
-    fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
+    fn splits(&self, n_samples: usize) -> Result<Vec<(Vec<usize>, Vec<usize>)>> {
+        if self.folds < 2 {
+            return Err(SmeltError::InvalidParameter(format!(
+                "CrossValidation requires at least 2 folds, got {}",
+                self.folds
+            )));
+        }
+        if n_samples < self.folds {
+            return Err(SmeltError::InvalidParameter(format!(
+                "CrossValidation with {} folds requires at least {} samples, got {n_samples}",
+                self.folds, self.folds
+            )));
+        }
         let mut indices: Vec<usize> = (0..n_samples).collect();
         let mut rng = StdRng::seed_from_u64(self.seed);
         indices.shuffle(&mut rng);
 
         let fold_size = n_samples / self.folds;
-        (0..self.folds)
+        Ok((0..self.folds)
             .map(|fold| {
                 let test_start = fold * fold_size;
                 let test_end = if fold == self.folds - 1 {
@@ -59,7 +78,7 @@ impl Resample for CrossValidation {
                     .collect();
                 (train, test)
             })
-            .collect()
+            .collect())
     }
 }
 
@@ -89,7 +108,13 @@ impl Holdout {
 }
 
 impl Resample for Holdout {
-    fn splits(&self, n_samples: usize) -> Vec<(Vec<usize>, Vec<usize>)> {
+    fn splits(&self, n_samples: usize) -> Result<Vec<(Vec<usize>, Vec<usize>)>> {
+        if !(self.ratio > 0.0 && self.ratio < 1.0) {
+            return Err(SmeltError::InvalidParameter(format!(
+                "Holdout ratio must be in (0, 1), got {}",
+                self.ratio
+            )));
+        }
         let mut indices: Vec<usize> = (0..n_samples).collect();
         let mut rng = StdRng::seed_from_u64(self.seed);
         indices.shuffle(&mut rng);
@@ -97,6 +122,6 @@ impl Resample for Holdout {
         let split = (n_samples as f64 * self.ratio) as usize;
         let train = indices[..split].to_vec();
         let test = indices[split..].to_vec();
-        vec![(train, test)]
+        Ok(vec![(train, test)])
     }
 }
