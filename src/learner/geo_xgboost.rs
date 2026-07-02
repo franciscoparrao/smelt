@@ -14,6 +14,7 @@
 use crate::learner::xgboost::XGBoost;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
+use crate::resample::{CrossValidation, Resample};
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use crate::{Result, SmeltError};
 use ndarray::Array2;
@@ -469,12 +470,14 @@ impl GeoXGBoost {
             _ => return Err(SmeltError::Other("Expected regression".into())),
         };
 
-        // Global errors per point
-        let global_errors: Vec<f64> = target
-            .iter()
-            .zip(&global_vals)
-            .map(|(y, p)| (y - p).abs())
-            .collect();
+        // Global errors per point, out-of-fold (CV) — comparable to the local
+        // models' leave-one-out errors. Only needed for the adaptive alpha
+        // (Eq. 19-20); skip the extra CV passes when alpha is fixed.
+        let global_errors: Vec<f64> = if self.alpha.is_none() {
+            self.global_oob_errors(task, &global_vals)?
+        } else {
+            Vec::new()
+        };
 
         // Step 2: Train local models for each spatial unit.
         // The local models are independent, so we train them in parallel.
@@ -529,13 +532,17 @@ impl GeoXGBoost {
             local_importances.push(imp);
         }
 
-        // Step 3: Compute alpha weights (Eq. 19, 20)
+        // Step 3: Compute alpha weights (Eq. 19, 20). Both errors are
+        // out-of-sample (e_local: leave-one-out; e_global: out-of-fold CV) so
+        // the comparison is apples-to-apples — comparing e_local against an
+        // in-sample global residual would systematically favour the global
+        // model, since it has already seen every training point.
         let alphas: Vec<f64> = (0..n_samples)
             .map(|i| {
                 match self.alpha {
                     Some(a) => a, // fixed alpha
                     None => {
-                        // Adaptive: favor local when it has lower error
+                        // Adaptive: favor local when it has lower OOS error
                         let e_local = (target[i] - local_preds[i]).abs();
                         let e_global = global_errors[i];
                         if e_local <= e_global {
@@ -560,12 +567,126 @@ impl GeoXGBoost {
             local_importances,
         })
     }
+
+    /// Out-of-fold absolute errors for the global model, via k-fold CV.
+    ///
+    /// The adaptive alpha (Eq. 19-20) compares the local models' leave-one-out
+    /// error against the global model's error; using the global model's
+    /// in-sample residual for that comparison is biased low (the global model
+    /// has already seen every point) and systematically favours it. This
+    /// refits the global model on `k` folds and returns each point's
+    /// held-out residual instead, so both sides of the comparison are
+    /// out-of-sample.
+    fn global_oob_errors(&self, task: &RegressionTask, global_vals: &[f64]) -> Result<Vec<f64>> {
+        let n_samples = task.n_samples();
+        let target = task.target();
+        let folds = 5.min(n_samples);
+
+        if folds < 2 {
+            // Too few points to cross-validate: fall back to the in-sample
+            // residual (biased, but there is no out-of-sample alternative).
+            return Ok(target.iter().zip(global_vals).map(|(y, p)| (y - p).abs()).collect());
+        }
+
+        let cv = CrossValidation::new(folds).with_seed(self.seed);
+        let features = task.features();
+
+        let fold_errors: Vec<Result<Vec<(usize, f64)>>> = cv
+            .splits(n_samples)
+            .into_par_iter()
+            .map(|(train_idx, test_idx)| -> Result<Vec<(usize, f64)>> {
+                let fold_features = features.select(ndarray::Axis(0), &train_idx);
+                let fold_target: Vec<f64> = train_idx.iter().map(|&j| target[j]).collect();
+                let fold_task = RegressionTask::new(task.id(), fold_features, fold_target)?;
+
+                let mut fold_xgb = self.make_xgb();
+                let fold_model = fold_xgb.train_regress(&fold_task)?;
+
+                let test_features = features.select(ndarray::Axis(0), &test_idx);
+                let test_pred = fold_model.predict(&test_features)?;
+                let test_vals = match &test_pred {
+                    Prediction::Regression { predicted, .. } => predicted.clone(),
+                    _ => return Err(SmeltError::Other("Expected regression".into())),
+                };
+                Ok(test_idx
+                    .into_iter()
+                    .zip(test_vals)
+                    .map(|(idx, pred)| (idx, (target[idx] - pred).abs()))
+                    .collect())
+            })
+            .collect();
+
+        let mut errors = vec![0.0; n_samples];
+        for fold in fold_errors {
+            for (idx, err) in fold? {
+                errors[idx] = err;
+            }
+        }
+        Ok(errors)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ndarray::Array2;
+    use rand::prelude::*;
+
+    /// Regression test: the adaptive alpha (Eq. 19-20) must compare the local
+    /// model's leave-one-out error against an out-of-fold error for the
+    /// global model, not its in-sample residual. A flexible global model on a
+    /// small dataset can nearly memorize the training set (in-sample error
+    /// close to 0) while its true generalization error is much higher; using
+    /// the in-sample residual would make the global model look artificially
+    /// competitive against the (genuinely out-of-sample) local models.
+    #[test]
+    fn global_oob_errors_are_not_optimistic_like_in_sample_residuals() {
+        let n = 40;
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut feats = Vec::with_capacity(n);
+        let mut target = Vec::with_capacity(n);
+        let mut coords = Vec::with_capacity(n);
+        for i in 0..n {
+            let x = i as f64;
+            coords.push((x, 0.0));
+            feats.push(x);
+            target.push(x * 0.3 + rng.random::<f64>() * 5.0); // noisy signal
+        }
+        let features = Array2::from_shape_vec((n, 1), feats).unwrap();
+        let task = RegressionTask::new("oob", features.clone(), target.clone()).unwrap();
+
+        // Deep, many-estimator, low-regularization XGBoost: with n=40 and a
+        // single feature this essentially memorizes the training set.
+        let gxgb = GeoXGBoost::new(coords)
+            .with_n_estimators(300)
+            .with_max_depth(8)
+            .with_learning_rate(0.5)
+            .with_lambda(0.01);
+
+        let mut global_xgb = gxgb.make_xgb();
+        let global_model = global_xgb.train_regress(&task).unwrap();
+        let global_pred = global_model.predict(&features).unwrap();
+        let Prediction::Regression { predicted: global_vals, .. } = global_pred else {
+            panic!("expected regression")
+        };
+
+        let in_sample: Vec<f64> = target
+            .iter()
+            .zip(&global_vals)
+            .map(|(y, p)| (y - p).abs())
+            .collect();
+        let oob = gxgb.global_oob_errors(&task, &global_vals).unwrap();
+
+        let mean_in_sample: f64 = in_sample.iter().sum::<f64>() / n as f64;
+        let mean_oob: f64 = oob.iter().sum::<f64>() / n as f64;
+
+        assert!(
+            mean_oob > mean_in_sample * 2.0,
+            "OOB error ({mean_oob:.4}) should be markedly higher than the \
+             optimistic in-sample residual ({mean_in_sample:.4}) once the \
+             global model overfits"
+        );
+    }
 
     /// Build a small spatially-structured regression task on a grid.
     fn toy_task(side: usize) -> (RegressionTask, Vec<(f64, f64)>) {
