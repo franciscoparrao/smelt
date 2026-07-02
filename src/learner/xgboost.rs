@@ -5,6 +5,7 @@
 //! parallel split finding, early stopping, zero-copy prediction, in-place partitioning.
 
 use crate::{Result, SmeltError};
+use crate::learner::math::{sigmoid, softmax};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
@@ -467,7 +468,8 @@ impl<'a> XGBTreeBuilder<'a> {
         }
     }
 
-    /// Like find_best_histogram but also returns per-feature histogram data for the pool.
+    /// Histogram split finding — parallel per feature, also returns per-feature
+    /// histogram data for the pool (used for parent/child subtraction).
     fn find_best_histogram_saving(
         &self,
         node_indices: &[usize],
@@ -551,85 +553,6 @@ impl<'a> XGBTreeBuilder<'a> {
             }
         }
         (best_split, hists)
-    }
-
-    /// Histogram split finding — parallel per feature, flat Vec<f64> for cache locality.
-    #[allow(dead_code)]
-    fn find_best_histogram(&self, node_indices: &[usize]) -> Option<BestSplit> {
-        let results: Vec<Option<BestSplit>> = self
-            .col_indices
-            .par_iter()
-            .map(|&feat| {
-                let nb = self.bins.n_bins(feat);
-                let mut bin_g = vec![0.0; nb];
-                let mut bin_h = vec![0.0; nb];
-                let mut nan_g = 0.0;
-                let mut nan_h = 0.0;
-
-                for &idx in node_indices {
-                    let b = self.bins.get_bin(feat, idx);
-                    if b == NAN_BIN {
-                        nan_g += self.grads[idx];
-                        nan_h += self.hess[idx];
-                    } else {
-                        bin_g[b as usize] += self.grads[idx];
-                        bin_h[b as usize] += self.hess[idx];
-                    }
-                }
-
-                let total_g: f64 = bin_g.iter().sum::<f64>() + nan_g;
-                let total_h: f64 = bin_h.iter().sum::<f64>() + nan_h;
-                let mut best_gain = 0.0;
-                let mut best: Option<(usize, f64, bool)> = None;
-
-                // NaN right
-                let (mut gl, mut hl) = (0.0, 0.0);
-                for bin in 0..nb.saturating_sub(1) {
-                    gl += bin_g[bin];
-                    hl += bin_h[bin];
-                    let (gr, hr) = (total_g - gl, total_h - hl);
-                    if hl < self.min_child_weight || hr < self.min_child_weight {
-                        continue;
-                    }
-                    let gain = self.split_gain(gl, hl, gr, hr);
-                    if gain > best_gain {
-                        best_gain = gain;
-                        best = Some((bin, gain, false));
-                    }
-                }
-                // NaN left
-                if nan_h > 0.0 {
-                    let (mut gl, mut hl) = (nan_g, nan_h);
-                    for bin in 0..nb.saturating_sub(1) {
-                        gl += bin_g[bin];
-                        hl += bin_h[bin];
-                        let (gr, hr) = (total_g - gl, total_h - hl);
-                        if hl < self.min_child_weight || hr < self.min_child_weight {
-                            continue;
-                        }
-                        let gain = self.split_gain(gl, hl, gr, hr);
-                        if gain > best_gain {
-                            best_gain = gain;
-                            best = Some((bin, gain, true));
-                        }
-                    }
-                }
-
-                best.map(|(bin, gain, nan_left)| BestSplit {
-                    feature: feat,
-                    threshold: self.bins.bin_threshold(feat, bin),
-                    gain,
-                    nan_goes_left: nan_left,
-                    split_bin: bin,
-                })
-            })
-            .collect();
-
-        results.into_iter().flatten().max_by(|a, b| {
-            a.gain
-                .partial_cmp(&b.gain)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
     }
 
     /// Exact greedy split — parallel per feature.
@@ -724,17 +647,6 @@ impl<'a> XGBTreeBuilder<'a> {
 }
 
 // ── Trained model ───────────────────────────────────────────────────
-
-fn sigmoid(x: f64) -> f64 {
-    1.0 / (1.0 + (-x).exp())
-}
-
-fn softmax(scores: &[f64]) -> Vec<f64> {
-    let max = scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let exps: Vec<f64> = scores.iter().map(|&s| (s - max).exp()).collect();
-    let sum: f64 = exps.iter().sum();
-    exps.iter().map(|&e| e / sum).collect()
-}
 
 #[derive(Serialize, Deserialize)]
 pub(crate) enum XGBMode {

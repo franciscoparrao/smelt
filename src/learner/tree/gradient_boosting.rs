@@ -5,6 +5,7 @@
 
 use super::{LeafValue, Node, TreeBuilder};
 use crate::Result;
+use crate::learner::math::{sigmoid, softmax};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
@@ -104,17 +105,6 @@ impl GradientBoosting {
         indices.truncate(k);
         indices
     }
-}
-
-fn sigmoid(x: f64) -> f64 {
-    1.0 / (1.0 + (-x).exp())
-}
-
-fn softmax(scores: &[f64]) -> Vec<f64> {
-    let max = scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let exps: Vec<f64> = scores.iter().map(|&s| (s - max).exp()).collect();
-    let sum: f64 = exps.iter().sum();
-    exps.iter().map(|&e| e / sum).collect()
 }
 
 // --- Internal mode ---

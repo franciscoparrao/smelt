@@ -14,6 +14,7 @@
 //! Decision Tree. NeurIPS.
 
 use crate::Result;
+use crate::learner::math::{sigmoid, softmax};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
@@ -553,16 +554,6 @@ fn leaf_weight(
 }
 
 // ── Trained model ───────────────────────────────────────────────────
-
-fn sigmoid(x: f64) -> f64 {
-    1.0 / (1.0 + (-x).exp())
-}
-fn softmax(s: &[f64]) -> Vec<f64> {
-    let mx = s.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let e: Vec<f64> = s.iter().map(|&v| (v - mx).exp()).collect();
-    let sm: f64 = e.iter().sum();
-    e.iter().map(|&v| v / sm).collect()
-}
 
 #[derive(Serialize, Deserialize)]
 pub(crate) enum LGBMode {

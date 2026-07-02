@@ -15,6 +15,7 @@ pub mod knn;
 pub mod lightgbm;
 pub mod linear_regression;
 pub mod logistic_regression;
+pub(crate) mod math;
 pub mod naive_bayes;
 pub mod oblique;
 pub mod quantile;

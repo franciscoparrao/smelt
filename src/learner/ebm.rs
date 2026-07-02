@@ -4,6 +4,7 @@
 //! f(x) = f₁(x₁) + f₂(x₂) + ... where each fᵢ is a shape function that can be visualized.
 
 use crate::Result;
+use crate::learner::math::sigmoid;
 use crate::learner::tree::TreeBuilder;
 use crate::learner::tree::{LeafValue, Node};
 use crate::learner::{Learner, TrainedModel};
@@ -72,10 +73,6 @@ impl EBM {
         self.seed = s;
         self
     }
-}
-
-fn sigmoid(x: f64) -> f64 {
-    1.0 / (1.0 + (-x).exp())
 }
 
 /// Trained EBM. Each entry in `shape_trees` is a list of boosted stumps for that feature.

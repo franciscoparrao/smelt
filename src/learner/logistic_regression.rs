@@ -2,6 +2,7 @@
 //!
 //! Binary classification with sigmoid. Multiclass via one-vs-rest.
 
+use crate::learner::math::sigmoid;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
@@ -59,10 +60,6 @@ impl LogisticRegression {
         self.tol = tol;
         self
     }
-}
-
-fn sigmoid(x: f64) -> f64 {
-    1.0 / (1.0 + (-x).exp())
 }
 
 /// Train a single binary logistic regression (positive class vs rest).
