@@ -2031,6 +2031,46 @@ fn load_csv_forced_categorical_column() {
     assert!(err.is_err());
 }
 
+/// NaN policy (item 14): the boosting engines handle missing values natively
+/// (learned default direction); every other learner must reject NaN features
+/// with a clear error instead of silently producing garbage distances,
+/// coefficients, or splits.
+#[test]
+fn nan_features_rejected_by_non_nan_learners_accepted_by_boosting() {
+    use ndarray::array;
+
+    let features = array![
+        [0.0, 1.0],
+        [1.0, f64::NAN],
+        [2.0, 3.0],
+        [3.0, 4.0],
+        [4.0, 5.0],
+        [5.0, 6.0]
+    ];
+    let rtask = RegressionTask::new("nan_policy", features.clone(), vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+        .unwrap();
+    let ctask = ClassificationTask::new("nan_policy", features, vec![0, 1, 0, 1, 0, 1]).unwrap();
+
+    // Non-NaN-capable learners: clear error at train time.
+    assert!(KNearestNeighbors::new(2).train_regress(&rtask).is_err());
+    assert!(LinearRegression::new().train_regress(&rtask).is_err());
+    assert!(DecisionTree::new().train_classif(&ctask).is_err());
+    assert!(RandomForest::new().train_regress(&rtask).is_err());
+    assert!(LogisticRegression::new().train_classif(&ctask).is_err());
+
+    // Boosting engines: NaN is a first-class missing value.
+    assert!(XGBoost::new().with_n_estimators(5).train_regress(&rtask).is_ok());
+    assert!(
+        LightGBM::new()
+            .with_n_estimators(5)
+            .with_top_rate(1.0)
+            .with_other_rate(0.0)
+            .train_regress(&rtask)
+            .is_ok()
+    );
+    assert!(CatBoost::new().with_n_estimators(5).train_regress(&rtask).is_ok());
+}
+
 #[test]
 fn task_with_categorical_features_validates_codes() {
     use ndarray::array;

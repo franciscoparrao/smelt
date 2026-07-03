@@ -214,6 +214,7 @@ impl Learner for AdaBoost {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
         let n = task.n_samples();

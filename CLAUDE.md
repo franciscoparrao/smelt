@@ -99,10 +99,13 @@ competitiva" in progress):
 - [x] Missing measures: BalancedAccuracy, CohensKappa, MCC, Brier
 - [x] Model registry (`learner_from_id`)
 - [x] Consistent parallel `predict` (multiclass XGBoost/CatBoost, all of LightGBM)
-- [ ] Categorical features + NaN support in `Task`/splits; early stopping with a
-      real validation set; monotone constraints; custom objectives (largest item —
-      touches `Task`, `CsvLoader`, histogram binning, and split-finding in all 3
-      boosting engines at once; needs its own scoping pass before starting)
+- [x] Categorical features + NaN support in `Task`/splits (FeatureType metadata,
+      NaN/categorical-aware CsvLoader, native Fisher categorical splits in
+      XGBoost/LightGBM, CatBoost target-stats fixes M2/M3); eval-set early
+      stopping in all 3 boosting engines; monotone constraints + custom
+      objectives (Huber/Poisson/Custom) in XGBoost; check_no_nan in non-NaN
+      learners (done 2026-07-02 — see docs/fase3_progreso.md). Not yet in
+      smelt-py: cat_features/eval_set/monotone/objective bindings (item 15c/15d)
 - [ ] Python: `define_learner!` macro, close the ~14 learners not yet bound,
       `get_params`/`set_params`, split `smelt-py/src/lib.rs` (1800+ lines)
 - [ ] Parquet/Arrow loading, `f32` histograms, sparse data support

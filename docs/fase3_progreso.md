@@ -88,3 +88,51 @@ alcanzables desde Python** (aunque `Bagging`/`Stacking`/`DynamicEnsemble`
 seleccionan su base por id en vez de por objeto). Quedan 15c
 (get_params/set_params) y 15d (dividir lib.rs) del ítem 15, y el ítem 14
 completo (categóricas + NaN) como los dos grandes pendientes de Fase 3.
+
+### 2026-07-02 — Ítem 14 completo: categóricas + NaN + early stopping + monotone + objetivos
+
+El ítem más grande de la Fase 3, ejecutado en 6 sub-fases con commit por
+sub-fase (`abe57bb`, `c392552`, `5c1ad04`, `37b8409`, `61a3f53` + docs/NaN):
+
+- **14a — Task/CsvLoader**: `FeatureType::{Numeric, Categorical{n_categories}}`
+  por columna en ambos Tasks (`with_categorical_features`, valida códigos
+  enteros no negativos, NaN permitido como categoría faltante). CsvLoader
+  carga celdas vacías/NA/NaN/null/?/N-A como `f64::NAN`, auto-detecta
+  columnas string como categóricas (LabelEncoder, determinístico) y tiene
+  `.categorical(&[...])` para forzar columnas numéricas.
+- **14b — CatBoost M2/M3 + early stopping**: módulo compartido
+  `learner/eval.rs` (EvalTarget/validadores/EarlyStopper); XGBoost
+  refactorizado sobre él; LightGBM y CatBoost ganan
+  `with_eval_set_regress/_classif` + `with_early_stopping_rounds`. CatBoost:
+  masa NaN entra a los gains con dirección default aprendida por nivel
+  (M2), categorías no vistas caen al prior (M3), los encoders saltan NaN
+  (`NaN as i64 == 0` fusionaba missing con la categoría 0), y usa
+  automáticamente las categóricas declaradas en el Task.
+- **14c — Splits categóricos nativos**: `HistBins::build_typed` binea
+  categóricas por código; `best_categorical_split` (scan de Fisher estilo
+  LightGBM: categorías ordenadas por g/h, prefijos, NaN a ambos lados) en
+  los 3 caminos de XGBoost (histograma, HistPool, exacto) y en LightGBM
+  (`XGBNode::CatSplit`/`LGBNode::CatSplit`). No vistas → derecha.
+- **14d — Monotone constraints (XGBoost)**: `with_monotone_constraints`
+  (+1/-1/0 por feature); splits que violan el orden de pesos rechazados en
+  los 3 caminos, bounds propagados por midpoint, hojas clamped. Solo paga
+  costo cuando hay constraint activa.
+- **14e — Objetivos custom (XGBoost regresión)**: `with_objective` con
+  `SquaredError` (default), `Huber{delta}`, `Poisson` (log-link, predice en
+  escala respuesta vía `PredTransform::Exp`, serde default Identity) y
+  `Custom(Arc<fn(pred, target) -> (grad, hess)>)`.
+- **14f — Política NaN**: `check_no_nan` al inicio de train en los 27
+  entry-points de learners sin soporte NaN (KNN, lineales, SVM, NB, árboles
+  no-boosting, AdaBoost, oblique, quantile, Hoeffding, EBM) — error claro
+  en vez de basura silenciosa. Los 3 motores de boosting aceptan NaN nativo.
+
+Validación: suite completa verde tras cada sub-fase (74 lib + 272
+integración al cierre), con tests discriminantes nuevos por sub-fase (la
+señal solo-en-missingness es spliteable en CatBoost, paridad de códigos
+imposible para umbral numérico con 3 stumps pero exacta con split
+categórico, monotonía verificada sobre el grid, Huber resiste outliers,
+custom==builtin bit a bit, y `cargo check --workspace` incluye smelt-py).
+Los árboles serializados viejos siguen cargando (serde default en los
+campos nuevos). Pendiente consciente: los constraints/objetivos custom no
+están en LightGBM/CatBoost (documentado), y smelt-py aún no expone
+cat_features/eval_set/monotone/objective (va con ítem 15c/15d).

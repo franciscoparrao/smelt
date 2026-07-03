@@ -275,6 +275,7 @@ impl Learner for QuantileForest {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
         let n_samples = task.n_samples();

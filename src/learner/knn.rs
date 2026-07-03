@@ -136,6 +136,7 @@ impl Learner for KNearestNeighbors {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_nan(task.features())?;
         Ok(Box::new(TrainedKnnClassifier {
             features: task.features().clone(),
             target: task.target().to_vec(),
@@ -145,6 +146,7 @@ impl Learner for KNearestNeighbors {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_nan(task.features())?;
         Ok(Box::new(TrainedKnnRegressor {
             features: task.features().clone(),
             target: task.target().to_vec(),

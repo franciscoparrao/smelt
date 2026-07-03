@@ -175,7 +175,7 @@
 13. `learner::math` + `scan_split` compartidos; borrar código muerto.
 
 ### Fase 3 — Paridad competitiva
-14. Categóricas + NaN en Task y splits; early stopping/monotone constraints/objetivos custom.
+14. ~~Categóricas + NaN en Task y splits; early stopping/monotone constraints/objetivos custom.~~ **HECHO 2026-07-02** (commits `abe57bb`..`61a3f53` + validación NaN): FeatureType en Task, CsvLoader NaN/categóricas, M2/M3 de CatBoost corregidos, eval-set early stopping en los 3 motores, splits categóricos nativos (Fisher) en XGBoost/LightGBM, monotone constraints y objetivos custom (Huber/Poisson/Custom) en XGBoost, check_no_nan en los learners sin soporte NaN.
 15. Python: macro `define_learner!`, cerrar los 14 learners, get_params/stubs, dividir lib.rs.
 16. Parquet/Arrow; model registry; medidas faltantes; f32 en histogramas; predict paralelo consistente.
 17. Docs: README y CLAUDE.md al día; `#![warn(missing_docs)]`.

@@ -525,6 +525,7 @@ impl Learner for ObliqueTree {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_nan(task.features())?;
         let nf = task.n_features();
         let fpp = self
             .features_per_proj
@@ -559,6 +560,7 @@ impl Learner for ObliqueTree {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_nan(task.features())?;
         let nf = task.n_features();
         let fpp = self
             .features_per_proj
@@ -662,6 +664,7 @@ impl Learner for ObliqueForest {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_nan(task.features())?;
         let nf = task.n_features();
         let ns = task.n_samples();
         let nc = task.n_classes();
@@ -716,6 +719,7 @@ impl Learner for ObliqueForest {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_nan(task.features())?;
         let nf = task.n_features();
         let ns = task.n_samples();
         let fpp = self

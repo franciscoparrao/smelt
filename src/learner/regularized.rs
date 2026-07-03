@@ -139,6 +139,7 @@ impl Learner for Ridge {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_nan(task.features())?;
         let x = task.features();
         let y = task.target();
         let n = x.nrows();
@@ -289,6 +290,7 @@ impl Learner for Lasso {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_nan(task.features())?;
         let x = task.features();
         let y = task.target();
         let n = x.nrows();
@@ -369,6 +371,7 @@ impl Learner for ElasticNet {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_nan(task.features())?;
         let x = task.features();
         let y = task.target();
         let n = x.nrows();
