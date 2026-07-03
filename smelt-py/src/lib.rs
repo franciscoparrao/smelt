@@ -1,5 +1,6 @@
 //! Python bindings for smelt-ml via PyO3.
 
+mod causal;
 mod common;
 mod feature_selection;
 mod learners;
@@ -11,6 +12,7 @@ mod tuning;
 
 use pyo3::prelude::*;
 
+use causal::{DrLearner, RLearner, SLearner, TLearner, XLearner};
 use feature_selection::{
     filter_anova_f, filter_cmim, filter_correlation, filter_information_gain, filter_jmi,
     filter_jmim, filter_mrmr, filter_mutual_information, filter_relief, filter_variance, rfe,
@@ -62,6 +64,13 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Stacking>()?;
     m.add_class::<DynamicEnsemble>()?;
     m.add_function(wrap_pyfunction!(registered_learner_ids, m)?)?;
+
+    // Causal meta-learners
+    m.add_class::<TLearner>()?;
+    m.add_class::<SLearner>()?;
+    m.add_class::<XLearner>()?;
+    m.add_class::<RLearner>()?;
+    m.add_class::<DrLearner>()?;
 
     // Preprocessing
     m.add_class::<StandardScaler>()?;

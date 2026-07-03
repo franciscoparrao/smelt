@@ -108,9 +108,39 @@ están expuestos a Python, pero el match debía seguir siendo exhaustivo).
 
 ## Fuera de alcance (seguimiento futuro)
 
-- Bindings Python (`smelt-py`) para los meta-learners.
 - Soporte genérico de pesos por muestra en `Learner`/`RegressionTask`
   (permitiría R-learner fielmente ponderado).
 - Estimación de error estándar/CI por bootstrap (`CausalForest` tiene su
   propio jackknife infinitesimal; los meta-learners no tienen ese
   mecanismo).
+
+## Actualización 2026-07-03 (misma sesión): bindings Python
+
+Se agregaron los bindings de `smelt-py` que el punto anterior dejaba como
+seguimiento — `smelt-py/src/causal.rs` (nuevo módulo), con `TLearner`,
+`SLearner`, `XLearner`, `RLearner`, `DrLearner` como clases PyO3.
+
+- **Mismo patrón que `Bagging`/`Stacking`/`DynamicEnsemble`** (no
+  `define_learner!`, que asume la forma `(X, y)`; no `declare_params!`
+  genérico tampoco): los learners base se seleccionan por **id string**
+  (`smelt.registered_learner_ids()`), validados eagerly en el constructor Y
+  revalidados en `set_params` — se movió `validate_learner_id` de privada a
+  `pub(crate)` en `learners/ensemble.rs` para reutilizarla, en vez de
+  duplicarla.
+- `estimate(x, treatment, y)` devuelve un dict `{"cate": ndarray, "ate":
+  float}` vía un helper compartido `meta_learner_result_to_dict`.
+- `XLearner`/`RLearner`/`DrLearner` exponen sus hiperparámetros propios
+  (`propensity_clip`, `cv_folds`, `cv_seed`, `residual_clip`) como kwargs
+  con default, iguales a la API de Rust.
+- Compiló limpio al primer intento (`cargo build -p smelt-py`).
+- **Gap de re-export descubierto en el smoke test**: las clases se
+  registraban en el módulo nativo `_smelt` pero `smelt/__init__.py` (el
+  wrapper puro-Python) no las re-exportaba — mismo patrón que cada learner
+  existente requiere (import explícito + entrada en `__all__`). Corregido.
+- Validación: `maturin develop --release` + smoke test en Python cubriendo
+  las 5 clases (`estimate`/`get_params`/`set_params` round-trip, PEHE
+  calculado contra el CATE verdadero de un fixture sintético) y los paths
+  de error (id de constructor inválido, id de `set_params` inválido, clave
+  de `set_params` desconocida, tratamiento no-binario) — todos fallan
+  limpio, no panic. `cargo test -p smelt-ml --lib`/`--test integration`
+  siguen en 95/272 verdes, sin regresiones.

@@ -41,6 +41,12 @@ from smelt._smelt import (
     Stacking,
     DynamicEnsemble,
     registered_learner_ids,
+    # Causal meta-learners
+    TLearner,
+    SLearner,
+    XLearner,
+    RLearner,
+    DrLearner,
     # Preprocessing
     StandardScaler,
     # Resampling
@@ -95,6 +101,7 @@ __all__ = [
     "AdaBoost", "EBM", "Lasso", "ElasticNet", "GradientBoosting",
     "HoeffdingTree", "LinearSVM", "ObliqueTree", "ObliqueForest", "QuantileForest", "QuantileGB",
     "Bagging", "Stacking", "DynamicEnsemble", "registered_learner_ids",
+    "TLearner", "SLearner", "XLearner", "RLearner", "DrLearner",
     "StandardScaler",
     "CrossValidation", "SpatialBlockCV", "SpatialBufferCV", "StratifiedCV", "GroupCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",

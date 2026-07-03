@@ -22,7 +22,7 @@ use smelt_ml::learner::TrainedModel;
 // strings as `learner_from_id` (validated eagerly in `new()`, not at fit
 // time) -- e.g. `Bagging(base="decision_tree")`, not `Bagging(base=DecisionTree())`.
 
-fn validate_learner_id(id: &str) -> PyResult<()> {
+pub(crate) fn validate_learner_id(id: &str) -> PyResult<()> {
     smelt_ml::prelude::learner_from_id(id).map(|_| ()).map_err(|_| {
         PyRuntimeError::new_err(format!(
             "unknown base learner id \"{id}\"; valid ids: {}",

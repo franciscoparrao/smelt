@@ -160,9 +160,12 @@ the full design rationale.
       built on `CrossValidation::splits`). New `Prediction::CausalEffect`
       variant + `Pehe`/`AteBias` measures for evaluating against synthetic
       ground-truth CATE. 95 lib tests + 66 doctests green (up from 74/61).
-- [ ] Python bindings (`smelt-py`) for the meta-learners — deliberately out
-      of scope; would need hand-written `#[pymethods]` + `declare_params!`
-      (not `define_learner!`, which assumes the `(X,y)` shape)
+- [x] Python bindings (`smelt-py/src/causal.rs`) for all 5 meta-learners —
+      done 2026-07-03, same session. Same id-string base-learner pattern as
+      `Bagging`/`Stacking` (not `define_learner!`/generic `declare_params!`,
+      both assume the `(X,y)`-`Learner` shape); `validate_learner_id`
+      promoted from private to `pub(crate)` in `learners/ensemble.rs` to
+      share it instead of duplicating
 - [ ] Generic per-sample-weight support on `Learner`/`RegressionTask` —
       would let R-learner use the paper's weighted R-loss instead of the
       documented unweighted simplification; cross-cutting, out of scope
