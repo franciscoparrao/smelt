@@ -178,3 +178,179 @@ macro cross-módulo) — todo idéntico al comportamiento pre-refactor.
 Con esto, del ítem 15 solo queda 15c (`get_params`/`set_params`) y, del
 ítem 14, exponer en smelt-py lo que quedó solo en Rust
 (cat_features/eval_set/monotone/objective).
+
+### 2026-07-03 — Ítem 15c completo: `get_params`/`set_params` (26/26 learners)
+
+Estilo sklearn: `get_params()` devuelve un dict de hiperparámetros del
+constructor (sin `trained`/`is_classif`), `set_params(**kwargs)` los
+actualiza in-place y lanza `ValueError` en claves desconocidas. No toca el
+modelo ya entrenado (igual que sklearn: el próximo `fit()` usa los nuevos
+valores).
+
+Dos caminos según cómo esté definido el wrapper:
+
+- **Los 11 learners vía `define_learner!`** (GradientBoosting,
+  HoeffdingTree, ObliqueTree, ObliqueForest, Lasso, ElasticNet, LinearSVM,
+  AdaBoost, EBM, QuantileForest, QuantileGB): la macro ya conoce la lista
+  de campos (`params = {...}`), así que `get_params`/`set_params` se
+  generaron dentro de la misma macro — cero código nuevo por learner.
+- **Los 15 restantes** (hand-written: RandomForest, ExtraTrees,
+  DecisionTree, LogisticRegression, LinearRegression, Ridge,
+  KNearestNeighbors, GaussianNB, XGBoost, CatBoost, LightGBM, GeoXGBoost,
+  Bagging, Stacking, DynamicEnsemble): nueva macro `declare_params!`
+  (mismo patrón que `declare_support!`) invocada con pares `campo =>
+  "nombre_python"` — el nivel de indirección existe porque `XGBoost`/
+  `CatBoost`/`GeoXGBoost` renombran el campo Rust `lambda` al parámetro
+  Python `lambda_` (choque con la palabra reservada `lambda`), así que la
+  clave del dict tiene que ser `"lambda_"`, no `stringify!(lambda)`.
+
+Excepción a la macro: `Bagging`/`Stacking`/`DynamicEnsemble` tienen
+`get_params`/`set_params` escritos a mano en vez de `declare_params!`,
+porque sus campos `base`/`base_learners`/`meta` seleccionan otro learner
+por id string y `new()` los valida eagerly (`validate_learner_id`); `fit()`
+asume esa validación ya ocurrió (`.expect("validated in ...")`). Si
+`set_params` hubiera usado la macro genérica sin revalidar, un id inválido
+pasado por `set_params` habría llegado intacto hasta el `.expect()` en
+`fit()` y volado como panic de Rust (que pyo3 convierte en una excepción
+opaca) en vez de un `ValueError` claro en `set_params` mismo. Mismo
+razonamiento para el chequeo de "al menos 1 base learner" de
+`Stacking`/`DynamicEnsemble`.
+
+Validación: `cargo build -p smelt-py` limpio (0 warnings nuevos — el primer
+intento generó 3 warnings de `v` no usada en los 3 casos sin parámetros
+—`LogisticRegression`/`LinearRegression`/`GaussianNB`—, resueltos con
+`#[allow(unused_variables)]` en el `set_params` de la macro).
+`cargo test -p smelt-ml` verde (61 doctests, sin cambios — este ítem no
+tocó `smelt-ml`). Verificación real: `maturin develop --release` + smoke
+test en Python cubriendo los 26 learners — round-trip `get_params()` →
+`set_params(**params)` → `get_params()` idéntico, claves exactas esperadas
+por learner (incluido `lambda_` en los 3 boosters), `set_params` cambiando
+comportamiento real (`RandomForest(n_estimators=5)` vía `set_params` antes
+de `fit`), `ValueError` en parámetro desconocido, y los dos casos de
+validación especial (`Bagging.set_params(base="not_a_real_id")` y
+`Stacking.set_params(base_learners=[])` fallan limpio en vez de panicar).
+
+Con esto el ítem 15 completo (15a/15b/15c/15d) queda cerrado. De la Fase 3
+sólo quedan los dos ítems grandes: exponer en smelt-py lo que el ítem 14
+dejó solo en Rust (cat_features/eval_set/monotone/objective), Parquet/
+Arrow + histogramas f32 + sparse (16d), y `missing_docs`/308 warnings
+(17b).
+
+### 2026-07-03 — Ítem 14 expuesto en smelt-py: cat_features/eval_set/monotone/objective
+
+Cierra la brecha que dejó el ítem 14 (todo Rust-only) entre XGBoost/LightGBM/
+CatBoost en Rust y sus wrappers Python.
+
+- **`cat_features`** (los 3 boosters): como `fit(x, y, cat_features=[...])`,
+  no como parámetro de constructor — es metadata de las columnas de esta
+  llamada a `fit`, no un hiperparámetro del modelo (mismo criterio que
+  sklearn/LightGBM sklearn-API, que también lo reciben en `.fit()`). Se
+  resuelve internamente vía un nuevo `common::fit_learner_cat` (variante de
+  `fit_learner` que además llama `Task::with_categorical_features(&cats)`
+  antes de entrenar) — `fit_learner` original queda como wrapper de
+  `fit_learner_cat(..., None)`, sin duplicar la lógica de construcción de
+  Task. Nota: CatBoost tiene su *propio* `with_cat_features` a nivel de
+  learner (además de leer el Task), pero se enruta igual por el Task para
+  los 3 boosters de manera uniforme — el efecto es idéntico porque CatBoost
+  cae al Task cuando su lista propia está vacía.
+- **`eval_set`/`early_stopping_rounds`** (los 3 boosters): como
+  `fit(x, y, eval_set=(x_val, y_val), early_stopping_rounds=N)`, calcado del
+  estilo sklearn-API de xgboost/lightgbm reales. Nuevo helper
+  `common::parse_eval_set` decide `with_eval_set_classif`/`_regress` con el
+  mismo criterio `is_integer(y)` que ya se usaba para `y` principal, y
+  devuelve un enum `EvalKind` para que cada `fit()` elija el builder
+  correcto antes de castear a `&mut dyn Learner`. Un eval_set del tipo
+  equivocado (float contra y entero, o viceversa) no se valida en Python —
+  se deja que el `train_*` de Rust lo rechace (ya tenía ese chequeo del
+  ítem 14b), y el error llega limpio vía `smelt_err`.
+- **`monotone_constraints`** (sólo XGBoost, no existe en LightGBM/CatBoost):
+  nuevo parámetro de **constructor** `Option<Vec<i8>>` (a diferencia de
+  cat_features/eval_set, esto sí es un hiperparámetro fijo del modelo, igual
+  que en la sklearn-API real de xgboost). Validación de longitud/valores
+  queda en Rust (`validate_constraints`), no se duplica en Python.
+- **`objective`** (sólo XGBoost): nuevo parámetro de constructor `objective:
+  String` + `huber_delta: f64`, con un mapeador `resolve_objective` en
+  `boosting.rs` a `smelt_ml::prelude::Objective::{SquaredError, Huber,
+  Poisson}`. **`Objective::Custom` (closure arbitraria) no se expone** —
+  bridgearlo a un callable Python requeriría reacquirir el GIL en cada
+  evaluación de gradiente/hessiano, el mismo trade-off costo/complejidad
+  que ya llevó a que `Bagging`/`Stacking` seleccionen su base learner por id
+  string en vez de aceptar un objeto Python (ver comentario en
+  `ensemble.rs`). Documentado como límite consciente, no como pendiente.
+- Ambos nuevos parámetros de constructor de XGBoost (`monotone_constraints`,
+  `objective`, `huber_delta`) se sumaron a su `declare_params!` — quedan
+  cubiertos por `get_params`/`set_params` (ítem 15c) sin trabajo extra.
+
+Validación: `cargo build -p smelt-py` limpio. `cargo test -p smelt-ml`
+verde (61 doctests, sin cambios — ítem smelt-py-only). Verificación real:
+`maturin develop --release` (build lento, ~7m30s, por contención de CPU de
+otros procesos del usuario corriendo en paralelo — no relacionado al
+cambio) + smoke test en Python cubriendo: cat_features en clasificación y
+regresión en los 3 boosters, índice de categórica fuera de rango
+rechazado con error limpio (no panic), eval_set + early_stopping en los 3
+boosters, eval_set de tipo discordante con `y` rechazado limpio,
+monotone_constraints verificado sobre grid (predicciones no-decrecientes en
+la feature restringida) y longitud incorrecta rechazada, objective=huber y
+objective=poisson (predicciones positivas) entrenando correctamente,
+objective desconocido rechazado, y round-trip `get_params`/`set_params`
+incluyendo los 3 campos nuevos de XGBoost.
+
+De la Fase 3 quedan sólo los dos ítems grandes: Parquet/Arrow + histogramas
+f32 + sparse (16d), y `missing_docs`/308 warnings (17b).
+
+### 2026-07-03 — Ítem 16d (parte 1/3): Parquet loading
+
+16d resultó ser 3 sub-ítems independientes con perfiles de riesgo muy
+distintos (Parquet aditivo/bajo riesgo, f32-histograms refactor numérico de
+alto riesgo en los 3 motores de boosting, sparse data diseño desde cero sin
+scaffolding previo). Se ejecuta como 3 piezas separadas; esta sesión cierra
+solo la primera.
+
+- **Nueva dependencia opcional**: `polars = "0.54.4"` (`default-features =
+  false, features = ["parquet"]`) detrás de un feature Cargo nuevo
+  `parquet` — sigue literalmente la sugerencia del audit de no forzar
+  Arrow/Parquet (~200 crates transitivos) a todo consumidor de `smelt-ml`.
+  Confirmado con dos builds: `cargo build -p smelt-ml` (sin `--features
+  parquet`) no compila ni un solo crate de polars; `cargo build -p smelt-ml
+  --features parquet` sí, sin afectar el primero.
+- **`ParquetLoader`** (`src/data/parquet.rs`, todo el archivo `#[cfg(feature
+  = "parquet")]`): misma forma de API que `CsvLoader` (`from_path`,
+  `target`, `categorical`, `load_classif`/`load_regress`), pero tipado por
+  el schema de Parquet en vez de sniffing de strings — columnas
+  numéricas/booleanas castean directo a `f64` (null → NaN), columnas string
+  se label-encodean y quedan `FeatureType::Categorical`, igual criterio que
+  la auto-detección de CSV. `SmeltError::Parquet(String)` nueva variante,
+  también `#[cfg(feature = "parquet")]` (primera vez que el enum de error
+  del crate tiene un variant feature-gateado).
+- Reutiliza el mismo endpoint (`Task::new` + `with_feature_names` +
+  `with_categorical_features`) que ya usaba `CsvLoader` — no tocó `Task` ni
+  ninguna otra parte del motor. `Task` sigue siendo `Array2<f64>` denso; el
+  loader materializa un array denso desde las columnas de Polars (no hay
+  camino columnar/Arrow-nativo downstream, eso sería un rework de `Task`
+  mucho más grande y no era el objetivo de "agregar un loader").
+- API de polars 0.54.4 verificada leyendo el código fuente real bajado a
+  `~/.cargo/registry` en vez de asumir por versión/memoria (`Column::new`,
+  `Column::cast`, `DataType::is_numeric/is_bool`, `ParquetReader::finish`,
+  `ChunkedArray::get` devolviendo `Option<T::Physical<'_>>`) — compiló al
+  primer intento contra la API real.
+
+Validación: `cargo build -p smelt-ml` (sin feature) limpio — 0 crates de
+polars compilados. `cargo build -p smelt-ml --features parquet` limpio al
+primer intento (~200 crates nuevos, ~8 min de compilación por contención de
+CPU de otros procesos del usuario, no por el tamaño real del árbol).
+`cargo test -p smelt-ml --lib` verde (74 tests, sin cambios — ítem aditivo).
+7 tests de integración nuevos en `tests/integration.rs` (`mod parquet_tests`,
+`#[cfg(feature = "parquet")]`, fixtures escritas con
+`polars::prelude::{Column, DataFrame, ParquetWriter}` en vez de CSV
+intermedio) espejando 1:1 los tests ya existentes de `CsvLoader`:
+classification, regression, target string, columna target inexistente,
+nulls→NaN, columna string auto-categórica, columna forzada
+categórica/columna forzada inexistente — los 7 pasan. `cargo check -p
+smelt-py` limpio (smelt-py no expone `ParquetLoader` todavía — deliberado,
+fuera de alcance de esta pasada; los bindings Python son la extensión
+natural si se quiere, análoga a como el ítem 14 se expuso en smelt-py en
+una sesión separada).
+
+Quedan de la Fase 3: f32 histograms (16d parte 2/3, refactor numérico
+riesgoso), sparse data (16d parte 3/3, diseño desde cero), y
+`missing_docs`/308 warnings (17b).

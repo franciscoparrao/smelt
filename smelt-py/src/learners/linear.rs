@@ -1,7 +1,7 @@
 //! Linear learners: LogisticRegression, LinearRegression, Ridge, Lasso,
 //! ElasticNet, LinearSVM.
 
-use crate::common::{define_learner, add_explain_methods, declare_support};
+use crate::common::{define_learner, add_explain_methods, declare_support, declare_params};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
@@ -156,3 +156,7 @@ declare_support!(Ridge,              classif = false, regress = true);
 declare_support!(Lasso,              classif = false, regress = true);
 declare_support!(ElasticNet,         classif = false, regress = true);
 declare_support!(LinearSVM,          classif = true,  regress = false);
+
+declare_params!(LogisticRegression, {});
+declare_params!(LinearRegression,   {});
+declare_params!(Ridge,              { alpha => "alpha" });

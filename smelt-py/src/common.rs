@@ -64,23 +64,72 @@ pub(crate) fn fit_learner(
     features: Array2<f64>,
     y: &Bound<'_, PyAny>,
 ) -> PyResult<(Box<dyn TrainedModel>, bool)> {
+    fit_learner_cat(py, learner, features, y, None)
+}
+
+/// Like `fit_learner`, but declares `cat_features` (column indices) as
+/// categorical on the `Task` before training -- this is how XGBoost/LightGBM/
+/// CatBoost's native categorical splits (item 14c) learn about categorical
+/// columns from Python, since the `fit(x, y)` entry point only sees raw
+/// ndarrays and has no other place to carry that metadata.
+pub(crate) fn fit_learner_cat(
+    py: Python<'_>,
+    learner: &mut dyn Learner,
+    features: Array2<f64>,
+    y: &Bound<'_, PyAny>,
+    cat_features: Option<Vec<usize>>,
+) -> PyResult<(Box<dyn TrainedModel>, bool)> {
     if is_integer(y) {
         let target = extract_class_labels(y)?;
-        let task = smelt_ml::task::ClassificationTask::new("py", features, target)
+        let mut task = smelt_ml::task::ClassificationTask::new("py", features, target)
             .map_err(smelt_err)?;
+        if let Some(cats) = cat_features {
+            task = task.with_categorical_features(&cats).map_err(smelt_err)?;
+        }
         let model = py
             .allow_threads(|| learner.train_classif(&task))
             .map_err(smelt_err)?;
         Ok((model, true))
     } else {
         let target: Vec<f64> = y.extract()?;
-        let task =
+        let mut task =
             smelt_ml::task::RegressionTask::new("py", features, target).map_err(smelt_err)?;
+        if let Some(cats) = cat_features {
+            task = task.with_categorical_features(&cats).map_err(smelt_err)?;
+        }
         let model = py
             .allow_threads(|| learner.train_regress(&task))
             .map_err(smelt_err)?;
         Ok((model, false))
     }
+}
+
+/// Build the `EvalSet`-shaped pair from a Python `(x_val, y_val)` tuple for
+/// the eval-set builders (`with_eval_set_regress`/`with_eval_set_classif`,
+/// item 14b). Classification vs regression is decided the same way as the
+/// main training target (`is_integer`), so an eval set must agree in kind
+/// with `y` -- passing a float eval target against an integer `y` (or vice
+/// versa) is rejected by the learner's own `train_*` at fit time.
+pub(crate) fn parse_eval_set(
+    eval_set: Option<(PyReadonlyArray2<'_, f64>, Bound<'_, PyAny>)>,
+) -> PyResult<Option<(Array2<f64>, EvalKind)>> {
+    match eval_set {
+        None => Ok(None),
+        Some((x, y)) => {
+            let features = to_array2(x);
+            if is_integer(&y) {
+                Ok(Some((features, EvalKind::Classification(extract_class_labels(&y)?))))
+            } else {
+                Ok(Some((features, EvalKind::Regression(y.extract()?))))
+            }
+        }
+    }
+}
+
+/// Classification/regression eval-set target, returned by `parse_eval_set`.
+pub(crate) enum EvalKind {
+    Classification(Vec<usize>),
+    Regression(Vec<f64>),
 }
 
 pub(crate) fn predict_values<'py>(
@@ -377,6 +426,34 @@ macro_rules! define_learner {
             fn feature_importances_(&self) -> pyo3::PyResult<Option<Vec<(String, f64)>>> {
                 Ok(self.trained.as_ref().ok_or_else(crate::common::not_fitted)?.feature_importance())
             }
+
+            /// Return constructor hyperparameters as a dict (sklearn-style `get_params`).
+            fn get_params(&self, py: pyo3::Python<'_>) -> pyo3::PyResult<pyo3::PyObject> {
+                let dict = pyo3::types::PyDict::new(py);
+                $( dict.set_item(stringify!($field), self.$field.clone())?; )*
+                Ok(dict.into_pyobject(py)?.into_any().unbind())
+            }
+
+            /// Update hyperparameters in place (sklearn-style `set_params`); unknown
+            /// keys raise `ValueError`. Does not affect an already-fitted model.
+            #[pyo3(signature = (**kwargs))]
+            fn set_params(&mut self, kwargs: Option<&pyo3::Bound<'_, pyo3::types::PyDict>>) -> pyo3::PyResult<()> {
+                if let Some(kwargs) = kwargs {
+                    for (k, v) in kwargs.iter() {
+                        let key: String = k.extract()?;
+                        $(
+                            if key == stringify!($field) {
+                                self.$field = v.extract()?;
+                                continue;
+                            }
+                        )*
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "invalid parameter '{key}' for this estimator"
+                        )));
+                    }
+                }
+                Ok(())
+            }
         }
 
         crate::common::define_learner!(@proba $name, $has_proba);
@@ -487,3 +564,43 @@ macro_rules! declare_support {
     };
 }
 pub(crate) use declare_support;
+
+/// Declares sklearn-style `get_params`/`set_params` for a hand-written learner
+/// wrapper struct (one that doesn't go through `define_learner!`). Each
+/// `field => "pyname"` pair maps a Rust field to its Python-facing parameter
+/// name -- usually identical, but they differ where the constructor renames a
+/// field to dodge a Python keyword (e.g. `lambda` -> `lambda_`). Invoke this
+/// in the same file that defines the struct.
+macro_rules! declare_params {
+    ($name:ident, { $( $field:ident => $pyname:literal ),* $(,)? }) => {
+        #[pyo3::pymethods]
+        impl $name {
+            /// Return constructor hyperparameters as a dict (sklearn-style `get_params`).
+            fn get_params(&self, py: pyo3::Python<'_>) -> pyo3::PyResult<pyo3::PyObject> {
+                let dict = pyo3::types::PyDict::new(py);
+                $( dict.set_item($pyname, self.$field.clone())?; )*
+                Ok(dict.into_pyobject(py)?.into_any().unbind())
+            }
+
+            /// Update hyperparameters in place (sklearn-style `set_params`); unknown
+            /// keys raise `ValueError`. Does not affect an already-fitted model.
+            #[pyo3(signature = (**kwargs))]
+            #[allow(unused_variables)]
+            fn set_params(&mut self, kwargs: Option<&pyo3::Bound<'_, pyo3::types::PyDict>>) -> pyo3::PyResult<()> {
+                if let Some(kwargs) = kwargs {
+                    for (k, v) in kwargs.iter() {
+                        let key: String = k.extract()?;
+                        match key.as_str() {
+                            $( $pyname => { self.$field = v.extract()?; } )*
+                            other => return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                                "invalid parameter '{other}' for this estimator"
+                            ))),
+                        }
+                    }
+                }
+                Ok(())
+            }
+        }
+    };
+}
+pub(crate) use declare_params;

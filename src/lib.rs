@@ -67,6 +67,8 @@ pub mod prelude {
     pub use crate::benchmark::{self, BenchmarkResult};
     pub use crate::cluster::{ClusterResult, DBSCAN, IsolationForest, KMeans};
     pub use crate::data::CsvLoader;
+    #[cfg(feature = "parquet")]
+    pub use crate::data::ParquetLoader;
     pub use crate::error::{Result, SmeltError};
     pub use crate::importance::{
         FeatureImportance, permutation_importance_classif, permutation_importance_regress,

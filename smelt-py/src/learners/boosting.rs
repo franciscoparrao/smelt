@@ -1,15 +1,34 @@
 //! Gradient boosting learners: XGBoost, CatBoost, LightGBM, GeoXGBoost.
 
 use crate::common::{
-    fit_learner, not_fitted, parse_coords, perm_importance_impl, predict_proba_values,
-    predict_values, shap_impl, smelt_err, to_array2, conformal_predict_impl,
+    fit_learner_cat, not_fitted, parse_coords, parse_eval_set, perm_importance_impl,
+    predict_proba_values, predict_values, shap_impl, smelt_err, to_array2, conformal_predict_impl,
+    EvalKind,
 };
-use crate::common::{add_explain_methods, declare_support};
+use crate::common::{add_explain_methods, declare_support, declare_params};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use smelt_ml::learner::TrainedModel;
 use smelt_ml::prediction::Prediction;
+
+/// Map the Python-facing `objective` string to `smelt_ml::prelude::Objective`.
+/// `Objective::Custom` (an arbitrary Rust closure) isn't exposed here --
+/// bridging a Python callback into it would mean re-acquiring the GIL on
+/// every gradient/hessian evaluation, the same cost/complexity trade-off
+/// that keeps `Bagging`/`Stacking` on learner-id strings instead of Python
+/// learner objects (see `ensemble.rs`).
+fn resolve_objective(objective: &str, huber_delta: f64) -> PyResult<smelt_ml::prelude::Objective> {
+    use smelt_ml::prelude::Objective;
+    match objective {
+        "squared_error" => Ok(Objective::SquaredError),
+        "huber" => Ok(Objective::Huber { delta: huber_delta }),
+        "poisson" => Ok(Objective::Poisson),
+        other => Err(PyRuntimeError::new_err(format!(
+            "unknown objective '{other}'; expected one of: squared_error, huber, poisson"
+        ))),
+    }
+}
 
 // ── XGBoost ────────────────────────────────────────────────────────────
 
@@ -26,12 +45,19 @@ pub(crate) struct XGBoost {
     subsample: f64,
     colsample_bytree: f64,
     seed: u64,
+    monotone_constraints: Option<Vec<i8>>,
+    objective: String,
+    huber_delta: f64,
 }
 
 #[pymethods]
 impl XGBoost {
+    /// `monotone_constraints`: one of -1/0/+1 per feature (+1 = non-decreasing,
+    /// -1 = non-increasing, 0 = unconstrained), checked against the number of
+    /// features at fit time. `objective`: one of "squared_error" (default),
+    /// "huber" (uses `huber_delta`), or "poisson"; only affects regression.
     #[new]
-    #[pyo3(signature = (n_estimators=100, max_depth=6, learning_rate=0.3, lambda_=1.0, alpha=0.0, gamma=0.0, subsample=1.0, colsample_bytree=1.0, seed=42))]
+    #[pyo3(signature = (n_estimators=100, max_depth=6, learning_rate=0.3, lambda_=1.0, alpha=0.0, gamma=0.0, subsample=1.0, colsample_bytree=1.0, seed=42, monotone_constraints=None, objective="squared_error".to_string(), huber_delta=1.0))]
     fn new(
         n_estimators: usize,
         max_depth: usize,
@@ -42,6 +68,9 @@ impl XGBoost {
         subsample: f64,
         colsample_bytree: f64,
         seed: u64,
+        monotone_constraints: Option<Vec<i8>>,
+        objective: String,
+        huber_delta: f64,
     ) -> Self {
         Self {
             trained: None,
@@ -55,14 +84,25 @@ impl XGBoost {
             subsample,
             colsample_bytree,
             seed,
+            monotone_constraints,
+            objective,
+            huber_delta,
         }
     }
 
+    /// `cat_features`: column indices to treat as categorical (native Fisher
+    /// splits instead of numeric thresholds). `eval_set`: `(x_val, y_val)`
+    /// held out for `early_stopping_rounds` to monitor; without it, early
+    /// stopping watches training loss, which rarely plateaus under boosting.
+    #[pyo3(signature = (x, y, cat_features=None, eval_set=None, early_stopping_rounds=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        cat_features: Option<Vec<usize>>,
+        eval_set: Option<(PyReadonlyArray2<'_, f64>, Bound<'_, PyAny>)>,
+        early_stopping_rounds: Option<usize>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::XGBoost::new()
             .with_n_estimators(self.n_estimators)
@@ -73,8 +113,22 @@ impl XGBoost {
             .with_gamma(self.gamma)
             .with_subsample(self.subsample)
             .with_colsample_bytree(self.colsample_bytree)
-            .with_seed(self.seed);
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+            .with_seed(self.seed)
+            .with_objective(resolve_objective(&self.objective, self.huber_delta)?);
+        if let Some(c) = self.monotone_constraints.clone() {
+            learner = learner.with_monotone_constraints(c);
+        }
+        if let Some(rounds) = early_stopping_rounds {
+            learner = learner.with_early_stopping_rounds(rounds);
+        }
+        if let Some((features, target)) = parse_eval_set(eval_set)? {
+            learner = match target {
+                EvalKind::Classification(t) => learner.with_eval_set_classif(features, t),
+                EvalKind::Regression(t) => learner.with_eval_set_regress(features, t),
+            };
+        }
+        let (model, is_classif) =
+            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -135,11 +189,19 @@ impl CatBoost {
         }
     }
 
+    /// `cat_features`: column indices to treat as categorical (CatBoost's own
+    /// target-statistic splits, falling back to whichever columns are passed
+    /// here since this wrapper always trains against a plain `Task`).
+    /// `eval_set`: `(x_val, y_val)` held out for `early_stopping_rounds`.
+    #[pyo3(signature = (x, y, cat_features=None, eval_set=None, early_stopping_rounds=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        cat_features: Option<Vec<usize>>,
+        eval_set: Option<(PyReadonlyArray2<'_, f64>, Bound<'_, PyAny>)>,
+        early_stopping_rounds: Option<usize>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::CatBoost::new()
             .with_n_estimators(self.n_estimators)
@@ -147,7 +209,17 @@ impl CatBoost {
             .with_learning_rate(self.learning_rate)
             .with_lambda(self.lambda)
             .with_seed(self.seed);
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        if let Some(rounds) = early_stopping_rounds {
+            learner = learner.with_early_stopping_rounds(rounds);
+        }
+        if let Some((features, target)) = parse_eval_set(eval_set)? {
+            learner = match target {
+                EvalKind::Classification(t) => learner.with_eval_set_classif(features, t),
+                EvalKind::Regression(t) => learner.with_eval_set_regress(features, t),
+            };
+        }
+        let (model, is_classif) =
+            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -191,11 +263,18 @@ impl LightGBM {
         Self { trained: None, is_classif: false, n_estimators, num_leaves, learning_rate, max_depth, seed }
     }
 
+    /// `cat_features`: column indices to treat as categorical (native Fisher
+    /// splits). `eval_set`: `(x_val, y_val)` held out for
+    /// `early_stopping_rounds`.
+    #[pyo3(signature = (x, y, cat_features=None, eval_set=None, early_stopping_rounds=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        cat_features: Option<Vec<usize>>,
+        eval_set: Option<(PyReadonlyArray2<'_, f64>, Bound<'_, PyAny>)>,
+        early_stopping_rounds: Option<usize>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::LightGBM::new()
             .with_n_estimators(self.n_estimators)
@@ -203,7 +282,17 @@ impl LightGBM {
             .with_learning_rate(self.learning_rate)
             .with_max_depth(self.max_depth)
             .with_seed(self.seed);
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        if let Some(rounds) = early_stopping_rounds {
+            learner = learner.with_early_stopping_rounds(rounds);
+        }
+        if let Some((features, target)) = parse_eval_set(eval_set)? {
+            learner = match target {
+                EvalKind::Classification(t) => learner.with_eval_set_classif(features, t),
+                EvalKind::Regression(t) => learner.with_eval_set_regress(features, t),
+            };
+        }
+        let (model, is_classif) =
+            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -519,3 +608,44 @@ add_explain_methods!(XGBoost, CatBoost, LightGBM);
 declare_support!(XGBoost,  classif = true, regress = true);
 declare_support!(CatBoost, classif = true, regress = true);
 declare_support!(LightGBM, classif = true, regress = true);
+
+declare_params!(XGBoost, {
+    n_estimators => "n_estimators",
+    max_depth => "max_depth",
+    learning_rate => "learning_rate",
+    lambda => "lambda_",
+    alpha => "alpha",
+    gamma => "gamma",
+    subsample => "subsample",
+    colsample_bytree => "colsample_bytree",
+    seed => "seed",
+    monotone_constraints => "monotone_constraints",
+    objective => "objective",
+    huber_delta => "huber_delta",
+});
+
+declare_params!(CatBoost, {
+    n_estimators => "n_estimators",
+    depth => "depth",
+    learning_rate => "learning_rate",
+    lambda => "lambda_",
+    seed => "seed",
+});
+
+declare_params!(LightGBM, {
+    n_estimators => "n_estimators",
+    num_leaves => "num_leaves",
+    learning_rate => "learning_rate",
+    max_depth => "max_depth",
+    seed => "seed",
+});
+
+declare_params!(GeoXGBoost, {
+    bandwidth => "bandwidth",
+    n_estimators => "n_estimators",
+    max_depth => "max_depth",
+    learning_rate => "learning_rate",
+    lambda => "lambda_",
+    alpha => "alpha",
+    seed => "seed",
+});

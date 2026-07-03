@@ -1,7 +1,7 @@
 //! Miscellaneous learners: KNearestNeighbors, GaussianNB, AdaBoost, EBM,
 //! QuantileForest, QuantileGB.
 
-use crate::common::{define_learner, add_explain_methods, declare_support};
+use crate::common::{define_learner, add_explain_methods, declare_support, declare_params};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
@@ -135,3 +135,6 @@ declare_support!(AdaBoost,          classif = true,  regress = false);
 declare_support!(EBM,               classif = true,  regress = true);
 declare_support!(QuantileForest,    classif = false, regress = true);
 declare_support!(QuantileGB,        classif = false, regress = true);
+
+declare_params!(KNearestNeighbors, { k => "k" });
+declare_params!(GaussianNB,        {});

@@ -2031,6 +2031,193 @@ fn load_csv_forced_categorical_column() {
     assert!(err.is_err());
 }
 
+// ── Parquet loading tests (item 16d, `parquet` feature) ──────────────
+
+#[cfg(feature = "parquet")]
+mod parquet_tests {
+    use super::*;
+    use polars::prelude::{Column, DataFrame, ParquetWriter};
+    use smelt_ml::prelude::ParquetLoader;
+
+    fn write_parquet(path: &std::path::Path, height: usize, columns: Vec<Column>) {
+        let mut df = DataFrame::new(height, columns).unwrap();
+        let file = std::fs::File::create(path).unwrap();
+        ParquetWriter::new(file).finish(&mut df).unwrap();
+    }
+
+    #[test]
+    fn load_parquet_classification() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.parquet");
+        write_parquet(
+            &path,
+            3,
+            vec![
+                Column::new("x1".into(), vec![1.0f64, 3.0, 5.0]),
+                Column::new("x2".into(), vec![2.0f64, 4.0, 6.0]),
+                Column::new("label".into(), vec![0i64, 1, 1]),
+            ],
+        );
+
+        let task = ParquetLoader::from_path(&path)
+            .target("label")
+            .load_classif()
+            .unwrap();
+        assert_eq!(task.n_samples(), 3);
+        assert_eq!(task.n_features(), 2);
+        assert_eq!(task.target(), &[0, 1, 1]);
+        assert_eq!(task.feature_names(), &["x1", "x2"]);
+    }
+
+    #[test]
+    fn load_parquet_regression() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.parquet");
+        write_parquet(
+            &path,
+            3,
+            vec![
+                Column::new("x".into(), vec![1.0f64, 3.0, 5.0]),
+                Column::new("y".into(), vec![2.0f64, 6.0, 10.0]),
+            ],
+        );
+
+        let task = ParquetLoader::from_path(&path)
+            .target("y")
+            .load_regress()
+            .unwrap();
+        assert_eq!(task.n_samples(), 3);
+        assert_eq!(task.n_features(), 1);
+        assert_eq!(task.target(), &[2.0, 6.0, 10.0]);
+    }
+
+    #[test]
+    fn load_parquet_string_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.parquet");
+        write_parquet(
+            &path,
+            3,
+            vec![
+                Column::new("x".into(), vec![1.0f64, 2.0, 3.0]),
+                Column::new(
+                    "species".into(),
+                    vec!["cat".to_string(), "dog".to_string(), "cat".to_string()],
+                ),
+            ],
+        );
+
+        let task = ParquetLoader::from_path(&path)
+            .target("species")
+            .load_classif()
+            .unwrap();
+        assert_eq!(task.n_classes(), 2); // cat=0, dog=1
+        assert_eq!(task.target(), &[0, 1, 0]);
+    }
+
+    #[test]
+    fn load_parquet_missing_column_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.parquet");
+        write_parquet(
+            &path,
+            1,
+            vec![
+                Column::new("x".into(), vec![1.0f64]),
+                Column::new("y".into(), vec![2.0f64]),
+            ],
+        );
+
+        let err = ParquetLoader::from_path(&path).target("missing").load_classif();
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn load_parquet_nulls_become_nan() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.parquet");
+        write_parquet(
+            &path,
+            2,
+            vec![
+                Column::new("x1".into(), vec![Some(1.0f64), None]),
+                Column::new("y".into(), vec![2.0f64, 4.0]),
+            ],
+        );
+
+        let task = ParquetLoader::from_path(&path)
+            .target("y")
+            .load_regress()
+            .unwrap();
+        let f = task.features();
+        assert!(f[[1, 0]].is_nan(), "null must load as NaN");
+        assert_eq!(f[[0, 0]], 1.0);
+    }
+
+    #[test]
+    fn load_parquet_string_column_auto_categorical() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.parquet");
+        write_parquet(
+            &path,
+            3,
+            vec![
+                Column::new(
+                    "soil".into(),
+                    vec!["clay".to_string(), "sand".to_string(), "clay".to_string()],
+                ),
+                Column::new("y".into(), vec![1.0f64, 2.0, 3.0]),
+            ],
+        );
+
+        let task = ParquetLoader::from_path(&path)
+            .target("y")
+            .load_regress()
+            .unwrap();
+        assert_eq!(task.categorical_features(), vec![0]);
+        assert_eq!(
+            task.feature_types()[0],
+            FeatureType::Categorical { n_categories: 2 }
+        );
+    }
+
+    #[test]
+    fn load_parquet_forced_categorical_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.parquet");
+        write_parquet(
+            &path,
+            3,
+            vec![
+                Column::new("region".into(), vec![3i64, 7, 3]),
+                Column::new("x".into(), vec![1.0f64, 2.0, 3.0]),
+                Column::new("y".into(), vec![0i64, 1, 0]),
+            ],
+        );
+
+        // Without forcing, "region" parses as numeric.
+        let plain = ParquetLoader::from_path(&path)
+            .target("y")
+            .load_classif()
+            .unwrap();
+        assert!(plain.categorical_features().is_empty());
+
+        let task = ParquetLoader::from_path(&path)
+            .target("y")
+            .categorical(&["region"])
+            .load_classif()
+            .unwrap();
+        assert_eq!(task.categorical_features(), vec![0]);
+
+        // Forcing a nonexistent column errors.
+        let err = ParquetLoader::from_path(&path)
+            .target("y")
+            .categorical(&["no_such_col"])
+            .load_classif();
+        assert!(err.is_err());
+    }
+}
+
 /// NaN policy (item 14): the boosting engines handle missing values natively
 /// (learned default direction); every other learner must reject NaN features
 /// with a clear error instead of silently producing garbage distances,

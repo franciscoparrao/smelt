@@ -1,10 +1,15 @@
-//! Data loading: CSV file import into Tasks.
+//! Data loading: CSV and (optionally) Parquet file import into Tasks.
 
 use crate::preprocess::LabelEncoder;
 use crate::task::{ClassificationTask, RegressionTask};
 use crate::{Result, SmeltError};
 use ndarray::Array2;
 use std::path::Path;
+
+#[cfg(feature = "parquet")]
+mod parquet;
+#[cfg(feature = "parquet")]
+pub use parquet::ParquetLoader;
 
 /// Loads a CSV file into a classification or regression Task.
 ///

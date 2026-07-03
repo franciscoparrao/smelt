@@ -5,8 +5,9 @@
 use crate::common::{add_explain_methods, declare_support};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use smelt_ml::learner::TrainedModel;
 
 // ── Bagging / Stacking / DynamicEnsemble ────────────────────────────────
@@ -271,3 +272,132 @@ add_explain_methods!(Bagging, Stacking, DynamicEnsemble);
 declare_support!(Bagging,         classif = true, regress = true);
 declare_support!(Stacking,        classif = true, regress = true);
 declare_support!(DynamicEnsemble, classif = true, regress = false);
+
+// get_params/set_params are hand-written here (not via `declare_params!`)
+// because `base`/`base_learners`/`meta` need the same eager id validation
+// `new()` does -- `fit()` relies on that having already happened
+// (`.expect("validated in ...")`), so letting `set_params` skip it would
+// turn a bad id into a panic instead of a clean PyValueError.
+
+#[pymethods]
+impl Bagging {
+    fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item("base", self.base.clone())?;
+        dict.set_item("n_estimators", self.n_estimators)?;
+        dict.set_item("seed", self.seed)?;
+        Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+
+    #[pyo3(signature = (**kwargs))]
+    fn set_params(&mut self, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                let key: String = k.extract()?;
+                match key.as_str() {
+                    "base" => {
+                        let base: String = v.extract()?;
+                        validate_learner_id(&base)?;
+                        self.base = base;
+                    }
+                    "n_estimators" => self.n_estimators = v.extract()?,
+                    "seed" => self.seed = v.extract()?,
+                    other => {
+                        return Err(PyValueError::new_err(format!(
+                            "invalid parameter '{other}' for this estimator"
+                        )))
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[pymethods]
+impl Stacking {
+    fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item("base_learners", self.base_learners.clone())?;
+        dict.set_item("meta", self.meta.clone())?;
+        dict.set_item("cv_folds", self.cv_folds)?;
+        dict.set_item("cv_seed", self.cv_seed)?;
+        Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+
+    #[pyo3(signature = (**kwargs))]
+    fn set_params(&mut self, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                let key: String = k.extract()?;
+                match key.as_str() {
+                    "base_learners" => {
+                        let ids: Vec<String> = v.extract()?;
+                        if ids.is_empty() {
+                            return Err(PyValueError::new_err(
+                                "Stacking requires at least 1 base learner",
+                            ));
+                        }
+                        for id in &ids {
+                            validate_learner_id(id)?;
+                        }
+                        self.base_learners = ids;
+                    }
+                    "meta" => {
+                        let meta: String = v.extract()?;
+                        validate_learner_id(&meta)?;
+                        self.meta = meta;
+                    }
+                    "cv_folds" => self.cv_folds = v.extract()?,
+                    "cv_seed" => self.cv_seed = v.extract()?,
+                    other => {
+                        return Err(PyValueError::new_err(format!(
+                            "invalid parameter '{other}' for this estimator"
+                        )))
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[pymethods]
+impl DynamicEnsemble {
+    fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item("base_learners", self.base_learners.clone())?;
+        dict.set_item("k_neighbors", self.k_neighbors)?;
+        Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+
+    #[pyo3(signature = (**kwargs))]
+    fn set_params(&mut self, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                let key: String = k.extract()?;
+                match key.as_str() {
+                    "base_learners" => {
+                        let ids: Vec<String> = v.extract()?;
+                        if ids.is_empty() {
+                            return Err(PyValueError::new_err(
+                                "DynamicEnsemble requires at least 1 base learner",
+                            ));
+                        }
+                        for id in &ids {
+                            validate_learner_id(id)?;
+                        }
+                        self.base_learners = ids;
+                    }
+                    "k_neighbors" => self.k_neighbors = v.extract()?,
+                    other => {
+                        return Err(PyValueError::new_err(format!(
+                            "invalid parameter '{other}' for this estimator"
+                        )))
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}

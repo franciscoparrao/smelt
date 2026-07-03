@@ -28,6 +28,10 @@ pub enum SmeltError {
     #[error("CSV error: {0}")]
     Csv(String),
 
+    #[cfg(feature = "parquet")]
+    #[error("Parquet error: {0}")]
+    Parquet(String),
+
     #[error("JSON error: {0}")]
     Json(String),
 

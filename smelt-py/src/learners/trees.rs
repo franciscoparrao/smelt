@@ -1,7 +1,7 @@
 //! Tree-based learners: RandomForest, ExtraTrees, DecisionTree,
 //! GradientBoosting, HoeffdingTree, ObliqueTree, ObliqueForest.
 
-use crate::common::{define_learner, add_explain_methods, declare_support};
+use crate::common::{define_learner, add_explain_methods, declare_support, declare_params};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
@@ -207,3 +207,7 @@ declare_support!(GradientBoosting,  classif = true,  regress = true);
 declare_support!(HoeffdingTree,     classif = true,  regress = false);
 declare_support!(ObliqueTree,       classif = true,  regress = true);
 declare_support!(ObliqueForest,     classif = true,  regress = true);
+
+declare_params!(RandomForest, { n_estimators => "n_estimators", max_depth => "max_depth", seed => "seed" });
+declare_params!(ExtraTrees,   { n_estimators => "n_estimators", max_depth => "max_depth", seed => "seed" });
+declare_params!(DecisionTree, { max_depth => "max_depth" });
