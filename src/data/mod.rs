@@ -8,6 +8,13 @@ use std::path::Path;
 
 /// Loads a CSV file into a classification or regression Task.
 ///
+/// Missing values (empty cells, `NA`, `NaN`, `null`, `?`, `N/A` — case
+/// insensitive) are loaded as `f64::NAN`. Feature columns whose non-missing
+/// values are not all numeric are auto-detected as categorical: their values
+/// are label-encoded to integer codes and the column is marked
+/// `FeatureType::Categorical` on the resulting task. Use [`CsvLoader::categorical`]
+/// to force specific columns to be treated as categorical.
+///
 /// # Examples
 ///
 /// ```no_run
@@ -23,6 +30,18 @@ pub struct CsvLoader {
     target_col: Option<String>,
     delimiter: u8,
     max_rows: Option<usize>,
+    categorical_cols: Vec<String>,
+}
+
+/// True when a CSV cell should be loaded as a missing value (`f64::NAN`).
+fn is_missing(s: &str) -> bool {
+    let t = s.trim();
+    t.is_empty()
+        || t == "?"
+        || t.eq_ignore_ascii_case("na")
+        || t.eq_ignore_ascii_case("nan")
+        || t.eq_ignore_ascii_case("null")
+        || t.eq_ignore_ascii_case("n/a")
 }
 
 impl CsvLoader {
@@ -32,11 +51,20 @@ impl CsvLoader {
             target_col: None,
             delimiter: b',',
             max_rows: None,
+            categorical_cols: Vec::new(),
         }
     }
 
     pub fn target(mut self, col: &str) -> Self {
         self.target_col = Some(col.to_string());
+        self
+    }
+
+    /// Force these feature columns to be treated as categorical (label-encoded)
+    /// even if their values parse as numbers. String columns are auto-detected
+    /// as categorical without needing this.
+    pub fn categorical(mut self, cols: &[&str]) -> Self {
+        self.categorical_cols = cols.iter().map(|c| c.to_string()).collect();
         self
     }
 
@@ -94,6 +122,67 @@ impl CsvLoader {
             .ok_or_else(|| SmeltError::FeatureNotFound(target_name.clone()))
     }
 
+    /// Parse feature columns with missing-value and categorical handling.
+    /// Returns (feature_names, features, categorical_column_indices).
+    /// A column is categorical when it is listed in `self.categorical_cols` or
+    /// when any non-missing value fails to parse as a number; its values are
+    /// label-encoded to integer codes. Missing cells become NaN either way.
+    fn parse_features(
+        &self,
+        headers: &[String],
+        rows: &[Vec<String>],
+        target_idx: usize,
+    ) -> Result<(Vec<String>, Array2<f64>, Vec<usize>)> {
+        for c in &self.categorical_cols {
+            if !headers.contains(c) {
+                return Err(SmeltError::FeatureNotFound(c.clone()));
+            }
+        }
+
+        let feature_cols: Vec<usize> = (0..headers.len()).filter(|&i| i != target_idx).collect();
+        let feature_names: Vec<String> =
+            feature_cols.iter().map(|&i| headers[i].clone()).collect();
+
+        let n_samples = rows.len();
+        let mut features = Array2::zeros((n_samples, feature_cols.len()));
+        let mut cat_indices = Vec::new();
+
+        for (j, &col) in feature_cols.iter().enumerate() {
+            let forced_cat = self.categorical_cols.contains(&headers[col]);
+            let all_numeric = rows
+                .iter()
+                .all(|r| is_missing(&r[col]) || r[col].trim().parse::<f64>().is_ok());
+
+            if all_numeric && !forced_cat {
+                for (i, row) in rows.iter().enumerate() {
+                    features[[i, j]] = if is_missing(&row[col]) {
+                        f64::NAN
+                    } else {
+                        row[col].trim().parse::<f64>().unwrap()
+                    };
+                }
+            } else {
+                let present: Vec<&str> = rows
+                    .iter()
+                    .map(|r| r[col].trim())
+                    .filter(|s| !is_missing(s))
+                    .collect();
+                let encoder = LabelEncoder::fit(&present);
+                for (i, row) in rows.iter().enumerate() {
+                    let cell = row[col].trim();
+                    features[[i, j]] = if is_missing(cell) {
+                        f64::NAN
+                    } else {
+                        encoder.encode(&[cell])?[0] as f64
+                    };
+                }
+                cat_indices.push(j);
+            }
+        }
+
+        Ok((feature_names, features, cat_indices))
+    }
+
     /// Load as a classification task. Target values are parsed as usize or auto-encoded.
     pub fn load_classif(&self) -> Result<ClassificationTask> {
         let (headers, rows) = self.read_raw()?;
@@ -127,37 +216,12 @@ impl CsvLoader {
             }
         };
 
-        // Parse feature columns
-        let feature_names: Vec<String> = headers
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| i != target_idx)
-            .map(|(_, h)| h.clone())
-            .collect();
+        let (feature_names, features, cat_indices) =
+            self.parse_features(&headers, &rows, target_idx)?;
 
-        let n_features = feature_names.len();
-        let n_samples = rows.len();
-        let mut features = Array2::zeros((n_samples, n_features));
-
-        for (i, row) in rows.iter().enumerate() {
-            let mut j = 0;
-            for (col, val) in row.iter().enumerate() {
-                if col == target_idx {
-                    continue;
-                }
-                features[[i, j]] = val.parse::<f64>().map_err(|_| {
-                    SmeltError::Csv(format!(
-                        "cannot parse '{}' as number at row {}, col '{}'",
-                        val,
-                        i + 1,
-                        headers[col]
-                    ))
-                })?;
-                j += 1;
-            }
-        }
-
-        ClassificationTask::new("csv", features, target)?.with_feature_names(feature_names)
+        ClassificationTask::new("csv", features, target)?
+            .with_feature_names(feature_names)?
+            .with_categorical_features(&cat_indices)
     }
 
     /// Load as a regression task. Target values must be numeric.
@@ -174,35 +238,11 @@ impl CsvLoader {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let feature_names: Vec<String> = headers
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| i != target_idx)
-            .map(|(_, h)| h.clone())
-            .collect();
+        let (feature_names, features, cat_indices) =
+            self.parse_features(&headers, &rows, target_idx)?;
 
-        let n_features = feature_names.len();
-        let n_samples = rows.len();
-        let mut features = Array2::zeros((n_samples, n_features));
-
-        for (i, row) in rows.iter().enumerate() {
-            let mut j = 0;
-            for (col, val) in row.iter().enumerate() {
-                if col == target_idx {
-                    continue;
-                }
-                features[[i, j]] = val.parse::<f64>().map_err(|_| {
-                    SmeltError::Csv(format!(
-                        "cannot parse '{}' as number at row {}, col '{}'",
-                        val,
-                        i + 1,
-                        headers[col]
-                    ))
-                })?;
-                j += 1;
-            }
-        }
-
-        RegressionTask::new("csv", features, target)?.with_feature_names(feature_names)
+        RegressionTask::new("csv", features, target)?
+            .with_feature_names(feature_names)?
+            .with_categorical_features(&cat_indices)
     }
 }

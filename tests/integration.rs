@@ -1959,6 +1959,115 @@ fn load_csv_missing_column_error() {
     assert!(err.is_err());
 }
 
+#[test]
+fn load_csv_missing_values_become_nan() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.csv");
+    std::fs::write(
+        &path,
+        "x1,x2,y\n1.0,,2.0\nNA,4.0,6.0\nnan,NULL,10.0\n?,8.0,14.0\n",
+    )
+    .unwrap();
+
+    let task = CsvLoader::from_path(&path).target("y").load_regress().unwrap();
+    let f = task.features();
+    assert!(f[[0, 1]].is_nan(), "empty cell must load as NaN");
+    assert!(f[[1, 0]].is_nan(), "NA must load as NaN");
+    assert!(f[[2, 0]].is_nan() && f[[2, 1]].is_nan(), "nan/NULL must load as NaN");
+    assert!(f[[3, 0]].is_nan(), "? must load as NaN");
+    assert_eq!(f[[0, 0]], 1.0);
+    assert_eq!(f[[3, 1]], 8.0);
+    // No categorical columns: everything non-missing is numeric.
+    assert!(task.categorical_features().is_empty());
+}
+
+#[test]
+fn load_csv_string_column_auto_categorical() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.csv");
+    std::fs::write(
+        &path,
+        "soil,elev,y\nclay,100.0,1.0\nsand,200.0,2.0\nclay,300.0,3.0\nloam,,4.0\n",
+    )
+    .unwrap();
+
+    let task = CsvLoader::from_path(&path).target("y").load_regress().unwrap();
+    assert_eq!(task.categorical_features(), vec![0]);
+    assert_eq!(
+        task.feature_types()[0],
+        FeatureType::Categorical { n_categories: 3 }
+    );
+    assert_eq!(task.feature_types()[1], FeatureType::Numeric);
+    // LabelEncoder sorts: clay=0, loam=1, sand=2.
+    let f = task.features();
+    assert_eq!(f[[0, 0]], 0.0);
+    assert_eq!(f[[1, 0]], 2.0);
+    assert_eq!(f[[3, 0]], 1.0);
+    assert!(f[[3, 1]].is_nan());
+}
+
+#[test]
+fn load_csv_forced_categorical_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.csv");
+    std::fs::write(&path, "region,x,y\n3,1.0,0\n7,2.0,1\n3,3.0,0\n").unwrap();
+
+    // Without forcing, "region" parses as numeric.
+    let plain = CsvLoader::from_path(&path).target("y").load_classif().unwrap();
+    assert!(plain.categorical_features().is_empty());
+
+    let task = CsvLoader::from_path(&path)
+        .target("y")
+        .categorical(&["region"])
+        .load_classif()
+        .unwrap();
+    assert_eq!(task.categorical_features(), vec![0]);
+
+    // Forcing a nonexistent column errors.
+    let err = CsvLoader::from_path(&path)
+        .target("y")
+        .categorical(&["no_such_col"])
+        .load_classif();
+    assert!(err.is_err());
+}
+
+#[test]
+fn task_with_categorical_features_validates_codes() {
+    use ndarray::array;
+
+    // Valid integer codes (with NaN as missing) are accepted.
+    let feats = array![[0.0, 1.5], [2.0, 2.5], [f64::NAN, 3.5]];
+    let task = RegressionTask::new("t", feats, vec![1.0, 2.0, 3.0])
+        .unwrap()
+        .with_categorical_features(&[0])
+        .unwrap();
+    assert_eq!(
+        task.feature_types()[0],
+        FeatureType::Categorical { n_categories: 3 }
+    );
+
+    // Non-integer codes are rejected.
+    let feats = array![[0.5, 1.0], [1.0, 2.0]];
+    let err = RegressionTask::new("t", feats, vec![1.0, 2.0])
+        .unwrap()
+        .with_categorical_features(&[0]);
+    assert!(err.is_err());
+
+    // Negative codes are rejected.
+    let feats = array![[-1.0, 1.0], [1.0, 2.0]];
+    let err = ClassificationTask::new("t", feats, vec![0, 1])
+        .unwrap()
+        .with_categorical_features(&[0]);
+    assert!(err.is_err());
+
+    // Out-of-range column index is rejected.
+    let feats = array![[0.0, 1.0], [1.0, 2.0]];
+    let err = RegressionTask::new("t", feats, vec![1.0, 2.0])
+        .unwrap()
+        .with_categorical_features(&[5]);
+    assert!(err.is_err());
+}
+
 // ── Serialization tests ────────────────────────────────────────────
 
 #[test]

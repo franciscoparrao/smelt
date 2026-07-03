@@ -92,7 +92,7 @@ pub mod prelude {
         CrossValidation, GroupCV, Holdout, Resample, SpatialBlockCV, SpatialBufferCV, StratifiedCV,
     };
     pub use crate::serialize::{SerializableModel, load_json, save_json};
-    pub use crate::task::{ClassificationTask, RegressionTask, Task};
+    pub use crate::task::{ClassificationTask, FeatureType, RegressionTask, Task};
     pub use crate::tuning::{
         BayesianOptimizer, GridSearch, Hyperband, ParamDistribution, RandomSearch, TuneResult,
     };

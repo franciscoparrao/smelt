@@ -4,7 +4,56 @@
 
 use crate::{Result, SmeltError};
 use ndarray::Array2;
+use serde::{Deserialize, Serialize};
 // validate module used by learner predict methods
+
+/// Type of a feature column.
+///
+/// Learners that understand categorical features (the boosting engines) read
+/// this to choose categorical split finding / target encoding; every other
+/// learner treats the integer codes as ordinary numeric values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FeatureType {
+    /// Continuous numeric feature (the default).
+    Numeric,
+    /// Categorical feature stored as integer codes `0..n_categories`.
+    /// NaN is allowed and means "missing category".
+    Categorical {
+        /// Number of distinct categories (max code + 1).
+        n_categories: usize,
+    },
+}
+
+/// Validate that `columns` can be marked categorical in `features` and return
+/// the per-column feature types: codes must be non-negative integers (NaN is
+/// allowed as missing).
+fn build_feature_types(features: &Array2<f64>, columns: &[usize]) -> Result<Vec<FeatureType>> {
+    let mut types = vec![FeatureType::Numeric; features.ncols()];
+    for &col in columns {
+        if col >= features.ncols() {
+            return Err(SmeltError::InvalidParameter(format!(
+                "categorical feature index {col} out of range ({} features)",
+                features.ncols()
+            )));
+        }
+        let mut max_code = 0usize;
+        for (row, &v) in features.column(col).iter().enumerate() {
+            if v.is_nan() {
+                continue;
+            }
+            if v < 0.0 || v.fract() != 0.0 {
+                return Err(SmeltError::InvalidParameter(format!(
+                    "categorical feature {col} has non-integer or negative code {v} at row {row}"
+                )));
+            }
+            max_code = max_code.max(v as usize);
+        }
+        types[col] = FeatureType::Categorical {
+            n_categories: max_code + 1,
+        };
+    }
+    Ok(types)
+}
 
 /// Core trait for all task types.
 pub trait Task {
@@ -22,6 +71,17 @@ pub trait Task {
     }
     /// Feature names.
     fn feature_names(&self) -> &[String];
+    /// Per-column feature types (Numeric unless marked categorical).
+    fn feature_types(&self) -> &[FeatureType];
+    /// Indices of the categorical feature columns.
+    fn categorical_features(&self) -> Vec<usize> {
+        self.feature_types()
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| matches!(t, FeatureType::Categorical { .. }))
+            .map(|(i, _)| i)
+            .collect()
+    }
 }
 
 /// Classification task with discrete target labels.
@@ -32,6 +92,7 @@ pub struct ClassificationTask {
     target: Vec<usize>,
     feature_names: Vec<String>,
     class_names: Vec<String>,
+    feature_types: Vec<FeatureType>,
 }
 
 impl ClassificationTask {
@@ -55,10 +116,18 @@ impl ClassificationTask {
         Ok(Self {
             id: id.into(),
             feature_names: (0..n_features).map(|i| format!("x{i}")).collect(),
+            feature_types: vec![FeatureType::Numeric; n_features],
             features,
             target,
             class_names: (0..n_classes).map(|i| format!("class_{i}")).collect(),
         })
+    }
+
+    /// Mark feature columns as categorical. Values in those columns must be
+    /// non-negative integer codes (NaN allowed as missing category).
+    pub fn with_categorical_features(mut self, columns: &[usize]) -> Result<Self> {
+        self.feature_types = build_feature_types(&self.features, columns)?;
+        Ok(self)
     }
 
     pub fn with_feature_names(mut self, names: Vec<String>) -> Result<Self> {
@@ -98,6 +167,9 @@ impl Task for ClassificationTask {
     fn feature_names(&self) -> &[String] {
         &self.feature_names
     }
+    fn feature_types(&self) -> &[FeatureType] {
+        &self.feature_types
+    }
 }
 
 /// Regression task with continuous target values.
@@ -107,6 +179,7 @@ pub struct RegressionTask {
     features: Array2<f64>,
     target: Vec<f64>,
     feature_names: Vec<String>,
+    feature_types: Vec<FeatureType>,
 }
 
 impl RegressionTask {
@@ -129,9 +202,17 @@ impl RegressionTask {
         Ok(Self {
             id: id.into(),
             feature_names: (0..n_features).map(|i| format!("x{i}")).collect(),
+            feature_types: vec![FeatureType::Numeric; n_features],
             features,
             target,
         })
+    }
+
+    /// Mark feature columns as categorical. Values in those columns must be
+    /// non-negative integer codes (NaN allowed as missing category).
+    pub fn with_categorical_features(mut self, columns: &[usize]) -> Result<Self> {
+        self.feature_types = build_feature_types(&self.features, columns)?;
+        Ok(self)
     }
 
     pub fn with_feature_names(mut self, names: Vec<String>) -> Result<Self> {
@@ -159,5 +240,8 @@ impl Task for RegressionTask {
     }
     fn feature_names(&self) -> &[String] {
         &self.feature_names
+    }
+    fn feature_types(&self) -> &[FeatureType] {
+        &self.feature_types
     }
 }
