@@ -123,9 +123,14 @@ competitiva" in progress):
       feature is off) — done 2026-07-03, see docs/fase3_progreso.md. Not yet
       bound in smelt-py (deliberately out of scope, analogous follow-up to
       item 14's smelt-py exposure)
-- [ ] `f32` histograms (item 16d part 2/3) — numerically risky refactor
-      across `HistBins`/`hist_pool.rs`/XGBoost/LightGBM/CatBoost, requires
-      re-validating all 3 engines' reference tests
+- [x] `f32` histograms (item 16d part 2/3) — **CatBoost only**, done
+      2026-07-03. Measured each engine's histogram-accumulation share of
+      total training time before touching code (CatBoost 45.5%, XGBoost
+      30.7%, LightGBM 10.1%) and scoped to the one case where the Amdahl
+      ceiling (~23%) justified the numerical-drift risk; measured ~26%
+      real speedup after, zero test regressions (74 lib + 272 integration).
+      LightGBM/XGBoost deliberately left on f64 — evaluated and passed on,
+      not merely deferred — see docs/fase3_progreso.md
 - [ ] Sparse data support (item 16d part 3/3) — greenfield, no existing
       sparse matrix type; needs a `Task` design decision (e.g. CSR variant)
 - [ ] `README.md`/this file kept current as features land (this section itself

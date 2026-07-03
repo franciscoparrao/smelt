@@ -354,3 +354,51 @@ una sesión separada).
 Quedan de la Fase 3: f32 histograms (16d parte 2/3, refactor numérico
 riesgoso), sparse data (16d parte 3/3, diseño desde cero), y
 `missing_docs`/308 warnings (17b).
+
+### 2026-07-03 — Ítem 16d (parte 2/3): f32 histograms — solo CatBoost
+
+Antes de tocar código se midió el beneficio real en vez de asumirlo (el
+audit mismo advertía "requiere re-validar todos los tests de referencia" —
+riesgo numérico real, no una ganancia gratis). Se instrumentó
+temporalmente (atomics `Instant`, revertido antes de este commit — no
+quedó en el historial) el único punto de acumulación de histograma de
+cada motor y se corrió un profile de entrenamiento real (N=50k, P=50,
+200 árboles):
+
+| Motor | % del tiempo total en acumulación | Techo teórico (Amdahl, 2x en esa fase) |
+|---|---|---|
+| CatBoost | 45.5% | ~23% |
+| XGBoost | 30.7% | ~15% |
+| LightGBM | 10.1% | ~5% |
+
+Con esos números se decidió acotar el ítem a **solo CatBoost** — el único
+caso donde el techo teórico justifica claramente el riesgo, con un solo
+punto de acumulación (`scan_partition_hists`, sin `HistPool`) y sin tests
+de precisión sensibles como los de monotone constraints de XGBoost.
+LightGBM/XGBoost quedan fuera de esta pasada (no es que estén rotos, es
+que la relación beneficio/riesgo no lo justificó con los datos reales).
+
+**Cambio**: `FeatHist` (`(Vec<f64>, Vec<f64>, f64, f64)` → `(Vec<f32>,
+Vec<f32>, f32, f32)`) — bin_g/bin_h ahora acumulan en f32. La fórmula de
+gain en `build_oblivious_tree` ensancha a f64 al construir los prefix
+sums (`bg[b] as f64`) antes de dividir/elevar al cuadrado, así que solo la
+suma por bin pierde precisión, no la comparación de splits. La resta del
+truco de histogramas (parent - smaller) queda en f32-f32=f32, igual que
+hacen las implementaciones oficiales (acumular y restar en float32, sólo
+ensanchar para la fórmula final) — no es una técnica inventada para este
+proyecto.
+
+Validación: `cargo build -p smelt-ml` limpio. `cargo test -p smelt-ml --lib
+catboost` verde (7/7, sin cambios de expectativas). Suite completa sin
+regresiones: 74 lib + 272 integración, cero fallos — ninguno de los tests
+existentes detectó drift de comportamiento (ni siquiera los que entrenan
+CatBoost end-to-end dentro de benchmarks). `cargo check -p smelt-py`
+limpio. Medición antes/después con un profile dedicado (mismo dataset):
+6.123s → 4.549s (best-of-3), **~26% más rápido** en tiempo total de
+entrenamiento — ligeramente mejor que el techo teórico estimado de 23%.
+
+Con esto 16d queda: parte 1 (Parquet) hecha, parte 2 (f32 histograms)
+hecha solo para CatBoost — LightGBM/XGBoost evaluados y descartados por
+relación beneficio/riesgo, documentado acá en vez de dejarlo como
+pendiente ambiguo —, parte 3 (sparse data) sigue pendiente. También sigue
+pendiente 17b (`missing_docs`).

@@ -278,7 +278,16 @@ type CBBins = HistBins;
 /// NaN gradient/hessian mass is tracked separately so split gains account for
 /// missing values (they used to be excluded from the gain but still routed
 /// left, giving inconsistent statistics — audit issue M2).
-type FeatHist = (Vec<f64>, Vec<f64>, f64, f64);
+///
+/// Bins accumulate in `f32` rather than `f64` (item 16d): this is CatBoost's
+/// one histogram hot loop (`scan_partition_hists`, below), profiled at ~45%
+/// of total training time — the largest fraction of the 3 boosting engines,
+/// and the only one where halving the per-bin footprint (fits twice as many
+/// bins per cache line, matching the official implementations) clearly
+/// justifies the numerical-drift risk. The gain formula in
+/// `build_oblivious_tree` widens back to `f64` before dividing, so only the
+/// per-bin sum itself loses precision, not the split comparison.
+type FeatHist = (Vec<f32>, Vec<f32>, f32, f32);
 
 fn scan_partition_hists(
     bins: &CBBins,
@@ -291,18 +300,18 @@ fn scan_partition_hists(
         .into_par_iter()
         .map(|feat| {
             let nb = bins.boundaries[feat].len();
-            let mut bg = vec![0.0; nb];
-            let mut bh = vec![0.0; nb];
-            let mut ng = 0.0;
-            let mut nh = 0.0;
+            let mut bg = vec![0.0f32; nb];
+            let mut bh = vec![0.0f32; nb];
+            let mut ng = 0.0f32;
+            let mut nh = 0.0f32;
             for &idx in indices {
                 let b = bins.get_bin(feat, idx);
                 if b == NAN_BIN {
-                    ng += grads[idx];
-                    nh += hess[idx];
+                    ng += grads[idx] as f32;
+                    nh += hess[idx] as f32;
                 } else {
-                    bg[b as usize] += grads[idx];
-                    bh[b as usize] += hess[idx];
+                    bg[b as usize] += grads[idx] as f32;
+                    bh[b as usize] += hess[idx] as f32;
                 }
             }
             (bg, bh, ng, nh)
@@ -353,15 +362,20 @@ fn build_oblivious_tree(
                     .iter()
                     .map(|part_cache| {
                         let (bg, bh, ng, nh) = &part_cache[feat];
+                        // Widen f32 bin sums to f64 here so the gain formula
+                        // below (division, squaring) runs at full precision —
+                        // only the per-bin accumulation in scan_partition_hists
+                        // is f32.
+                        let (ng, nh) = (*ng as f64, *nh as f64);
                         let mut pg = vec![0.0; nb + 1];
                         let mut ph = vec![0.0; nb + 1];
                         for b in 0..nb {
-                            pg[b + 1] = pg[b] + bg[b];
-                            ph[b + 1] = ph[b] + bh[b];
+                            pg[b + 1] = pg[b] + bg[b] as f64;
+                            ph[b + 1] = ph[b] + bh[b] as f64;
                         }
                         let tg = pg[nb] + ng;
                         let th = ph[nb] + nh;
-                        (pg, ph, tg, th, *ng, *nh)
+                        (pg, ph, tg, th, ng, nh)
                     })
                     .collect();
 
@@ -441,8 +455,8 @@ fn build_oblivious_tree(
                 .map(|feat| {
                     let (pg, ph, png, pnh) = &parent_hists[feat];
                     let (sg, sh, sng, snh) = &smaller_hists[feat];
-                    let bg: Vec<f64> = pg.iter().zip(sg).map(|(p, s)| p - s).collect();
-                    let bh: Vec<f64> = ph.iter().zip(sh).map(|(p, s)| p - s).collect();
+                    let bg: Vec<f32> = pg.iter().zip(sg).map(|(p, s)| p - s).collect();
+                    let bh: Vec<f32> = ph.iter().zip(sh).map(|(p, s)| p - s).collect();
                     (bg, bh, png - sng, pnh - snh)
                 })
                 .collect();
