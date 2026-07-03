@@ -13,6 +13,7 @@
 //! Reference: Prokhorenkova, L. et al. (2018). CatBoost: unbiased boosting
 //! with categorical features. NeurIPS.
 
+use super::eval::{EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress};
 use super::histogram::{HistBins, NAN_BIN};
 use crate::Result;
 use crate::learner::math::{sigmoid, softmax};
@@ -57,10 +58,14 @@ pub struct CatBoost {
     depth: usize, // oblivious tree depth
     lambda: f64,  // L2 regularization
     /// Indices of categorical features (will use target statistics encoding).
+    /// When empty, the task's own `FeatureType::Categorical` columns are used.
     cat_features: Vec<usize>,
     /// Prior for target statistics smoothing.
     prior_strength: f64,
     seed: u64,
+    early_stopping_rounds: usize,
+    /// Optional held-out set for early stopping — see `EvalSet` docs.
+    eval_set: EvalSet,
 }
 
 impl Default for CatBoost {
@@ -73,6 +78,8 @@ impl Default for CatBoost {
             cat_features: Vec::new(),
             prior_strength: 1.0,
             seed: 42,
+            early_stopping_rounds: 0,
+            eval_set: None,
         }
     }
 }
@@ -109,6 +116,56 @@ impl CatBoost {
         self.seed = s;
         self
     }
+    /// Stop after `n` rounds without improvement of the monitored loss
+    /// (held-out loss when an eval set is provided, training loss otherwise).
+    pub fn with_early_stopping_rounds(mut self, n: usize) -> Self {
+        self.early_stopping_rounds = n;
+        self
+    }
+    /// Set a held-out set that `early_stopping_rounds` evaluates on, for
+    /// regression. Without this, early stopping monitors training loss, which
+    /// rarely plateaus under boosting and so rarely actually fires.
+    pub fn with_eval_set_regress(mut self, features: Array2<f64>, target: Vec<f64>) -> Self {
+        self.eval_set = Some((features, EvalTarget::Regression(target)));
+        self
+    }
+    /// Set a held-out set that `early_stopping_rounds` evaluates on, for
+    /// classification (binary or multiclass).
+    pub fn with_eval_set_classif(mut self, features: Array2<f64>, target: Vec<usize>) -> Self {
+        self.eval_set = Some((features, EvalTarget::Classification(target)));
+        self
+    }
+
+    /// Categorical columns to target-encode: the explicitly configured ones,
+    /// or the task's own categorical metadata when none were configured.
+    fn effective_cat_features(&self, task: &dyn Task) -> Vec<usize> {
+        if self.cat_features.is_empty() {
+            task.categorical_features()
+        } else {
+            self.cat_features.clone()
+        }
+    }
+
+    /// Encode eval-set features with the final training statistics (the same
+    /// map prediction uses): seen categories → their statistic, unseen → prior,
+    /// NaN stays NaN.
+    fn encode_eval(
+        eval_features: &Array2<f64>,
+        cat_encodings: &HashMap<usize, HashMap<i64, f64>>,
+        prior: f64,
+    ) -> Array2<f64> {
+        let mut encoded = eval_features.clone();
+        for (&col, encodings) in cat_encodings {
+            for i in 0..encoded.nrows() {
+                let raw = eval_features[[i, col]];
+                if raw.is_nan() {
+                    continue;
+                }
+                encoded[[i, col]] = encodings.get(&(raw as i64)).copied().unwrap_or(prior);
+            }
+        }
+        encoded
+    }
 }
 
 // ── Ordered Target Statistics ───────────────────────────────────────
@@ -142,7 +199,14 @@ fn ordered_target_encode(
         let mut count_by_cat: HashMap<i64, usize> = HashMap::new();
 
         for &idx in &perm {
-            let cat_val = features[[idx, cat_col]] as i64; // discretize
+            let raw = features[[idx, cat_col]];
+            if raw.is_nan() {
+                // Missing category stays NaN — the NaN-aware binning and
+                // splits handle it. Casting NaN as i64 would silently merge
+                // missing values into category 0.
+                continue;
+            }
+            let cat_val = raw as i64; // discretize
 
             let count = *count_by_cat.get(&cat_val).unwrap_or(&0);
             let sum = *sum_by_cat.get(&cat_val).unwrap_or(&0.0);
@@ -170,6 +234,12 @@ fn ordered_target_encode(
 pub struct ObliviousTree {
     /// One split per depth level: (feature_index, threshold).
     splits: Vec<(usize, f64)>,
+    /// Per-level direction for NaN values (true = left). Learned during
+    /// training like XGBoost's default direction. `#[serde(default)]` so
+    /// models serialized before this field existed still load; missing
+    /// entries mean left, matching the old `NaN >= t == false` routing.
+    #[serde(default)]
+    nan_left: Vec<bool>,
     /// Leaf weights: 2^depth values.
     leaf_weights: Vec<f64>,
 }
@@ -188,7 +258,13 @@ impl ObliviousTree {
         let mut leaf_idx = 0usize;
         let d = self.splits.len();
         for (level, &(feat, threshold)) in self.splits.iter().enumerate() {
-            if row[feat] >= threshold {
+            let v = row[feat];
+            let goes_right = if v.is_nan() {
+                !self.nan_left.get(level).copied().unwrap_or(true)
+            } else {
+                v >= threshold
+            };
+            if goes_right {
                 leaf_idx |= 1 << (d - 1 - level);
             }
         }
@@ -197,6 +273,42 @@ impl ObliviousTree {
 }
 
 type CBBins = HistBins;
+
+/// Per-partition per-feature histogram: (bin_g, bin_h, nan_g, nan_h).
+/// NaN gradient/hessian mass is tracked separately so split gains account for
+/// missing values (they used to be excluded from the gain but still routed
+/// left, giving inconsistent statistics — audit issue M2).
+type FeatHist = (Vec<f64>, Vec<f64>, f64, f64);
+
+fn scan_partition_hists(
+    bins: &CBBins,
+    grads: &[f64],
+    hess: &[f64],
+    indices: &[usize],
+    n_features: usize,
+) -> Vec<FeatHist> {
+    (0..n_features)
+        .into_par_iter()
+        .map(|feat| {
+            let nb = bins.boundaries[feat].len();
+            let mut bg = vec![0.0; nb];
+            let mut bh = vec![0.0; nb];
+            let mut ng = 0.0;
+            let mut nh = 0.0;
+            for &idx in indices {
+                let b = bins.get_bin(feat, idx);
+                if b == NAN_BIN {
+                    ng += grads[idx];
+                    nh += hess[idx];
+                } else {
+                    bg[b as usize] += grads[idx];
+                    bh[b as usize] += hess[idx];
+                }
+            }
+            (bg, bh, ng, nh)
+        })
+        .collect()
+}
 
 fn build_oblivious_tree(
     bins: &CBBins,
@@ -209,94 +321,89 @@ fn build_oblivious_tree(
 ) -> ObliviousTree {
     let n_leaves = 1 << depth;
     let mut splits = Vec::with_capacity(depth);
+    let mut nan_lefts = Vec::with_capacity(depth);
     let mut partitions: Vec<Vec<usize>> = vec![indices.to_vec()];
 
-    // Histogram cache: per partition, per feature → (bin_g, bin_h)
-    // cache[partition_idx][feature_idx] = (Vec<f64>, Vec<f64>)
-    type PartHist = Vec<Vec<(Vec<f64>, Vec<f64>)>>;
+    // Histogram cache: cache[partition_idx][feature_idx] = FeatHist
+    type PartHist = Vec<Vec<FeatHist>>;
 
-    // Build initial cache: scan root partition for all features
-    let initial_cache: Vec<(Vec<f64>, Vec<f64>)> = (0..n_features)
-        .into_par_iter()
-        .map(|feat| {
-            let nb = bins.boundaries[feat].len();
-            let mut bg = vec![0.0; nb];
-            let mut bh = vec![0.0; nb];
-            for &idx in indices {
-                let b = bins.get_bin(feat, idx);
-                if b == NAN_BIN {
-                    continue;
-                }
-                let b = b as usize;
-                bg[b] += grads[idx];
-                bh[b] += hess[idx];
-            }
-            (bg, bh)
-        })
-        .collect();
-    let mut cache: PartHist = vec![initial_cache];
+    let mut cache: PartHist = vec![scan_partition_hists(bins, grads, hess, indices, n_features)];
 
     for _level in 0..depth {
         let mut best_gain = f64::NEG_INFINITY;
         let mut best_feat = 0;
         let mut best_bin = 0;
+        let mut best_nan_left = true;
 
-        // Find best split from CACHED histograms (no scanning!)
-        let results: Vec<(usize, usize, f64)> = (0..n_features)
+        // Find best split from CACHED histograms (no scanning!). For each
+        // candidate bin, evaluate NaN-goes-left vs NaN-goes-right (the
+        // direction is shared across partitions, like the split itself —
+        // oblivious property).
+        let results: Vec<(usize, usize, f64, bool)> = (0..n_features)
             .into_par_iter()
             .map(|feat| {
                 let nb = bins.boundaries[feat].len();
                 let mut best_local_gain = f64::NEG_INFINITY;
                 let mut best_local_bin = 0;
+                let mut best_local_nan_left = true;
 
-                // Prefix sums from cached histograms
-                let prefix: Vec<(Vec<f64>, Vec<f64>, f64, f64)> = cache
+                // Prefix sums from cached histograms, plus NaN mass and
+                // NaN-inclusive totals per partition.
+                let prefix: Vec<(Vec<f64>, Vec<f64>, f64, f64, f64, f64)> = cache
                     .iter()
                     .map(|part_cache| {
-                        let (bg, bh) = &part_cache[feat];
+                        let (bg, bh, ng, nh) = &part_cache[feat];
                         let mut pg = vec![0.0; nb + 1];
                         let mut ph = vec![0.0; nb + 1];
                         for b in 0..nb {
                             pg[b + 1] = pg[b] + bg[b];
                             ph[b + 1] = ph[b] + bh[b];
                         }
-                        let tg = pg[nb];
-                        let th = ph[nb];
-                        (pg, ph, tg, th)
+                        let tg = pg[nb] + ng;
+                        let th = ph[nb] + nh;
+                        (pg, ph, tg, th, *ng, *nh)
                     })
                     .collect();
 
                 for bin in 0..nb.saturating_sub(1) {
-                    let mut total_gain = 0.0;
-                    for (pg, ph, tg, th) in &prefix {
-                        let gl = pg[bin + 1];
-                        let hl = ph[bin + 1];
-                        let gr = tg - gl;
-                        let hr = th - hl;
-                        if hl > 0.0 && hr > 0.0 {
-                            total_gain += gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
-                                - tg * tg / (th + lambda);
+                    for nan_left in [false, true] {
+                        let mut total_gain = 0.0;
+                        for (pg, ph, tg, th, ng, nh) in &prefix {
+                            let (mut gl, mut hl) = (pg[bin + 1], ph[bin + 1]);
+                            if nan_left {
+                                gl += ng;
+                                hl += nh;
+                            }
+                            let gr = tg - gl;
+                            let hr = th - hl;
+                            if hl > 0.0 && hr > 0.0 {
+                                total_gain += gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
+                                    - tg * tg / (th + lambda);
+                            }
+                        }
+                        if total_gain > best_local_gain {
+                            best_local_gain = total_gain;
+                            best_local_bin = bin;
+                            best_local_nan_left = nan_left;
                         }
                     }
-                    if total_gain > best_local_gain {
-                        best_local_gain = total_gain;
-                        best_local_bin = bin;
-                    }
                 }
-                (feat, best_local_bin, best_local_gain)
+                (feat, best_local_bin, best_local_gain, best_local_nan_left)
             })
             .collect();
 
-        for (feat, bin, gain) in results {
+        for (feat, bin, gain, nan_left) in results {
             if gain > best_gain {
                 best_gain = gain;
                 best_feat = feat;
                 best_bin = bin;
+                best_nan_left = nan_left;
             }
         }
 
         let threshold = bins.boundaries[best_feat][best_bin];
         splits.push((best_feat, threshold));
+        nan_lefts.push(best_nan_left);
 
         // Split all partitions + update histogram cache via subtraction
         let mut new_partitions = Vec::with_capacity(partitions.len() * 2);
@@ -307,8 +414,11 @@ fn build_oblivious_tree(
             let mut right = Vec::new();
             for &idx in partition {
                 let b = bins.get_bin(best_feat, idx);
-                // NaN samples route LEFT (matches predict_one: NaN >= threshold is false).
-                let goes_left = b == NAN_BIN || (b as usize) <= best_bin;
+                let goes_left = if b == NAN_BIN {
+                    best_nan_left
+                } else {
+                    (b as usize) <= best_bin
+                };
                 if goes_left {
                     left.push(idx);
                 } else {
@@ -324,34 +434,16 @@ fn build_oblivious_tree(
                 (&right, false)
             };
 
-            // Scan smaller child for all features (parallel)
-            let smaller_hists: Vec<(Vec<f64>, Vec<f64>)> = (0..n_features)
-                .into_par_iter()
-                .map(|feat| {
-                    let nb = bins.boundaries[feat].len();
-                    let mut bg = vec![0.0; nb];
-                    let mut bh = vec![0.0; nb];
-                    for &idx in smaller.iter() {
-                        let b = bins.get_bin(feat, idx);
-                        if b == NAN_BIN {
-                            continue;
-                        }
-                        let b = b as usize;
-                        bg[b] += grads[idx];
-                        bh[b] += hess[idx];
-                    }
-                    (bg, bh)
-                })
-                .collect();
+            let smaller_hists = scan_partition_hists(bins, grads, hess, smaller, n_features);
 
             // Subtract for larger child: parent - smaller
-            let larger_hists: Vec<(Vec<f64>, Vec<f64>)> = (0..n_features)
+            let larger_hists: Vec<FeatHist> = (0..n_features)
                 .map(|feat| {
-                    let (pg, ph) = &parent_hists[feat];
-                    let (sg, sh) = &smaller_hists[feat];
+                    let (pg, ph, png, pnh) = &parent_hists[feat];
+                    let (sg, sh, sng, snh) = &smaller_hists[feat];
                     let bg: Vec<f64> = pg.iter().zip(sg).map(|(p, s)| p - s).collect();
                     let bh: Vec<f64> = ph.iter().zip(sh).map(|(p, s)| p - s).collect();
-                    (bg, bh)
+                    (bg, bh, png - sng, pnh - snh)
                 })
                 .collect();
 
@@ -383,6 +475,7 @@ fn build_oblivious_tree(
 
     ObliviousTree {
         splits,
+        nan_left: nan_lefts,
         leaf_weights,
     }
 }
@@ -405,20 +498,30 @@ pub struct TrainedCatBoost {
     pub(crate) feature_names: Vec<String>,
     pub(crate) cat_features: Vec<usize>,
     pub(crate) cat_encodings: HashMap<usize, HashMap<i64, f64>>,
+    /// Target prior used as the fallback encoding for categories never seen
+    /// during training (audit issue M3: they used to pass through as raw codes
+    /// into thresholds living in target-statistic space). `serde(default)` so
+    /// models serialized before this field existed still load (0.0 keeps a
+    /// neutral value; retrain to get the real prior).
+    #[serde(default)]
+    pub(crate) prior: f64,
 }
 
 impl TrainedModel for TrainedCatBoost {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
         crate::validate::check_n_features(features, self.feature_names.len())?;
 
-        // Apply categorical encoding (using final training statistics)
+        // Apply categorical encoding (using final training statistics).
+        // NaN stays NaN (missing category → NaN-aware split routing);
+        // unseen categories fall back to the training prior.
         let mut encoded = features.clone();
         for (&col, encodings) in &self.cat_encodings {
             for i in 0..features.nrows() {
-                let val = features[[i, col]] as i64;
-                if let Some(&enc) = encodings.get(&val) {
-                    encoded[[i, col]] = enc;
+                let raw = features[[i, col]];
+                if raw.is_nan() {
+                    continue;
                 }
+                encoded[[i, col]] = encodings.get(&(raw as i64)).copied().unwrap_or(self.prior);
             }
         }
 
@@ -513,23 +616,33 @@ impl Learner for CatBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
+        let eval = validate_eval_regress(&self.eval_set, nf)?;
         let mut rng = StdRng::seed_from_u64(self.seed);
+        let cat_features = self.effective_cat_features(task);
 
         let prior = target.iter().sum::<f64>() / ns as f64;
         let encoded = ordered_target_encode(
             features,
             target,
-            &self.cat_features,
+            &cat_features,
             prior,
             self.prior_strength,
             &mut rng,
         );
 
+        // Final encoding map: used at prediction time, and to encode the eval
+        // set during training (it only depends on the data, not the model).
+        let cat_encodings =
+            build_final_encodings(features, target, &cat_features, prior, self.prior_strength);
+        let eval_encoded = eval.map(|(ef, _)| Self::encode_eval(ef, &cat_encodings, prior));
+
         let initial = prior;
         let mut preds = vec![initial; ns];
+        let mut eval_preds = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
         let mut trees = Vec::with_capacity(self.n_estimators);
         let indices: Vec<usize> = (0..ns).collect();
         let bins = HistBins::build(&encoded, 64);
+        let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
             let grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
@@ -539,17 +652,25 @@ impl Learner for CatBoost {
             for i in 0..ns {
                 preds[i] += self.learning_rate * tree.predict_one(encoded.row(i));
             }
+            if let (Some(ep), Some(ee)) = (&mut eval_preds, &eval_encoded) {
+                for i in 0..ee.nrows() {
+                    ep[i] += self.learning_rate * tree.predict_one(ee.row(i));
+                }
+            }
             trees.push(tree);
-        }
 
-        // Build final encoding map for prediction
-        let cat_encodings = build_final_encodings(
-            features,
-            target,
-            &self.cat_features,
-            prior,
-            self.prior_strength,
-        );
+            if stopper.is_active() {
+                let loss = if let (Some(ep), Some((_, et))) = (&eval_preds, eval) {
+                    ep.iter().zip(et).map(|(p, y)| (p - y).powi(2)).sum::<f64>() / ep.len() as f64
+                } else {
+                    preds.iter().zip(target).map(|(p, y)| (p - y).powi(2)).sum::<f64>() / ns as f64
+                };
+                if let Some(best_n) = stopper.update(loss, trees.len()) {
+                    trees.truncate(best_n);
+                    break;
+                }
+            }
+        }
 
         Ok(Box::new(TrainedCatBoost {
             trees,
@@ -557,8 +678,9 @@ impl Learner for CatBoost {
             learning_rate: self.learning_rate,
             mode: CBMode::Regression,
             feature_names: task.feature_names().to_vec(),
-            cat_features: self.cat_features.clone(),
+            cat_features,
             cat_encodings,
+            prior,
         }))
     }
 
@@ -577,25 +699,38 @@ impl CatBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
+        let eval = validate_eval_classif(&self.eval_set, nf)?;
         let mut rng = StdRng::seed_from_u64(self.seed);
+        let cat_features = self.effective_cat_features(task);
 
         let target_f64: Vec<f64> = target.iter().map(|&t| t as f64).collect();
         let prior = target_f64.iter().sum::<f64>() / ns as f64;
         let encoded = ordered_target_encode(
             features,
             &target_f64,
-            &self.cat_features,
+            &cat_features,
             prior,
             self.prior_strength,
             &mut rng,
         );
 
+        let cat_encodings = build_final_encodings(
+            features,
+            &target_f64,
+            &cat_features,
+            prior,
+            self.prior_strength,
+        );
+        let eval_encoded = eval.map(|(ef, _)| Self::encode_eval(ef, &cat_encodings, prior));
+
         let p_pos = target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64;
         let initial = (p_pos / (1.0 - p_pos).max(1e-15)).ln();
         let mut fv = vec![initial; ns];
+        let mut eval_fv = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
         let mut trees = Vec::with_capacity(self.n_estimators);
         let indices: Vec<usize> = (0..ns).collect();
         let bins = HistBins::build(&encoded, 64);
+        let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
             let grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
@@ -610,16 +745,32 @@ impl CatBoost {
             for i in 0..ns {
                 fv[i] += self.learning_rate * tree.predict_one(encoded.row(i));
             }
+            if let (Some(efv), Some(ee)) = (&mut eval_fv, &eval_encoded) {
+                for i in 0..ee.nrows() {
+                    efv[i] += self.learning_rate * tree.predict_one(ee.row(i));
+                }
+            }
             trees.push(tree);
-        }
 
-        let cat_encodings = build_final_encodings(
-            features,
-            &target_f64,
-            &self.cat_features,
-            prior,
-            self.prior_strength,
-        );
+            if stopper.is_active() {
+                let eps = 1e-15;
+                let logloss = |f: f64, y: usize| {
+                    let p = sigmoid(f).clamp(eps, 1.0 - eps);
+                    let y = y as f64;
+                    -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
+                };
+                let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
+                    efv.iter().zip(et).map(|(&f, &y)| logloss(f, y)).sum::<f64>()
+                        / efv.len() as f64
+                } else {
+                    fv.iter().zip(target).map(|(&f, &y)| logloss(f, y)).sum::<f64>() / ns as f64
+                };
+                if let Some(best_n) = stopper.update(loss, trees.len()) {
+                    trees.truncate(best_n);
+                    break;
+                }
+            }
+        }
 
         Ok(Box::new(TrainedCatBoost {
             trees,
@@ -627,8 +778,9 @@ impl CatBoost {
             learning_rate: self.learning_rate,
             mode: CBMode::BinaryClassif,
             feature_names: task.feature_names().to_vec(),
-            cat_features: self.cat_features.clone(),
+            cat_features,
             cat_encodings,
+            prior,
         }))
     }
 
@@ -636,18 +788,29 @@ impl CatBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf, nc) = (task.n_samples(), task.n_features(), task.n_classes());
+        let eval = validate_eval_classif(&self.eval_set, nf)?;
         let mut rng = StdRng::seed_from_u64(self.seed);
+        let cat_features = self.effective_cat_features(task);
 
         let target_f64: Vec<f64> = target.iter().map(|&t| t as f64).collect();
         let prior = target_f64.iter().sum::<f64>() / ns as f64;
         let encoded = ordered_target_encode(
             features,
             &target_f64,
-            &self.cat_features,
+            &cat_features,
             prior,
             self.prior_strength,
             &mut rng,
         );
+
+        let cat_encodings = build_final_encodings(
+            features,
+            &target_f64,
+            &cat_features,
+            prior,
+            self.prior_strength,
+        );
+        let eval_encoded = eval.map(|(ef, _)| Self::encode_eval(ef, &cat_encodings, prior));
 
         let mut cc = vec![0usize; nc];
         for &t in target {
@@ -658,9 +821,12 @@ impl CatBoost {
             .map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln())
             .collect();
         let mut fv: Vec<Vec<f64>> = (0..ns).map(|_| initial.clone()).collect();
+        let mut eval_fv: Option<Vec<Vec<f64>>> =
+            eval.map(|(ef, _)| (0..ef.nrows()).map(|_| initial.clone()).collect());
         let mut trees = Vec::with_capacity(self.n_estimators * nc);
         let indices: Vec<usize> = (0..ns).collect();
         let bins = HistBins::build(&encoded, 64);
+        let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
             let probs: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
@@ -683,17 +849,30 @@ impl CatBoost {
                 for i in 0..ns {
                     fv[i][c] += self.learning_rate * tree.predict_one(encoded.row(i));
                 }
+                if let (Some(efv), Some(ee)) = (&mut eval_fv, &eval_encoded) {
+                    for i in 0..ee.nrows() {
+                        efv[i][c] += self.learning_rate * tree.predict_one(ee.row(i));
+                    }
+                }
                 trees.push(tree);
             }
-        }
 
-        let cat_encodings = build_final_encodings(
-            features,
-            &target_f64,
-            &self.cat_features,
-            prior,
-            self.prior_strength,
-        );
+            if stopper.is_active() {
+                let eps = 1e-15;
+                let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
+                    let ep: Vec<Vec<f64>> = efv.iter().map(|f| softmax(f)).collect();
+                    (0..et.len()).map(|i| -ep[i][et[i]].max(eps).ln()).sum::<f64>()
+                        / et.len() as f64
+                } else {
+                    let pn: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
+                    (0..ns).map(|i| -pn[i][target[i]].max(eps).ln()).sum::<f64>() / ns as f64
+                };
+                if let Some(best_n) = stopper.update(loss, trees.len()) {
+                    trees.truncate(best_n);
+                    break;
+                }
+            }
+        }
 
         Ok(Box::new(TrainedCatBoost {
             trees,
@@ -701,8 +880,9 @@ impl CatBoost {
             learning_rate: self.learning_rate,
             mode: CBMode::MultiClassif { n_classes: nc },
             feature_names: task.feature_names().to_vec(),
-            cat_features: self.cat_features.clone(),
+            cat_features,
             cat_encodings,
+            prior,
         }))
     }
 }
@@ -785,6 +965,172 @@ mod tests {
             .sqrt();
         assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
     }
+
+    /// Regression test for audit issue M2: NaN gradient/hessian mass used to be
+    /// excluded from split gains but still routed left, so a target pattern
+    /// carried *only* by missingness was invisible to split finding (zero gain
+    /// everywhere → root-only trees → global-mean predictions). With NaN-aware
+    /// gains and a learned per-level direction, the model must separate the
+    /// NaN group from the rest.
+    #[test]
+    fn missingness_pattern_is_splittable() {
+        let n = 400;
+        let mut features = Array2::<f64>::zeros((n, 2));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            if i % 2 == 0 {
+                features[[i, 0]] = f64::NAN;
+                target[i] = 10.0;
+            } else {
+                features[[i, 0]] = (i % 7) as f64;
+                target[i] = 0.0;
+            }
+            features[[i, 1]] = (i % 5) as f64; // uninformative noise column
+        }
+        let task = RegressionTask::new("nan_split", features.clone(), target.clone()).unwrap();
+        let mut cb = CatBoost::new().with_n_estimators(30).with_depth(3).with_learning_rate(0.3);
+        let model = cb.train_regress(&task).unwrap();
+        let Prediction::Regression { predicted, .. } = model.predict(&features).unwrap() else {
+            panic!("expected regression")
+        };
+        let rmse = (predicted
+            .iter()
+            .zip(&target)
+            .map(|(p, t)| (p - t).powi(2))
+            .sum::<f64>()
+            / n as f64)
+            .sqrt();
+        assert!(
+            rmse < 2.0,
+            "NaN-carried signal should be splittable (old behavior: RMSE=5 from \
+             predicting the global mean), got RMSE={rmse}"
+        );
+    }
+
+    /// Regression test for audit issue M3: unseen categories at prediction time
+    /// used to pass through as raw integer codes into thresholds living in
+    /// target-statistic space (~[0,1] here), silently routing them to an
+    /// arbitrary side. They must now fall back to the training prior.
+    #[test]
+    fn unseen_category_falls_back_to_prior() {
+        let n = 200;
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            let cat = (i % 2) as f64;
+            features[[i, 0]] = cat;
+            target[i] = cat * 10.0; // cat 0 → 0, cat 1 → 10; prior = 5
+        }
+        let task = RegressionTask::new("unseen_cat", features, target).unwrap();
+        let mut cb = CatBoost::new()
+            .with_n_estimators(50)
+            .with_depth(3)
+            .with_cat_features(vec![0]);
+        let model = cb.train_regress(&task).unwrap();
+
+        // Category 99 was never seen: its encoding must be the prior (5.0),
+        // so the prediction must land strictly between the two class means,
+        // not snap to either extreme.
+        let unseen = Array2::from_shape_vec((1, 1), vec![99.0]).unwrap();
+        let Prediction::Regression { predicted, .. } = model.predict(&unseen).unwrap() else {
+            panic!("expected regression")
+        };
+        assert!(
+            (2.0..=8.0).contains(&predicted[0]),
+            "unseen category should predict near the prior (5.0), got {}",
+            predicted[0]
+        );
+    }
+
+    /// The ordered/final target encoders must skip NaN cells: casting NaN to
+    /// i64 yields 0 in Rust, which used to silently merge missing values into
+    /// category 0's statistics.
+    #[test]
+    fn target_encoding_skips_nan() {
+        let features =
+            Array2::from_shape_vec((4, 1), vec![0.0, f64::NAN, 1.0, 0.0]).unwrap();
+        let target = vec![1.0, 100.0, 2.0, 3.0];
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let encoded = ordered_target_encode(&features, &target, &[0], 2.0, 1.0, &mut rng);
+        assert!(encoded[[1, 0]].is_nan(), "NaN cell must stay NaN after encoding");
+
+        let finals = build_final_encodings(&features, &target, &[0], 2.0, 1.0);
+        let enc0 = finals[&0][&0]; // category 0: targets 1 and 3, prior 2, strength 1
+        assert!(
+            (enc0 - (1.0 + 3.0 + 2.0) / 3.0).abs() < 1e-12,
+            "category 0 statistic must not include the NaN row's target (100), got {enc0}"
+        );
+    }
+
+    /// CatBoost picks up categorical columns declared on the Task when none
+    /// were configured explicitly (item 14: FeatureType metadata).
+    #[test]
+    fn task_categorical_metadata_is_used_automatically() {
+        let features = Array2::from_shape_vec((4, 2), vec![0.0, 1.0, 1.0, 2.0, 0.0, 3.0, 1.0, 4.0])
+            .unwrap();
+        let task = RegressionTask::new("meta", features, vec![1.0, 2.0, 3.0, 4.0])
+            .unwrap()
+            .with_categorical_features(&[0])
+            .unwrap();
+
+        let cb = CatBoost::new();
+        assert_eq!(cb.effective_cat_features(&task), vec![0]);
+
+        // Explicit configuration wins over task metadata.
+        let cb = CatBoost::new().with_cat_features(vec![1]);
+        assert_eq!(cb.effective_cat_features(&task), vec![1]);
+    }
+
+    /// Eval-set early stopping must truncate to the best round on held-out
+    /// loss instead of running all estimators on an overfittable config.
+    #[test]
+    fn eval_set_early_stopping_generalizes_better() {
+        use rand::Rng;
+        let n = 40;
+        let make = |seed: u64| {
+            let mut r = StdRng::seed_from_u64(seed);
+            let mut feats = Vec::with_capacity(n);
+            let mut target = Vec::with_capacity(n);
+            for i in 0..n {
+                feats.push(i as f64);
+                target.push(i as f64 * 0.1 + r.random::<f64>() * 8.0);
+            }
+            (Array2::from_shape_vec((n, 1), feats).unwrap(), target)
+        };
+        let (tr_f, tr_t) = make(1);
+        let (va_f, va_t) = make(2);
+        let task = RegressionTask::new("es", tr_f, tr_t).unwrap();
+
+        let rmse = |m: &dyn TrainedModel| {
+            let Prediction::Regression { predicted, .. } = m.predict(&va_f).unwrap() else {
+                panic!("expected regression")
+            };
+            (predicted.iter().zip(&va_t).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+                / va_t.len() as f64)
+                .sqrt()
+        };
+
+        let base = || {
+            CatBoost::new()
+                .with_n_estimators(500)
+                .with_depth(6)
+                .with_learning_rate(0.5)
+                .with_lambda(0.0001)
+                .with_early_stopping_rounds(3)
+        };
+        let m_train = base().train_regress(&task).unwrap();
+        let m_eval = base()
+            .with_eval_set_regress(va_f.clone(), va_t.clone())
+            .train_regress(&task)
+            .unwrap();
+        assert!(
+            rmse(&*m_eval) < rmse(&*m_train),
+            "eval-set early stopping should generalize better: eval={:.3} train-loss={:.3}",
+            rmse(&*m_eval),
+            rmse(&*m_train)
+        );
+    }
 }
 
 /// Build final target encoding map for prediction-time categorical handling.
@@ -800,7 +1146,11 @@ fn build_final_encodings(
         let mut sum_by_cat: HashMap<i64, f64> = HashMap::new();
         let mut count_by_cat: HashMap<i64, usize> = HashMap::new();
         for (i, &t) in target.iter().enumerate() {
-            let cat_val = features[[i, col]] as i64;
+            let raw = features[[i, col]];
+            if raw.is_nan() {
+                continue; // missing category: no statistic to accumulate
+            }
+            let cat_val = raw as i64;
             *sum_by_cat.entry(cat_val).or_insert(0.0) += t;
             *count_by_cat.entry(cat_val).or_insert(0) += 1;
         }

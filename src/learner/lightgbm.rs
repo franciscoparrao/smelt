@@ -25,6 +25,7 @@ use rand::seq::SliceRandom;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::eval::{EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress};
 use super::histogram::{HistBins, NAN_BIN};
 
 /// LightGBM-inspired leaf-wise GBM with GOSS sampling.
@@ -67,6 +68,11 @@ pub struct LightGBM {
     subsample: f64,
     colsample_bytree: f64,
     seed: u64,
+    early_stopping_rounds: usize,
+    /// Optional held-out set for early stopping — see `EvalSet` docs; training
+    /// loss under boosting rarely plateaus, so the eval set is what makes
+    /// `early_stopping_rounds` actually fire.
+    eval_set: EvalSet,
 }
 
 impl Default for LightGBM {
@@ -84,6 +90,8 @@ impl Default for LightGBM {
             subsample: 1.0,
             colsample_bytree: 1.0,
             seed: 42,
+            early_stopping_rounds: 0,
+            eval_set: None,
         }
     }
 }
@@ -134,6 +142,25 @@ impl LightGBM {
     }
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
+        self
+    }
+    /// Stop after `n` rounds without improvement of the monitored loss
+    /// (held-out loss when an eval set is provided, training loss otherwise).
+    pub fn with_early_stopping_rounds(mut self, n: usize) -> Self {
+        self.early_stopping_rounds = n;
+        self
+    }
+    /// Set a held-out set that `early_stopping_rounds` evaluates on, for
+    /// regression. Without this, early stopping monitors training loss, which
+    /// rarely plateaus under boosting and so rarely actually fires.
+    pub fn with_eval_set_regress(mut self, features: Array2<f64>, target: Vec<f64>) -> Self {
+        self.eval_set = Some((features, EvalTarget::Regression(target)));
+        self
+    }
+    /// Set a held-out set that `early_stopping_rounds` evaluates on, for
+    /// classification (binary or multiclass).
+    pub fn with_eval_set_classif(mut self, features: Array2<f64>, target: Vec<usize>) -> Self {
+        self.eval_set = Some((features, EvalTarget::Classification(target)));
         self
     }
 }
@@ -695,12 +722,15 @@ impl Learner for LightGBM {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
+        let eval = validate_eval_regress(&self.eval_set, nf)?;
         let bins = HistBins::build(features, self.n_bins);
         let initial = target.iter().sum::<f64>() / ns as f64;
         let mut preds = vec![initial; ns];
+        let mut eval_preds = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
         let mut trees = Vec::with_capacity(self.n_estimators);
         let mut imp = vec![0.0; nf];
         let mut rng = StdRng::seed_from_u64(self.seed);
+        let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
             let grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
@@ -727,7 +757,25 @@ impl Learner for LightGBM {
             for i in 0..ns {
                 preds[i] += self.learning_rate * tree.predict_one(features.row(i));
             }
+            if let (Some(ep), Some((ef, _))) = (&mut eval_preds, eval) {
+                for i in 0..ef.nrows() {
+                    ep[i] += self.learning_rate * tree.predict_one(ef.row(i));
+                }
+            }
             trees.push(tree);
+
+            if stopper.is_active() {
+                // MSE on the held-out set when provided, else on train.
+                let loss = if let (Some(ep), Some((_, et))) = (&eval_preds, eval) {
+                    ep.iter().zip(et).map(|(p, y)| (p - y).powi(2)).sum::<f64>() / ep.len() as f64
+                } else {
+                    preds.iter().zip(target).map(|(p, y)| (p - y).powi(2)).sum::<f64>() / ns as f64
+                };
+                if let Some(best_n) = stopper.update(loss, trees.len()) {
+                    trees.truncate(best_n);
+                    break;
+                }
+            }
         }
 
         Ok(Box::new(TrainedLightGBM {
@@ -755,13 +803,16 @@ impl LightGBM {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
+        let eval = validate_eval_classif(&self.eval_set, nf)?;
         let bins = HistBins::build(features, self.n_bins);
         let p_pos = target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64;
         let initial = (p_pos / (1.0 - p_pos).max(1e-15)).ln();
         let mut fv = vec![initial; ns];
+        let mut eval_fv = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
         let mut trees = Vec::with_capacity(self.n_estimators);
         let mut imp = vec![0.0; nf];
         let mut rng = StdRng::seed_from_u64(self.seed);
+        let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
             let grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
@@ -792,7 +843,31 @@ impl LightGBM {
             for i in 0..ns {
                 fv[i] += self.learning_rate * tree.predict_one(features.row(i));
             }
+            if let (Some(efv), Some((ef, _))) = (&mut eval_fv, eval) {
+                for i in 0..ef.nrows() {
+                    efv[i] += self.learning_rate * tree.predict_one(ef.row(i));
+                }
+            }
             trees.push(tree);
+
+            if stopper.is_active() {
+                let eps = 1e-15;
+                let logloss = |f: f64, y: usize| {
+                    let p = sigmoid(f).clamp(eps, 1.0 - eps);
+                    let y = y as f64;
+                    -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
+                };
+                let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
+                    efv.iter().zip(et).map(|(&f, &y)| logloss(f, y)).sum::<f64>()
+                        / efv.len() as f64
+                } else {
+                    fv.iter().zip(target).map(|(&f, &y)| logloss(f, y)).sum::<f64>() / ns as f64
+                };
+                if let Some(best_n) = stopper.update(loss, trees.len()) {
+                    trees.truncate(best_n);
+                    break;
+                }
+            }
         }
 
         Ok(Box::new(TrainedLightGBM {
@@ -809,6 +884,7 @@ impl LightGBM {
         let features = task.features();
         let target = task.target();
         let (ns, nf, nc) = (task.n_samples(), task.n_features(), task.n_classes());
+        let eval = validate_eval_classif(&self.eval_set, nf)?;
         let bins = HistBins::build(features, self.n_bins);
         let mut cc = vec![0usize; nc];
         for &t in target {
@@ -819,9 +895,12 @@ impl LightGBM {
             .map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln())
             .collect();
         let mut fv: Vec<Vec<f64>> = (0..ns).map(|_| initial.clone()).collect();
+        let mut eval_fv: Option<Vec<Vec<f64>>> =
+            eval.map(|(ef, _)| (0..ef.nrows()).map(|_| initial.clone()).collect());
         let mut trees = Vec::with_capacity(self.n_estimators * nc);
         let mut imp = vec![0.0; nf];
         let mut rng = StdRng::seed_from_u64(self.seed);
+        let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
             let probs: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
@@ -851,7 +930,28 @@ impl LightGBM {
                 for i in 0..ns {
                     fv[i][c] += self.learning_rate * tree.predict_one(features.row(i));
                 }
+                if let (Some(efv), Some((ef, _))) = (&mut eval_fv, eval) {
+                    for i in 0..ef.nrows() {
+                        efv[i][c] += self.learning_rate * tree.predict_one(ef.row(i));
+                    }
+                }
                 trees.push(tree);
+            }
+
+            if stopper.is_active() {
+                let eps = 1e-15;
+                let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
+                    let ep: Vec<Vec<f64>> = efv.iter().map(|f| softmax(f)).collect();
+                    (0..et.len()).map(|i| -ep[i][et[i]].max(eps).ln()).sum::<f64>()
+                        / et.len() as f64
+                } else {
+                    let pn: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
+                    (0..ns).map(|i| -pn[i][target[i]].max(eps).ln()).sum::<f64>() / ns as f64
+                };
+                if let Some(best_n) = stopper.update(loss, trees.len()) {
+                    trees.truncate(best_n);
+                    break;
+                }
             }
         }
 
@@ -961,6 +1061,69 @@ mod tests {
             assert!(selected.contains(&i), "top-gradient sample {i} should always be selected");
             assert_eq!(weights[i], 1.0, "top-gradient samples must have weight 1.0");
         }
+    }
+
+    /// Eval-set early stopping must stop at the best held-out round on an
+    /// overfittable config, generalizing better than train-loss monitoring
+    /// (which almost never fires under boosting). GOSS is disabled
+    /// (top_rate=1, other_rate=0) so the run is deterministic.
+    #[test]
+    fn eval_set_early_stopping_generalizes_better() {
+        use rand::Rng;
+        let n = 40;
+        let make = |seed: u64| {
+            let mut r = StdRng::seed_from_u64(seed);
+            let mut feats = Vec::with_capacity(n);
+            let mut target = Vec::with_capacity(n);
+            for i in 0..n {
+                feats.push(i as f64);
+                target.push(i as f64 * 0.1 + r.random::<f64>() * 8.0);
+            }
+            (Array2::from_shape_vec((n, 1), feats).unwrap(), target)
+        };
+        let (tr_f, tr_t) = make(1);
+        let (va_f, va_t) = make(2);
+        let task = RegressionTask::new("es", tr_f, tr_t).unwrap();
+
+        let rmse = |m: &dyn TrainedModel| {
+            let Prediction::Regression { predicted, .. } = m.predict(&va_f).unwrap() else {
+                panic!("expected regression")
+            };
+            (predicted.iter().zip(&va_t).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+                / va_t.len() as f64)
+                .sqrt()
+        };
+
+        let base = || {
+            LightGBM::new()
+                .with_n_estimators(500)
+                .with_num_leaves(31)
+                .with_learning_rate(0.5)
+                .with_top_rate(1.0)
+                .with_other_rate(0.0)
+                .with_early_stopping_rounds(3)
+        };
+        let m_train = base().train_regress(&task).unwrap();
+        let m_eval = base()
+            .with_eval_set_regress(va_f.clone(), va_t.clone())
+            .train_regress(&task)
+            .unwrap();
+        assert!(
+            rmse(&*m_eval) < rmse(&*m_train),
+            "eval-set early stopping should generalize better: eval={:.3} train-loss={:.3}",
+            rmse(&*m_eval),
+            rmse(&*m_train)
+        );
+    }
+
+    #[test]
+    fn eval_set_task_type_mismatch_is_rejected() {
+        let features = Array2::<f64>::zeros((10, 1));
+        let task = RegressionTask::new("es_type", features, vec![0.0; 10]).unwrap();
+        let mut mismatched = LightGBM::new()
+            .with_early_stopping_rounds(2)
+            .with_eval_set_classif(Array2::<f64>::zeros((5, 1)), vec![0usize; 5]);
+        assert!(mismatched.train_regress(&task).is_err());
     }
 
     fn count_leaves(node: &LGBNode) -> usize {

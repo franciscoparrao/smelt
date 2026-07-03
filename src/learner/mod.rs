@@ -7,6 +7,7 @@ pub mod bagging;
 pub mod catboost;
 pub mod des;
 pub mod ebm;
+pub(crate) mod eval;
 pub mod geo_xgboost;
 pub(crate) mod hist_pool;
 pub mod histogram;

@@ -16,6 +16,7 @@ use rand::seq::SliceRandom;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::eval::{EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress};
 use super::hist_pool::HistPool;
 use super::histogram::{HistBins, NAN_BIN};
 
@@ -62,14 +63,7 @@ pub struct XGBoost {
     /// boosting is (near-)monotonically decreasing, so without a validation set
     /// early stopping rarely plateaus and almost never actually fires — it isn't
     /// a substitute for evaluating on unseen data.
-    eval_set: Option<(Array2<f64>, EvalTarget)>,
-}
-
-/// Held-out target for early-stopping evaluation, paired with `eval_set`'s
-/// features. Must match the task type the model is trained on.
-enum EvalTarget {
-    Regression(Vec<f64>),
-    Classification(Vec<usize>),
+    eval_set: EvalSet,
 }
 
 impl Default for XGBoost {
@@ -834,60 +828,6 @@ impl XGBoost {
         (tree, builder.feature_importances)
     }
 
-    /// Validate `self.eval_set` for a regression task and return the
-    /// (features, target) pair to evaluate on for early stopping, if set.
-    fn validate_eval_regress(&self, n_features: usize) -> Result<Option<(&Array2<f64>, &[f64])>> {
-        match &self.eval_set {
-            None => Ok(None),
-            Some((ef, EvalTarget::Regression(et))) => {
-                if ef.ncols() != n_features {
-                    return Err(SmeltError::DimensionMismatch {
-                        expected: n_features,
-                        got: ef.ncols(),
-                    });
-                }
-                if et.len() != ef.nrows() {
-                    return Err(SmeltError::DimensionMismatch {
-                        expected: ef.nrows(),
-                        got: et.len(),
-                    });
-                }
-                Ok(Some((ef, et.as_slice())))
-            }
-            Some((_, EvalTarget::Classification(_))) => Err(SmeltError::InvalidParameter(
-                "eval_set was set via with_eval_set_classif but the model is training a regression task".into(),
-            )),
-        }
-    }
-
-    /// Validate `self.eval_set` for a classification task and return the
-    /// (features, target) pair to evaluate on for early stopping, if set.
-    fn validate_eval_classif(
-        &self,
-        n_features: usize,
-    ) -> Result<Option<(&Array2<f64>, &[usize])>> {
-        match &self.eval_set {
-            None => Ok(None),
-            Some((ef, EvalTarget::Classification(et))) => {
-                if ef.ncols() != n_features {
-                    return Err(SmeltError::DimensionMismatch {
-                        expected: n_features,
-                        got: ef.ncols(),
-                    });
-                }
-                if et.len() != ef.nrows() {
-                    return Err(SmeltError::DimensionMismatch {
-                        expected: ef.nrows(),
-                        got: et.len(),
-                    });
-                }
-                Ok(Some((ef, et.as_slice())))
-            }
-            Some((_, EvalTarget::Regression(_))) => Err(SmeltError::InvalidParameter(
-                "eval_set was set via with_eval_set_regress but the model is training a classification task".into(),
-            )),
-        }
-    }
 }
 
 impl Learner for XGBoost {
@@ -907,7 +847,7 @@ impl Learner for XGBoost {
                 });
             }
         }
-        let eval = self.validate_eval_regress(nf)?;
+        let eval = validate_eval_regress(&self.eval_set, nf)?;
         let bins = HistBins::build(features, self.n_bins);
         // Weighted mean as the initial prediction when sample weights are set.
         let initial = match &self.sample_weight {
@@ -1029,7 +969,7 @@ impl XGBoost {
                 });
             }
         }
-        let eval = self.validate_eval_classif(nf)?;
+        let eval = validate_eval_classif(&self.eval_set, nf)?;
         let bins = HistBins::build(features, self.n_bins);
         // Weighted positive-class fraction as the initial log-odds when
         // sample weights are set (same objective as XGBoost's base_score).
@@ -1152,7 +1092,7 @@ impl XGBoost {
                 });
             }
         }
-        let eval = self.validate_eval_classif(nf)?;
+        let eval = validate_eval_classif(&self.eval_set, nf)?;
         let bins = HistBins::build(features, self.n_bins);
         // Weighted per-class frequency as the initial log-prior when sample
         // weights are set.
