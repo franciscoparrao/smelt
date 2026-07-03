@@ -105,9 +105,14 @@ competitiva" in progress):
       stopping in all 3 boosting engines; monotone constraints + custom
       objectives (Huber/Poisson/Custom) in XGBoost; check_no_nan in non-NaN
       learners (done 2026-07-02 — see docs/fase3_progreso.md). Not yet in
-      smelt-py: cat_features/eval_set/monotone/objective bindings (item 15c/15d)
-- [ ] Python: `define_learner!` macro, close the ~14 learners not yet bound,
-      `get_params`/`set_params`, split `smelt-py/src/lib.rs` (1800+ lines)
+      smelt-py: cat_features/eval_set/monotone/objective bindings (item 15c)
+- [x] Python: `define_learner!` macro, close the ~14 learners not yet bound
+      (item 15a/15b, done earlier); split `smelt-py/src/lib.rs`
+      2543→114 lines across `common.rs` + `learners/{boosting,trees,linear,
+      misc,ensemble}.rs` + `preprocess/resample/measures/py_stats/tuning/
+      feature_selection.rs` (item 15d, done 2026-07-02 — see
+      docs/fase3_progreso.md)
+- [ ] `get_params`/`set_params` on the Python wrappers (item 15c)
 - [ ] Parquet/Arrow loading, `f32` histograms, sparse data support
 - [ ] `README.md`/this file kept current as features land (this section itself
       was stale for a long time — reconciled 2026-07-02)

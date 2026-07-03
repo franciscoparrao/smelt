@@ -17,11 +17,11 @@ scoping.
 | 16c | Predict paralelo consistente | ✅ hecho | `14f318c` | XGBoost y CatBoost tenían Regression/BinaryClassif paralelos con rayon pero MultiClassif serial; LightGBM tenía los 3 modos seriales. Ahora los 3 motores usan el mismo patrón `into_par_iter()` en los 3 modos. Sin cambios numéricos, solo el loop por fila. |
 | 17a | README.md / CLAUDE.md al día | ✅ hecho | `8f36278` | Versión 0.6→1.3, conteo de learners 21→26, tabla de learners/medidas/resampling completada, roadmap de CLAUDE.md (Phase 1-6, todo marcado como pendiente pese a estar hecho hace tiempo) reconciliado con el estado real. |
 | 17b | `#![warn(missing_docs)]` | ❌ evaluado, no ejecutado | | 308 advertencias al activarlo — demasiado para tratarlo como ganancia rápida. Queda como ítem grande para una sesión dedicada (escribir ~300 doc comments o decidir cuáles APIs realmente necesitan documentación pública vs volverlas `pub(crate)`). |
-| 14 | Categóricas + NaN en Task/splits; early stopping real; monotone constraints; objetivos custom | pendiente | | El ítem más grande del proyecto — toca `Task`, `CsvLoader`, `histogram.rs`, y el split-finding de XGBoost/LightGBM/CatBoost a la vez. Requiere su propia sesión de scoping antes de empezar. |
+| 14 | Categóricas + NaN en Task/splits; early stopping real; monotone constraints; objetivos custom | ✅ hecho | `abe57bb`..`01420ad` | Ver entrada de log 2026-07-02 "Ítem 14 completo" para el detalle de las 6 sub-fases. |
 | 15a | Macro `define_learner!` + exponer 11 de 14 learners faltantes | ✅ hecho | `2565c23`, fix `8b813c7` | AdaBoost, EBM, Lasso, ElasticNet, GradientBoosting, HoeffdingTree, LinearSVM, ObliqueTree, ObliqueForest (agregada en el fix), QuantileForest, QuantileGB. Reusa `add_explain_methods!`/`declare_support!` existentes (shap_values, permutation_importance, conformal_predict, supports_classification/regression) — no solo fit/predict. Verificado de punta a punta con `maturin develop --release` + smoke test real en Python (no solo `cargo build`). Bug encontrado y corregido en el desarrollo: `$has_proba:literal` no se puede reenviar/re-matchear en una macro recursiva (macro_rules! lo prohíbe para fragmentos `literal`; solución: `:tt`). |
 | 15b | Exponer Bagging/Stacking/DynamicEnsemble | ✅ hecho | `3844173` | Diseño: base learners seleccionados por id de string (mismo registry que `learner_from_id`, expuesto a Python como `registered_learner_ids()`) en vez de aceptar un objeto learner Python ya construido — evita puentear una pyclass arbitraria hacia el closure `Fn() -> Box<dyn Learner>`, que requeriría reacquirir el GIL en cada bootstrap/fold. Ids validados en el constructor (no en fit), con mensaje de error que lista los ids válidos. `Bagging`/`Stacking` declaran classif+regress (genéricos según el base elegido); `DynamicEnsemble` solo classif (así es DES/KNORA-E en sí). Verificado con smoke test real: fit/predict/predict_proba en los 3, más los 2 caminos de error (id inválido, lista vacía) devolviendo `PyErr` claro en vez de panicar. Con esto los 26 learners de Rust son alcanzables desde Python. |
 | 15c | get_params/set_params | pendiente | | |
-| 15d | Dividir `smelt-py/src/lib.rs` (ahora 2500+ líneas) | pendiente | | |
+| 15d | Dividir `smelt-py/src/lib.rs` (ahora 2500+ líneas) | ✅ hecho | (siguiente commit) | `lib.rs` 2543→114 líneas. Ver entrada de log 2026-07-02 "Ítem 15d completo". |
 | 16d | Parquet/Arrow, f32 en histogramas, sparse data | pendiente | | `f32` en histogramas es un cambio de precisión numérica, no una "ganancia rápida" — requiere re-validar todos los tests de referencia de los 3 motores de boosting. |
 
 ## Log
@@ -136,3 +136,45 @@ Los árboles serializados viejos siguen cargando (serde default en los
 campos nuevos). Pendiente consciente: los constraints/objetivos custom no
 están en LightGBM/CatBoost (documentado), y smelt-py aún no expone
 cat_features/eval_set/monotone/objective (va con ítem 15c/15d).
+
+### 2026-07-02 — Ítem 15d completo: dividir `smelt-py/src/lib.rs`
+
+`lib.rs` era un solo archivo de 2543 líneas (learners + preprocesamiento +
+resampling + medidas + stats + tuning + feature selection + el `#[pymodule]`).
+Se partió en 12 archivos por dominio, sin cambiar comportamiento:
+
+- `common.rs`: helpers compartidos (`to_array2`, `fit_learner`,
+  `predict_values`/`predict_proba_values`, `not_fitted`, `parse_coords`,
+  `resolve_measure`, `shap_impl`/`perm_importance_impl`/
+  `conformal_predict_impl`) + los 3 macros (`define_learner!`,
+  `add_explain_methods!`, `declare_support!`), re-exportados con
+  `pub(crate) use nombre;` (el patrón estándar para compartir
+  `macro_rules!` entre módulos del mismo crate).
+- `learners/{boosting,trees,linear,misc,ensemble}.rs`: cada uno invoca
+  `define_learner!`/`add_explain_methods!`/`declare_support!` en el MISMO
+  archivo donde vive el struct — necesario porque el código expandido por
+  una macro_rules! "vive" (para efectos de privacidad de campos) en el
+  módulo donde se invoca, no donde se define la macro. Invocar la macro en
+  otro archivo distinto al struct habría roto el acceso a campos privados
+  como `self.trained`.
+- `preprocess.rs`, `resample.rs`, `measures.rs`, `py_stats.rs`,
+  `tuning.rs`, `feature_selection.rs`: un dominio por archivo.
+- `lib.rs` final: solo `mod` + `use` + el `#[pymodule] fn _smelt`. 2543→114
+  líneas.
+
+Validación: `cargo check --workspace` limpio (mismos 2 warnings preexistentes
+de `smelt-ml`, ninguno nuevo en `smelt-py`), `cargo test -p smelt-ml` verde
+(74+272+... como siempre). `cargo test -p smelt-py` falla al linkear —
+confirmado con `git stash` que es el MISMO fallo en el `lib.rs` monolítico
+original (pyo3 `extension-module` no linkea contra libpython; el harness de
+test sí lo necesita), no una regresión del split. Verificación real:
+`maturin develop --release` + smoke test en Python cubriendo las 12 áreas
+(boosting, trees incl. `define_learner!`, linear, misc, ensemble +
+`registered_learner_ids`, preprocess, resample, measures, stats, tuning
+BayesianOptimizer, feature_selection filters+RFE, y los 3 explain methods
+`shap_values`/`permutation_importance`/`conformal_predict` que dependen del
+macro cross-módulo) — todo idéntico al comportamiento pre-refactor.
+
+Con esto, del ítem 15 solo queda 15c (`get_params`/`set_params`) y, del
+ítem 14, exponer en smelt-py lo que quedó solo en Rust
+(cat_features/eval_set/monotone/objective).
