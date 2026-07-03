@@ -3,8 +3,13 @@
 //! One flat buffer per tree depth level, allocated once per tree.
 //! Avoids per-node allocation that caused 20x regression.
 
-use super::histogram::HistBins;
+use super::histogram::{HistBins, best_categorical_split};
 use rayon::prelude::*;
+
+/// Best split found in a pooled histogram:
+/// (feature, threshold, gain, nan_goes_left, split_bin, left_cats).
+/// `left_cats` is `Some(sorted codes going left)` for categorical features.
+pub(crate) type PoolSplit = (usize, f64, f64, bool, usize, Option<Vec<u16>>);
 
 pub(crate) struct HistPool {
     levels: Vec<Vec<f64>>,
@@ -55,7 +60,7 @@ impl HistPool {
         }
     }
 
-    /// Find best split from histogram at depth. Returns (feature, threshold, gain, nan_goes_left, split_bin).
+    /// Find best split from histogram at depth.
     pub fn find_best(
         &self,
         depth: usize,
@@ -65,12 +70,12 @@ impl HistPool {
         lambda: f64,
         _alpha: f64,
         gamma: f64,
-    ) -> Option<(usize, f64, f64, bool, usize)> {
+    ) -> Option<PoolSplit> {
         let buf = &self.levels[depth];
         let mb = self.max_bins;
         let fs = self.feat_stride;
 
-        let results: Vec<Option<(usize, f64, f64, bool, usize)>> = col_indices
+        let results: Vec<Option<PoolSplit>> = col_indices
             .par_iter()
             .enumerate()
             .map(|(fi, &feat)| {
@@ -81,17 +86,31 @@ impl HistPool {
                 let nan_h = buf[off + 2 * mb + 1];
                 let nb = bins.n_bins(feat);
 
-                let total_g: f64 = bin_g[..nb].iter().sum::<f64>() + nan_g;
-                let total_h: f64 = bin_h[..nb].iter().sum::<f64>() + nan_h;
-                let mut best_gain = 0.0f64;
-                let mut best_bin = 0usize;
-                let mut best_nan_left = false;
-
                 let sg = |gl: f64, hl: f64, gr: f64, hr: f64| -> f64 {
                     0.5 * (gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
                         - (gl + gr) * (gl + gr) / (hl + hr + lambda))
                         - gamma
                 };
+
+                if bins.cat[feat].is_some() {
+                    return best_categorical_split(
+                        &bin_g[..nb],
+                        &bin_h[..nb],
+                        nan_g,
+                        nan_h,
+                        min_cw,
+                        sg,
+                    )
+                    .map(|(left_cats, gain, nan_left)| {
+                        (feat, f64::NAN, gain, nan_left, 0, Some(left_cats))
+                    });
+                }
+
+                let total_g: f64 = bin_g[..nb].iter().sum::<f64>() + nan_g;
+                let total_h: f64 = bin_h[..nb].iter().sum::<f64>() + nan_h;
+                let mut best_gain = 0.0f64;
+                let mut best_bin = 0usize;
+                let mut best_nan_left = false;
 
                 let (mut gl, mut hl) = (0.0, 0.0);
                 for b in 0..nb.saturating_sub(1) {
@@ -133,6 +152,7 @@ impl HistPool {
                         best_gain,
                         best_nan_left,
                         best_bin,
+                        None,
                     ))
                 } else {
                     None

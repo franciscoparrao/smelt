@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use super::eval::{EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress};
 use super::hist_pool::HistPool;
-use super::histogram::{HistBins, NAN_BIN};
+use super::histogram::{HistBins, NAN_BIN, best_categorical_split};
 
 /// XGBoost learner (eXtreme Gradient Boosting).
 ///
@@ -176,6 +176,16 @@ pub enum XGBNode {
         left: Box<XGBNode>,
         right: Box<XGBNode>,
     },
+    /// Categorical split: the listed category codes go left; every other
+    /// code — including categories unseen during training — goes right.
+    CatSplit {
+        feature: usize,
+        /// Sorted category codes routed left.
+        left_cats: Vec<u16>,
+        nan_goes_left: bool,
+        left: Box<XGBNode>,
+        right: Box<XGBNode>,
+    },
 }
 
 impl XGBNode {
@@ -203,6 +213,25 @@ impl XGBNode {
                     right.predict_one(sample)
                 }
             }
+            XGBNode::CatSplit {
+                feature,
+                left_cats,
+                nan_goes_left,
+                left,
+                right,
+            } => {
+                let val = sample[*feature];
+                let goes_left = if val.is_nan() {
+                    *nan_goes_left
+                } else {
+                    left_cats.binary_search(&(val as u16)).is_ok()
+                };
+                if goes_left {
+                    left.predict_one(sample)
+                } else {
+                    right.predict_one(sample)
+                }
+            }
         }
     }
 }
@@ -215,6 +244,39 @@ struct BestSplit {
     gain: f64,
     nan_goes_left: bool,
     split_bin: usize,
+    /// `Some(sorted category codes going left)` for categorical splits.
+    left_cats: Option<Vec<u16>>,
+}
+
+impl BestSplit {
+    /// Does bin `b` (never `NAN_BIN`) route left under this split?
+    #[inline]
+    fn bin_goes_left(&self, b: u8) -> bool {
+        match &self.left_cats {
+            Some(cats) => cats.binary_search(&(b as u16)).is_ok(),
+            None => (b as usize) <= self.split_bin,
+        }
+    }
+
+    /// Build the split node for this best split with the given children.
+    fn into_node(self, left: XGBNode, right: XGBNode) -> XGBNode {
+        match self.left_cats {
+            Some(left_cats) => XGBNode::CatSplit {
+                feature: self.feature,
+                left_cats,
+                nan_goes_left: self.nan_goes_left,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+            None => XGBNode::Split {
+                feature: self.feature,
+                threshold: self.threshold,
+                nan_goes_left: self.nan_goes_left,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+        }
+    }
 }
 
 // ── XGBoost tree builder ────────────────────────────────────────────
@@ -298,12 +360,13 @@ impl<'a> XGBTreeBuilder<'a> {
                 self.alpha,
                 self.gamma,
             );
-            r.map(|(feat, thr, gain, nl, sb)| BestSplit {
+            r.map(|(feat, thr, gain, nl, sb, lc)| BestSplit {
                 feature: feat,
                 threshold: thr,
                 gain,
                 nan_goes_left: nl,
                 split_bin: sb,
+                left_cats: lc,
             })
         } else {
             // Original par_iter scan+find (fast!) — also capture histograms
@@ -321,24 +384,18 @@ impl<'a> XGBTreeBuilder<'a> {
                 };
             }
         };
-        let (feat, threshold, gain, nan_goes_left, split_bin) = (
-            best.feature,
-            best.threshold,
-            best.gain,
-            best.nan_goes_left,
-            best.split_bin,
-        );
+        let feat = best.feature;
 
-        self.feature_importances[feat] += gain;
+        self.feature_importances[feat] += best.gain;
 
         // Partition
         let (mut left_end, mut i) = (start, start);
         while i < end {
             let b = self.bins.get_bin(feat, indices[i]);
             let goes_left = if b == NAN_BIN {
-                nan_goes_left
+                best.nan_goes_left
             } else {
-                (b as usize) <= split_bin
+                best.bin_goes_left(b)
             };
             if goes_left {
                 indices.swap(left_end, i);
@@ -369,13 +426,7 @@ impl<'a> XGBTreeBuilder<'a> {
             let right = XGBNode::Leaf {
                 weight: self.leaf_weight_gh(rg, rh),
             };
-            return XGBNode::Split {
-                feature: feat,
-                threshold,
-                nan_goes_left,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            return best.into_node(left, right);
         }
 
         let left_count = left_end - start;
@@ -386,24 +437,12 @@ impl<'a> XGBTreeBuilder<'a> {
             let left = self.build_hist_sub(indices, start, left_end, depth + 1, false);
             self.pool.subtract_in_place(depth, depth + 1);
             let right = self.build_hist_sub(indices, left_end, end, depth + 1, true);
-            XGBNode::Split {
-                feature: feat,
-                threshold,
-                nan_goes_left,
-                left: Box::new(left),
-                right: Box::new(right),
-            }
+            best.into_node(left, right)
         } else {
             let right = self.build_hist_sub(indices, left_end, end, depth + 1, false);
             self.pool.subtract_in_place(depth, depth + 1);
             let left = self.build_hist_sub(indices, start, left_end, depth + 1, true);
-            XGBNode::Split {
-                feature: feat,
-                threshold,
-                nan_goes_left,
-                left: Box::new(left),
-                right: Box::new(right),
-            }
+            best.into_node(left, right)
         }
     }
 
@@ -435,10 +474,16 @@ impl<'a> XGBTreeBuilder<'a> {
         self.feature_importances[best.feature] += best.gain;
         let feat = best.feature;
         let (mut left_end, mut i) = (start, start);
-        let (thr, nan_left) = (best.threshold, best.nan_goes_left);
         while i < end {
             let v = self.features[[indices[i], feat]];
-            let goes_left = if v.is_nan() { nan_left } else { v < thr };
+            let goes_left = if v.is_nan() {
+                best.nan_goes_left
+            } else {
+                match &best.left_cats {
+                    Some(cats) => cats.binary_search(&(v as u16)).is_ok(),
+                    None => v < best.threshold,
+                }
+            };
             if goes_left {
                 indices.swap(left_end, i);
                 left_end += 1;
@@ -453,13 +498,7 @@ impl<'a> XGBTreeBuilder<'a> {
         }
         let left = self.build_exact(indices, start, left_end, depth + 1);
         let right = self.build_exact(indices, left_end, end, depth + 1);
-        XGBNode::Split {
-            feature: feat,
-            threshold: best.threshold,
-            nan_goes_left: best.nan_goes_left,
-            left: Box::new(left),
-            right: Box::new(right),
-        }
+        best.into_node(left, right)
     }
 
     /// Histogram split finding — parallel per feature, also returns per-feature
@@ -487,6 +526,26 @@ impl<'a> XGBTreeBuilder<'a> {
                         bin_g[b as usize] += self.grads[idx];
                         bin_h[b as usize] += self.hess[idx];
                     }
+                }
+
+                if self.bins.cat[feat].is_some() {
+                    let split = best_categorical_split(
+                        &bin_g,
+                        &bin_h,
+                        nan_g,
+                        nan_h,
+                        self.min_child_weight,
+                        |gl, hl, gr, hr| self.split_gain(gl, hl, gr, hr),
+                    )
+                    .map(|(left_cats, gain, nan_left)| BestSplit {
+                        feature: feat,
+                        threshold: f64::NAN,
+                        gain,
+                        nan_goes_left: nan_left,
+                        split_bin: 0,
+                        left_cats: Some(left_cats),
+                    });
+                    return (split, (bin_g, bin_h, nan_g, nan_h));
                 }
 
                 let total_g: f64 = bin_g.iter().sum::<f64>() + nan_g;
@@ -531,6 +590,7 @@ impl<'a> XGBTreeBuilder<'a> {
                     gain,
                     nan_goes_left: nan_left,
                     split_bin: bin,
+                    left_cats: None,
                 });
                 (split, (bin_g, bin_h, nan_g, nan_h))
             })
@@ -556,6 +616,40 @@ impl<'a> XGBTreeBuilder<'a> {
             .col_indices
             .par_iter()
             .map(|&feat| {
+                if let Some(nc) = self.bins.cat[feat] {
+                    // Categorical: aggregate g/h by code and Fisher-scan.
+                    let mut bin_g = vec![0.0; nc];
+                    let mut bin_h = vec![0.0; nc];
+                    let (mut nan_g, mut nan_h) = (0.0, 0.0);
+                    for &i in node_indices {
+                        let v = features[[i, feat]];
+                        if v.is_nan() {
+                            nan_g += self.grads[i];
+                            nan_h += self.hess[i];
+                        } else {
+                            let c = (v as usize).min(nc - 1);
+                            bin_g[c] += self.grads[i];
+                            bin_h[c] += self.hess[i];
+                        }
+                    }
+                    return best_categorical_split(
+                        &bin_g,
+                        &bin_h,
+                        nan_g,
+                        nan_h,
+                        self.min_child_weight,
+                        |gl, hl, gr, hr| self.split_gain(gl, hl, gr, hr),
+                    )
+                    .map(|(left_cats, gain, nan_left)| BestSplit {
+                        feature: feat,
+                        threshold: f64::NAN,
+                        gain,
+                        nan_goes_left: nan_left,
+                        split_bin: 0,
+                        left_cats: Some(left_cats),
+                    });
+                }
+
                 let mut sorted: Vec<usize> = node_indices
                     .iter()
                     .filter(|&&i| !features[[i, feat]].is_nan())
@@ -628,6 +722,7 @@ impl<'a> XGBTreeBuilder<'a> {
                     gain,
                     nan_goes_left: nan_left,
                     split_bin: 0,
+                    left_cats: None,
                 })
             })
             .collect();
@@ -848,7 +943,7 @@ impl Learner for XGBoost {
             }
         }
         let eval = validate_eval_regress(&self.eval_set, nf)?;
-        let bins = HistBins::build(features, self.n_bins);
+        let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         // Weighted mean as the initial prediction when sample weights are set.
         let initial = match &self.sample_weight {
             Some(w) => {
@@ -970,7 +1065,7 @@ impl XGBoost {
             }
         }
         let eval = validate_eval_classif(&self.eval_set, nf)?;
-        let bins = HistBins::build(features, self.n_bins);
+        let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         // Weighted positive-class fraction as the initial log-odds when
         // sample weights are set (same objective as XGBoost's base_score).
         let p_pos = match &self.sample_weight {
@@ -1093,7 +1188,7 @@ impl XGBoost {
             }
         }
         let eval = validate_eval_classif(&self.eval_set, nf)?;
-        let bins = HistBins::build(features, self.n_bins);
+        let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         // Weighted per-class frequency as the initial log-prior when sample
         // weights are set.
         let initial: Vec<f64> = match &self.sample_weight {
@@ -1197,6 +1292,132 @@ impl XGBoost {
             feature_names: task.feature_names().to_vec(),
             feature_importances: imp,
         }))
+    }
+}
+
+#[cfg(test)]
+mod cat_tests {
+    use super::*;
+    use ndarray::Array2;
+
+    /// y depends on the parity of a 7-code categorical feature: a single
+    /// numeric threshold can never separate {0,2,4,6} from {1,3,5}, but one
+    /// native categorical split can. With 3 depth-1 stumps the numeric model
+    /// must stay far from the target while the categorical one nails it.
+    fn parity_task(n: usize, categorical: bool) -> (RegressionTask, Array2<f64>, Vec<f64>) {
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            let code = (i % 7) as f64;
+            features[[i, 0]] = code;
+            target[i] = ((i % 7) % 2) as f64 * 10.0;
+        }
+        let task = RegressionTask::new("parity", features.clone(), target.clone()).unwrap();
+        let task = if categorical {
+            task.with_categorical_features(&[0]).unwrap()
+        } else {
+            task
+        };
+        (task, features, target)
+    }
+
+    fn rmse_of(model: &dyn TrainedModel, features: &Array2<f64>, target: &[f64]) -> f64 {
+        let Prediction::Regression { predicted, .. } = model.predict(features).unwrap() else {
+            unreachable!()
+        };
+        (predicted
+            .iter()
+            .zip(target)
+            .map(|(p, y)| (p - y).powi(2))
+            .sum::<f64>()
+            / target.len() as f64)
+            .sqrt()
+    }
+
+    fn stumps() -> XGBoost {
+        XGBoost::new()
+            .with_n_estimators(3)
+            .with_max_depth(1)
+            .with_learning_rate(1.0)
+            .with_lambda(1e-6)
+    }
+
+    /// Histogram mode: n > n_bins.
+    #[test]
+    fn categorical_split_beats_numeric_threshold_histogram_mode() {
+        let n = 700;
+        let (cat_task, features, target) = parity_task(n, true);
+        let (num_task, _, _) = parity_task(n, false);
+
+        let m_cat = stumps().train_regress(&cat_task).unwrap();
+        let m_num = stumps().train_regress(&num_task).unwrap();
+        let (rc, rn) = (rmse_of(&*m_cat, &features, &target), rmse_of(&*m_num, &features, &target));
+        assert!(rc < 1.0, "categorical split should fit parity exactly, got RMSE={rc}");
+        assert!(
+            rn > 2.0,
+            "numeric thresholds cannot fit parity with 3 stumps, got RMSE={rn}"
+        );
+    }
+
+    /// Exact mode: n <= n_bins routes through find_best_exact.
+    #[test]
+    fn categorical_split_works_in_exact_mode() {
+        let n = 140;
+        let (cat_task, features, target) = parity_task(n, true);
+        let m_cat = stumps().train_regress(&cat_task).unwrap();
+        let rc = rmse_of(&*m_cat, &features, &target);
+        assert!(rc < 1.0, "categorical split should fit parity in exact mode, got RMSE={rc}");
+    }
+
+    /// Unseen categories at prediction time route right (with the
+    /// not-explicitly-listed categories) and never panic.
+    #[test]
+    fn unseen_category_routes_safely() {
+        let (cat_task, ..) = parity_task(700, true);
+        let m = stumps().train_regress(&cat_task).unwrap();
+        let unseen = Array2::from_shape_vec((2, 1), vec![99.0, f64::NAN]).unwrap();
+        let Prediction::Regression { predicted, .. } = m.predict(&unseen).unwrap() else {
+            unreachable!()
+        };
+        assert!(predicted.iter().all(|p| p.is_finite()));
+        assert!(
+            (-1.0..=11.0).contains(&predicted[0]),
+            "unseen category prediction should stay in target range, got {}",
+            predicted[0]
+        );
+    }
+
+    /// Classification also uses the typed bins (multiclass exercises the
+    /// shared tree builder through a different train path).
+    #[test]
+    fn categorical_split_multiclass() {
+        let n = 600;
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0usize; n];
+        for i in 0..n {
+            features[[i, 0]] = (i % 6) as f64;
+            target[i] = (i % 6) % 3; // class = code mod 3, non-ordinal in code space
+        }
+        let task = ClassificationTask::new("cat_mc", features.clone(), target.clone())
+            .unwrap()
+            .with_categorical_features(&[0])
+            .unwrap();
+        let mut m = XGBoost::new()
+            .with_n_estimators(10)
+            .with_max_depth(2)
+            .with_learning_rate(0.5);
+        let model = m.train_classif(&task).unwrap();
+        let Prediction::Classification { predicted, .. } = model.predict(&features).unwrap()
+        else {
+            unreachable!()
+        };
+        let acc = predicted
+            .iter()
+            .zip(&target)
+            .filter(|(p, t)| p == t)
+            .count() as f64
+            / n as f64;
+        assert!(acc > 0.95, "categorical multiclass should be near-perfect, got acc={acc}");
     }
 }
 

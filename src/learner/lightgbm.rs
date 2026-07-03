@@ -26,7 +26,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::eval::{EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress};
-use super::histogram::{HistBins, NAN_BIN};
+use super::histogram::{HistBins, NAN_BIN, best_categorical_split};
 
 /// LightGBM-inspired leaf-wise GBM with GOSS sampling.
 ///
@@ -181,6 +181,16 @@ pub enum LGBNode {
         left: Box<LGBNode>,
         right: Box<LGBNode>,
     },
+    /// Categorical split: the listed category codes go left; every other
+    /// code — including categories unseen during training — goes right.
+    CatSplit {
+        feature: usize,
+        /// Sorted category codes routed left.
+        left_cats: Vec<u16>,
+        nan_left: bool,
+        left: Box<LGBNode>,
+        right: Box<LGBNode>,
+    },
 }
 
 impl LGBNode {
@@ -203,6 +213,25 @@ impl LGBNode {
                         right.predict_one(row)
                     }
                 } else if v < *threshold {
+                    left.predict_one(row)
+                } else {
+                    right.predict_one(row)
+                }
+            }
+            LGBNode::CatSplit {
+                feature,
+                left_cats,
+                nan_left,
+                left,
+                right,
+            } => {
+                let v = row[*feature];
+                let goes_left = if v.is_nan() {
+                    *nan_left
+                } else {
+                    left_cats.binary_search(&(v as u16)).is_ok()
+                };
+                if goes_left {
                     left.predict_one(row)
                 } else {
                     right.predict_one(row)
@@ -276,6 +305,19 @@ struct LeafCandidate {
     threshold: f64,
     nan_left: bool,
     split_bin: usize,
+    /// `Some(sorted category codes going left)` for categorical splits.
+    left_cats: Option<Vec<u16>>,
+}
+
+impl LeafCandidate {
+    /// Does bin `b` (never `NAN_BIN`) route left under this split?
+    #[inline]
+    fn bin_goes_left(&self, b: u8) -> bool {
+        match &self.left_cats {
+            Some(cats) => cats.binary_search(&(b as u16)).is_ok(),
+            None => (b as usize) <= self.split_bin,
+        }
+    }
 }
 
 /// Per-feature cached histogram: (bin_g, bin_h, nan_g, nan_h)
@@ -328,6 +370,29 @@ fn find_best_from_cache(
         .map(|(fi, &feat)| {
             let (bin_g, bin_h, nan_g, nan_h) = &cached[fi];
             let nb = bin_g.len();
+
+            if bins.cat[feat].is_some() {
+                return best_categorical_split(
+                    bin_g,
+                    bin_h,
+                    *nan_g,
+                    *nan_h,
+                    min_child_weight,
+                    |gl, hl, gr, hr| {
+                        0.5 * (gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
+                            - (gl + gr) * (gl + gr) / (hl + hr + lambda))
+                    },
+                )
+                .map(|(left_cats, gain, nan_left)| LeafCandidate {
+                    gain,
+                    feature: feat,
+                    threshold: f64::NAN,
+                    nan_left,
+                    split_bin: 0,
+                    left_cats: Some(left_cats),
+                });
+            }
+
             let total_g: f64 = bin_g.iter().sum::<f64>() + nan_g;
             let total_h: f64 = bin_h.iter().sum::<f64>() + nan_h;
             let mut best_gain = 0.0;
@@ -373,6 +438,7 @@ fn find_best_from_cache(
                 threshold: bins.boundaries[feat][bin],
                 nan_left,
                 split_bin: bin,
+                left_cats: None,
             })
         })
         .collect();
@@ -411,6 +477,7 @@ enum ArenaNode {
         feature: usize,
         threshold: f64,
         nan_left: bool,
+        left_cats: Option<Vec<u16>>,
         left: usize,
         right: usize,
     },
@@ -478,6 +545,7 @@ fn build_leaf_wise_tree(
             feature: split.feature,
             threshold: split.threshold,
             nan_left: split.nan_left,
+            left_cats: split.left_cats.clone(),
             left: usize::MAX,
             right: usize::MAX,
         };
@@ -494,7 +562,7 @@ fn build_leaf_wise_tree(
             let goes_left = if b == NAN_BIN {
                 split.nan_left
             } else {
-                (b as usize) <= split.split_bin
+                split.bin_goes_left(b)
             };
             if goes_left {
                 left_idx.push(idx);
@@ -555,13 +623,26 @@ fn build_leaf_wise_tree(
             ArenaNode::Leaf { indices, .. } => LGBNode::Leaf {
                 weight: leaf_weight(grads, hess, weights, &indices, lambda),
             },
-            ArenaNode::Split { feature, threshold, nan_left, left, right } => LGBNode::Split {
-                feature,
-                threshold,
-                nan_left,
-                left: Box::new(to_lgb_node(arena, left, grads, hess, weights, lambda)),
-                right: Box::new(to_lgb_node(arena, right, grads, hess, weights, lambda)),
-            },
+            ArenaNode::Split { feature, threshold, nan_left, left_cats, left, right } => {
+                let l = Box::new(to_lgb_node(arena, left, grads, hess, weights, lambda));
+                let r = Box::new(to_lgb_node(arena, right, grads, hess, weights, lambda));
+                match left_cats {
+                    Some(left_cats) => LGBNode::CatSplit {
+                        feature,
+                        left_cats,
+                        nan_left,
+                        left: l,
+                        right: r,
+                    },
+                    None => LGBNode::Split {
+                        feature,
+                        threshold,
+                        nan_left,
+                        left: l,
+                        right: r,
+                    },
+                }
+            }
         }
     }
     let mut arena_opt: Vec<Option<ArenaNode>> = arena.into_iter().map(Some).collect();
@@ -723,7 +804,7 @@ impl Learner for LightGBM {
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
         let eval = validate_eval_regress(&self.eval_set, nf)?;
-        let bins = HistBins::build(features, self.n_bins);
+        let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         let initial = target.iter().sum::<f64>() / ns as f64;
         let mut preds = vec![initial; ns];
         let mut eval_preds = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
@@ -804,7 +885,7 @@ impl LightGBM {
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
         let eval = validate_eval_classif(&self.eval_set, nf)?;
-        let bins = HistBins::build(features, self.n_bins);
+        let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         let p_pos = target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64;
         let initial = (p_pos / (1.0 - p_pos).max(1e-15)).ln();
         let mut fv = vec![initial; ns];
@@ -885,7 +966,7 @@ impl LightGBM {
         let target = task.target();
         let (ns, nf, nc) = (task.n_samples(), task.n_features(), task.n_classes());
         let eval = validate_eval_classif(&self.eval_set, nf)?;
-        let bins = HistBins::build(features, self.n_bins);
+        let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         let mut cc = vec![0usize; nc];
         for &t in target {
             cc[t] += 1;
@@ -1063,6 +1144,59 @@ mod tests {
         }
     }
 
+    /// y depends on the parity of a 7-code categorical feature: one numeric
+    /// threshold cannot separate {0,2,4,6} from {1,3,5}, one native
+    /// categorical split can. Trees restricted to a single split
+    /// (num_leaves=2) discriminate the two mechanisms.
+    #[test]
+    fn categorical_split_beats_numeric_threshold() {
+        let n = 700;
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            features[[i, 0]] = (i % 7) as f64;
+            target[i] = ((i % 7) % 2) as f64 * 10.0;
+        }
+        let num_task = RegressionTask::new("parity", features.clone(), target.clone()).unwrap();
+        let cat_task = RegressionTask::new("parity", features.clone(), target.clone())
+            .unwrap()
+            .with_categorical_features(&[0])
+            .unwrap();
+
+        let stumps = || {
+            LightGBM::new()
+                .with_n_estimators(3)
+                .with_num_leaves(2)
+                .with_learning_rate(1.0)
+                .with_top_rate(1.0)
+                .with_other_rate(0.0)
+        };
+        let rmse = |m: &dyn TrainedModel| {
+            let Prediction::Regression { predicted, .. } = m.predict(&features).unwrap() else {
+                unreachable!()
+            };
+            (predicted.iter().zip(&target).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+                / n as f64)
+                .sqrt()
+        };
+
+        let m_cat = stumps().train_regress(&cat_task).unwrap();
+        let m_num = stumps().train_regress(&num_task).unwrap();
+        assert!(rmse(&*m_cat) < 1.0, "categorical split should fit parity, got {}", rmse(&*m_cat));
+        assert!(
+            rmse(&*m_num) > 2.0,
+            "numeric thresholds cannot fit parity with 3 single-split trees, got {}",
+            rmse(&*m_num)
+        );
+
+        // Unseen category and NaN at prediction time route safely.
+        let unseen = Array2::from_shape_vec((2, 1), vec![42.0, f64::NAN]).unwrap();
+        let Prediction::Regression { predicted, .. } = m_cat.predict(&unseen).unwrap() else {
+            unreachable!()
+        };
+        assert!(predicted.iter().all(|p| p.is_finite()));
+    }
+
     /// Eval-set early stopping must stop at the best held-out round on an
     /// overfittable config, generalizing better than train-loss monitoring
     /// (which almost never fires under boosting). GOSS is disabled
@@ -1129,7 +1263,9 @@ mod tests {
     fn count_leaves(node: &LGBNode) -> usize {
         match node {
             LGBNode::Leaf { .. } => 1,
-            LGBNode::Split { left, right, .. } => count_leaves(left) + count_leaves(right),
+            LGBNode::Split { left, right, .. } | LGBNode::CatSplit { left, right, .. } => {
+                count_leaves(left) + count_leaves(right)
+            }
         }
     }
 
