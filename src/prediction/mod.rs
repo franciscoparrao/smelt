@@ -16,6 +16,15 @@ pub enum Prediction {
         predicted: Vec<f64>,
         truth: Option<Vec<f64>>,
     },
+    /// Estimated per-unit treatment effect (CATE), from a causal
+    /// meta-learner (`TLearner`/`SLearner`/`XLearner`/`RLearner`/
+    /// `DrLearner`) or `CausalForest`. `true_effect` is only ever `Some`
+    /// for synthetic benchmarks with a known ground-truth `tau(x)` --
+    /// real data never has this, so it's what `Pehe`/`AteBias` require.
+    CausalEffect {
+        estimated: Vec<f64>,
+        true_effect: Option<Vec<f64>>,
+    },
 }
 
 impl Prediction {
@@ -74,10 +83,35 @@ impl Prediction {
         }
     }
 
+    pub fn causal_effect(estimated: Vec<f64>) -> Self {
+        Self::CausalEffect {
+            estimated,
+            true_effect: None,
+        }
+    }
+
+    pub fn causal_effect_with_truth(estimated: Vec<f64>, true_effect: Vec<f64>) -> Self {
+        Self::CausalEffect {
+            estimated,
+            true_effect: Some(true_effect),
+        }
+    }
+
+    pub fn with_truth_causal(self, true_effect: Vec<f64>) -> Self {
+        match self {
+            Self::CausalEffect { estimated, .. } => Self::CausalEffect {
+                estimated,
+                true_effect: Some(true_effect),
+            },
+            other => other,
+        }
+    }
+
     pub fn n_samples(&self) -> usize {
         match self {
             Self::Classification { predicted, .. } => predicted.len(),
             Self::Regression { predicted, .. } => predicted.len(),
+            Self::CausalEffect { estimated, .. } => estimated.len(),
         }
     }
 }

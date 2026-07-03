@@ -23,6 +23,8 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
 
+pub mod meta_learners;
+
 /// Estimated causal effect for a single observation.
 #[derive(Debug, Clone)]
 pub struct CausalEffect {

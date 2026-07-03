@@ -65,6 +65,10 @@ pub use error::{Result, SmeltError};
 /// Convenience re-exports for `use smelt_ml::prelude::*`
 pub mod prelude {
     pub use crate::benchmark::{self, BenchmarkResult};
+    pub use crate::causal::{
+        CausalEffect, CausalForest, CausalForestResult,
+        meta_learners::{DrLearner, RLearner, SLearner, TLearner, XLearner},
+    };
     pub use crate::cluster::{ClusterResult, DBSCAN, IsolationForest, KMeans};
     pub use crate::data::CsvLoader;
     #[cfg(feature = "parquet")]
@@ -82,8 +86,8 @@ pub mod prelude {
         learner_from_id, registered_learner_ids,
     };
     pub use crate::measure::{
-        Accuracy, AucRoc, BalancedAccuracy, Brier, CohensKappa, F1Score, LogLoss, Mae, Mape, Mcc,
-        Measure, Precision, RSquared, Recall, Rmse,
+        Accuracy, AteBias, AucRoc, BalancedAccuracy, Brier, CohensKappa, F1Score, LogLoss, Mae,
+        Mape, Mcc, Measure, Pehe, Precision, RSquared, Recall, Rmse,
     };
     pub use crate::prediction::Prediction;
     pub use crate::preprocess::{

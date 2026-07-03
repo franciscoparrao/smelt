@@ -46,13 +46,16 @@ src/
 │                   # SMOTE, Adasyn, PCA, FilterSelector, RFE, Pipeline
 ├── tuning/         # GridSearch, RandomSearch, BayesianOptimizer, Hyperband
 ├── cluster/        # KMeans, DBSCAN, IsolationForest
-├── causal/         # CausalForest (honest splitting, CATE/ATE, jackknife SE)
+├── causal/         # CausalForest (honest splitting, CATE/ATE, jackknife SE);
+│                   # causal/meta_learners/: T/S/X/R/DR-learner (Künzel et al.
+│                   # 2019, Nie & Wager 2021, Kennedy 2020), composing ordinary
+│                   # Learners via Bagging/Stacking-style factory closures
 ├── conformal/      # ConformalRegressor/Classifier, CQR
 ├── survival/       # RandomSurvivalForest
 ├── importance/     # permutation importance, permutation-SHAP
 ├── multilabel/, multioutput/  # ClassifierChain, RegressorChain
 ├── stats.rs        # Wilcoxon, sign test, Friedman, Nemenyi, McNemar, bootstrap CI
-├── data/           # CsvLoader
+├── data/           # CsvLoader; ParquetLoader behind the `parquet` feature
 ├── serialize.rs    # SerializableModel (JSON, versioned envelope)
 ├── benchmark.rs, benchmark_design.rs  # resample+measure loop, multi-learner tables
 └── validate.rs     # dimension/NaN checks shared across public entry points
@@ -135,6 +138,34 @@ competitiva" in progress):
       sparse matrix type; needs a `Task` design decision (e.g. CSR variant)
 - [ ] `README.md`/this file kept current as features land (this section itself
       was stale for a long time — reconciled 2026-07-02)
+
+### Causal meta-learners (2026-07-03, not part of Fase 3)
+
+Separate initiative — the user asked for "SOTA algorithms" without
+specifying domain; after evaluating causal meta-learners, a GeoXGBoost/MGWR
+extension (rejected: needs discussion with paper collaborator George
+Grekousis first, not a unilateral design), audit-gap closures (DART/EFB/
+ordered boosting — 2017-18 techniques, not "SOTA" strictly), and tabular
+deep learning (foundational blocker, no autodiff infra exists), causal
+meta-learners was chosen. See `docs/causal_meta_learners_2026-07-03.md` for
+the full design rationale.
+
+- [x] T/S/X/R/DR-learner (`src/causal/meta_learners/`) — standalone
+      `estimate(features, treatment, outcome)` API (matches `CausalForest`'s
+      precedent, not a `Learner` impl — a 3-input estimator doesn't fit
+      `Learner::train_regress(&RegressionTask)`'s `(X,y)` shape). Composes
+      ordinary `Learner`s via the same `Fn() -> Box<dyn Learner> + Send +
+      Sync` factory pattern `Bagging`/`Stacking` use. R-learner/DR-learner
+      share K-fold cross-fitting helpers (`meta_learners/cross_fit.rs`,
+      built on `CrossValidation::splits`). New `Prediction::CausalEffect`
+      variant + `Pehe`/`AteBias` measures for evaluating against synthetic
+      ground-truth CATE. 95 lib tests + 66 doctests green (up from 74/61).
+- [ ] Python bindings (`smelt-py`) for the meta-learners — deliberately out
+      of scope; would need hand-written `#[pymethods]` + `declare_params!`
+      (not `define_learner!`, which assumes the `(X,y)` shape)
+- [ ] Generic per-sample-weight support on `Learner`/`RegressionTask` —
+      would let R-learner use the paper's weighted R-loss instead of the
+      documented unweighted simplification; cross-cutting, out of scope
 
 ## Dependencies
 

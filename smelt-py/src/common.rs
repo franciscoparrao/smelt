@@ -143,6 +143,7 @@ pub(crate) fn predict_values<'py>(
             predicted.iter().map(|&p| p as f64).collect()
         }
         Prediction::Regression { predicted, .. } => predicted.clone(),
+        Prediction::CausalEffect { estimated, .. } => estimated.clone(),
     };
     Ok(PyArray1::from_vec(py, values))
 }

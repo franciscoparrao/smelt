@@ -667,3 +667,72 @@ impl Measure for Mape {
         }
     }
 }
+
+/// Precision in Estimation of Heterogeneous Effects (Hill 2011; the
+/// standard evaluation metric for CATE/treatment-effect estimators, see
+/// e.g. Shalit, Johansson & Sontag 2017). `sqrt(mean squared error)`
+/// between estimated and *true* `tau(x)`. Only computable when ground
+/// truth is known -- i.e. synthetic benchmarks, never real observational
+/// or experimental data (which never reveals both potential outcomes for
+/// the same unit).
+pub struct Pehe;
+
+impl Measure for Pehe {
+    fn id(&self) -> &str {
+        "causal.pehe"
+    }
+    fn maximize(&self) -> bool {
+        false
+    }
+
+    fn score(&self, prediction: &Prediction) -> Result<f64> {
+        match prediction {
+            Prediction::CausalEffect {
+                estimated,
+                true_effect: Some(truth),
+            } => {
+                let mse: f64 = estimated
+                    .iter()
+                    .zip(truth)
+                    .map(|(e, t)| (e - t).powi(2))
+                    .sum::<f64>()
+                    / estimated.len() as f64;
+                Ok(mse.sqrt())
+            }
+            _ => Err(SmeltError::Other(
+                "PEHE requires a CausalEffect prediction with known ground truth".into(),
+            )),
+        }
+    }
+}
+
+/// Absolute bias of the estimated ATE (mean of per-unit CATE estimates)
+/// against the known true ATE. Companion to [`Pehe`] -- PEHE measures
+/// per-unit precision, this measures aggregate bias; a method can have low
+/// ATE bias while still having poor per-unit PEHE if errors cancel out.
+pub struct AteBias;
+
+impl Measure for AteBias {
+    fn id(&self) -> &str {
+        "causal.ate_bias"
+    }
+    fn maximize(&self) -> bool {
+        false
+    }
+
+    fn score(&self, prediction: &Prediction) -> Result<f64> {
+        match prediction {
+            Prediction::CausalEffect {
+                estimated,
+                true_effect: Some(truth),
+            } => {
+                let est_ate = estimated.iter().sum::<f64>() / estimated.len() as f64;
+                let true_ate = truth.iter().sum::<f64>() / truth.len() as f64;
+                Ok((est_ate - true_ate).abs())
+            }
+            _ => Err(SmeltError::Other(
+                "AteBias requires a CausalEffect prediction with known ground truth".into(),
+            )),
+        }
+    }
+}
