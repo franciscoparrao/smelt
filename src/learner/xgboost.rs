@@ -64,6 +64,10 @@ pub struct XGBoost {
     /// early stopping rarely plateaus and almost never actually fires — it isn't
     /// a substitute for evaluating on unseen data.
     eval_set: EvalSet,
+    /// Optional per-feature monotone constraints (+1 increasing, -1 decreasing,
+    /// 0 unconstrained). Splits violating the direction are rejected and leaf
+    /// weights are clamped to propagated bounds, as in official XGBoost.
+    monotone_constraints: Option<Vec<i8>>,
 }
 
 impl Default for XGBoost {
@@ -83,6 +87,7 @@ impl Default for XGBoost {
             seed: 42,
             sample_weight: None,
             eval_set: None,
+            monotone_constraints: None,
         }
     }
 }
@@ -139,6 +144,14 @@ impl XGBoost {
     /// number of training samples; each gradient/hessian is scaled by its weight.
     pub fn with_sample_weights(mut self, w: Vec<f64>) -> Self {
         self.sample_weight = Some(w);
+        self
+    }
+    /// Per-feature monotone constraints: +1 forces the prediction to be
+    /// non-decreasing in that feature, -1 non-increasing, 0 unconstrained.
+    /// Length must match the number of features; applies to numeric features
+    /// (categorical splits ignore it).
+    pub fn with_monotone_constraints(mut self, c: Vec<i8>) -> Self {
+        self.monotone_constraints = Some(c);
         self
     }
     /// Set a held-out set that `early_stopping_rounds` evaluates on, for
@@ -295,6 +308,10 @@ struct XGBTreeBuilder<'a> {
     use_exact: bool,
     feature_importances: Vec<f64>,
     pool: HistPool,
+    /// Per-feature monotone constraints (+1 increasing, -1 decreasing,
+    /// 0 none). Empty slice = unconstrained. Applies to numeric features;
+    /// categorical splits ignore it (monotonicity is meaningless on codes).
+    constraints: &'a [i8],
 }
 
 impl<'a> XGBTreeBuilder<'a> {
@@ -310,11 +327,58 @@ impl<'a> XGBTreeBuilder<'a> {
         -gt / (h + self.lambda)
     }
 
+    /// Leaf weight clamped to the node's monotone bounds.
+    #[inline]
+    fn bounded_leaf(&self, g: f64, h: f64, lo: f64, hi: f64) -> f64 {
+        self.leaf_weight_gh(g, h).clamp(lo, hi)
+    }
+
     #[inline]
     fn split_gain(&self, gl: f64, hl: f64, gr: f64, hr: f64) -> f64 {
         0.5 * (gl * gl / (hl + self.lambda) + gr * gr / (hr + self.lambda)
             - (gl + gr) * (gl + gr) / (hl + hr + self.lambda))
             - self.gamma
+    }
+
+    /// True when splitting `feat` with these child stats would violate its
+    /// monotone constraint (standard XGBoost check: compare child weights).
+    #[inline]
+    fn violates_monotone(&self, feat: usize, gl: f64, hl: f64, gr: f64, hr: f64) -> bool {
+        let c = self.constraints.get(feat).copied().unwrap_or(0);
+        if c == 0 {
+            return false;
+        }
+        let wl = self.leaf_weight_gh(gl, hl);
+        let wr = self.leaf_weight_gh(gr, hr);
+        if c > 0 { wl > wr } else { wl < wr }
+    }
+
+    /// Bounds for the children of a node split on `feat` given the child
+    /// gradient/hessian sums: unconstrained features pass the parent bounds
+    /// through; constrained features cap the increasing side at the midpoint
+    /// of the (clamped) child weights, as in official XGBoost.
+    fn child_bounds_gh(
+        &self,
+        feat: usize,
+        lo: f64,
+        hi: f64,
+        lg: f64,
+        lh: f64,
+        rg: f64,
+        rh: f64,
+    ) -> ((f64, f64), (f64, f64)) {
+        let c = self.constraints.get(feat).copied().unwrap_or(0);
+        if c == 0 {
+            return ((lo, hi), (lo, hi));
+        }
+        let wl = self.bounded_leaf(lg, lh, lo, hi);
+        let wr = self.bounded_leaf(rg, rh, lo, hi);
+        let mid = (wl + wr) / 2.0;
+        if c > 0 {
+            ((lo, hi.min(mid)), (lo.max(mid), hi))
+        } else {
+            ((lo.max(mid), hi), (lo, hi.min(mid)))
+        }
     }
 
     fn build(
@@ -323,15 +387,18 @@ impl<'a> XGBTreeBuilder<'a> {
         start: usize,
         end: usize,
         depth: usize,
+        lo: f64,
+        hi: f64,
     ) -> XGBNode {
         if self.use_exact {
-            return self.build_exact(indices, start, end, depth);
+            return self.build_exact(indices, start, end, depth, lo, hi);
         }
-        self.build_hist_sub(indices, start, end, depth, false)
+        self.build_hist_sub(indices, start, end, depth, false, lo, hi)
     }
 
     /// Build with histogram subtraction.
     /// `hist_ready`: pool[depth] already populated from subtraction (skip scan).
+    #[allow(clippy::too_many_arguments)]
     fn build_hist_sub(
         &mut self,
         indices: &mut Vec<usize>,
@@ -339,13 +406,15 @@ impl<'a> XGBTreeBuilder<'a> {
         end: usize,
         depth: usize,
         hist_ready: bool,
+        lo: f64,
+        hi: f64,
     ) -> XGBNode {
         let n = end - start;
         let h_sum: f64 = indices[start..end].iter().map(|&i| self.hess[i]).sum();
         if depth >= self.max_depth || n <= 1 || h_sum < self.min_child_weight {
             let g_sum: f64 = indices[start..end].iter().map(|&i| self.grads[i]).sum();
             return XGBNode::Leaf {
-                weight: self.leaf_weight_gh(g_sum, h_sum),
+                weight: self.bounded_leaf(g_sum, h_sum, lo, hi),
             };
         }
 
@@ -359,6 +428,7 @@ impl<'a> XGBTreeBuilder<'a> {
                 self.lambda,
                 self.alpha,
                 self.gamma,
+                self.constraints,
             );
             r.map(|(feat, thr, gain, nl, sb, lc)| BestSplit {
                 feature: feat,
@@ -380,7 +450,7 @@ impl<'a> XGBTreeBuilder<'a> {
             _ => {
                 let g_sum: f64 = indices[start..end].iter().map(|&i| self.grads[i]).sum();
                 return XGBNode::Leaf {
-                    weight: self.leaf_weight_gh(g_sum, h_sum),
+                    weight: self.bounded_leaf(g_sum, h_sum, lo, hi),
                 };
             }
         };
@@ -407,24 +477,34 @@ impl<'a> XGBTreeBuilder<'a> {
         if left_end == start || left_end == end {
             let g_sum: f64 = indices[start..end].iter().map(|&i| self.grads[i]).sum();
             return XGBNode::Leaf {
-                weight: self.leaf_weight_gh(g_sum, h_sum),
+                weight: self.bounded_leaf(g_sum, h_sum, lo, hi),
             };
         }
 
-        if depth + 1 >= self.max_depth {
-            // Children are leaves — skip histogram work
-            let lg: f64 = indices[start..left_end]
-                .iter()
-                .map(|&i| self.grads[i])
-                .sum();
+        let constrained = self.constraints.get(feat).copied().unwrap_or(0) != 0;
+        let children_are_leaves = depth + 1 >= self.max_depth;
+
+        // Child g/h sums are only needed for leaf weights or monotone bounds —
+        // skip the four O(n) passes on the common unconstrained inner node.
+        let ((llo, lhi), (rlo, rhi), gh) = if constrained || children_are_leaves {
+            let lg: f64 = indices[start..left_end].iter().map(|&i| self.grads[i]).sum();
             let lh: f64 = indices[start..left_end].iter().map(|&i| self.hess[i]).sum();
             let rg: f64 = indices[left_end..end].iter().map(|&i| self.grads[i]).sum();
             let rh: f64 = indices[left_end..end].iter().map(|&i| self.hess[i]).sum();
+            let (lb, rb) = self.child_bounds_gh(feat, lo, hi, lg, lh, rg, rh);
+            (lb, rb, Some((lg, lh, rg, rh)))
+        } else {
+            ((lo, hi), (lo, hi), None)
+        };
+
+        if children_are_leaves {
+            // Children are leaves — skip histogram work
+            let (lg, lh, rg, rh) = gh.expect("gh computed when children are leaves");
             let left = XGBNode::Leaf {
-                weight: self.leaf_weight_gh(lg, lh),
+                weight: self.bounded_leaf(lg, lh, llo, lhi),
             };
             let right = XGBNode::Leaf {
-                weight: self.leaf_weight_gh(rg, rh),
+                weight: self.bounded_leaf(rg, rh, rlo, rhi),
             };
             return best.into_node(left, right);
         }
@@ -434,32 +514,34 @@ impl<'a> XGBTreeBuilder<'a> {
 
         // Subtraction: scan+save SMALLER, process, subtract → LARGER (skip scan)
         if left_count <= right_count {
-            let left = self.build_hist_sub(indices, start, left_end, depth + 1, false);
+            let left = self.build_hist_sub(indices, start, left_end, depth + 1, false, llo, lhi);
             self.pool.subtract_in_place(depth, depth + 1);
-            let right = self.build_hist_sub(indices, left_end, end, depth + 1, true);
+            let right = self.build_hist_sub(indices, left_end, end, depth + 1, true, rlo, rhi);
             best.into_node(left, right)
         } else {
-            let right = self.build_hist_sub(indices, left_end, end, depth + 1, false);
+            let right = self.build_hist_sub(indices, left_end, end, depth + 1, false, rlo, rhi);
             self.pool.subtract_in_place(depth, depth + 1);
-            let left = self.build_hist_sub(indices, start, left_end, depth + 1, true);
+            let left = self.build_hist_sub(indices, start, left_end, depth + 1, true, llo, lhi);
             best.into_node(left, right)
         }
     }
 
-    /// Exact greedy build (unchanged).
+    /// Exact greedy build.
     fn build_exact(
         &mut self,
         indices: &mut Vec<usize>,
         start: usize,
         end: usize,
         depth: usize,
+        lo: f64,
+        hi: f64,
     ) -> XGBNode {
         let n = end - start;
         let h_sum: f64 = indices[start..end].iter().map(|&i| self.hess[i]).sum();
         if depth >= self.max_depth || n <= 1 || h_sum < self.min_child_weight {
             let g_sum: f64 = indices[start..end].iter().map(|&i| self.grads[i]).sum();
             return XGBNode::Leaf {
-                weight: self.leaf_weight_gh(g_sum, h_sum),
+                weight: self.bounded_leaf(g_sum, h_sum, lo, hi),
             };
         }
         let best = match self.find_best_exact(&indices[start..end]) {
@@ -467,7 +549,7 @@ impl<'a> XGBTreeBuilder<'a> {
             _ => {
                 let g_sum: f64 = indices[start..end].iter().map(|&i| self.grads[i]).sum();
                 return XGBNode::Leaf {
-                    weight: self.leaf_weight_gh(g_sum, h_sum),
+                    weight: self.bounded_leaf(g_sum, h_sum, lo, hi),
                 };
             }
         };
@@ -493,11 +575,21 @@ impl<'a> XGBTreeBuilder<'a> {
         if left_end == start || left_end == end {
             let g_sum: f64 = indices[start..end].iter().map(|&i| self.grads[i]).sum();
             return XGBNode::Leaf {
-                weight: self.leaf_weight_gh(g_sum, h_sum),
+                weight: self.bounded_leaf(g_sum, h_sum, lo, hi),
             };
         }
-        let left = self.build_exact(indices, start, left_end, depth + 1);
-        let right = self.build_exact(indices, left_end, end, depth + 1);
+        let ((llo, lhi), (rlo, rhi)) =
+            if self.constraints.get(feat).copied().unwrap_or(0) != 0 {
+                let lg: f64 = indices[start..left_end].iter().map(|&i| self.grads[i]).sum();
+                let lh: f64 = indices[start..left_end].iter().map(|&i| self.hess[i]).sum();
+                let rg: f64 = indices[left_end..end].iter().map(|&i| self.grads[i]).sum();
+                let rh: f64 = indices[left_end..end].iter().map(|&i| self.hess[i]).sum();
+                self.child_bounds_gh(feat, lo, hi, lg, lh, rg, rh)
+            } else {
+                ((lo, hi), (lo, hi))
+            };
+        let left = self.build_exact(indices, start, left_end, depth + 1, llo, lhi);
+        let right = self.build_exact(indices, left_end, end, depth + 1, rlo, rhi);
         best.into_node(left, right)
     }
 
@@ -561,6 +653,9 @@ impl<'a> XGBTreeBuilder<'a> {
                     if hl < self.min_child_weight || hr < self.min_child_weight {
                         continue;
                     }
+                    if self.violates_monotone(feat, gl, hl, gr, hr) {
+                        continue;
+                    }
                     let gain = self.split_gain(gl, hl, gr, hr);
                     if gain > best_gain {
                         best_gain = gain;
@@ -574,6 +669,9 @@ impl<'a> XGBTreeBuilder<'a> {
                         hl += bin_h[bin];
                         let (gr, hr) = (total_g - gl, total_h - hl);
                         if hl < self.min_child_weight || hr < self.min_child_weight {
+                            continue;
+                        }
+                        if self.violates_monotone(feat, gl, hl, gr, hr) {
                             continue;
                         }
                         let gain = self.split_gain(gl, hl, gr, hr);
@@ -691,7 +789,10 @@ impl<'a> XGBTreeBuilder<'a> {
                         continue;
                     }
                     let (gr, hr) = (total_g - gl, total_h - hl);
-                    if hl >= self.min_child_weight && hr >= self.min_child_weight {
+                    if hl >= self.min_child_weight
+                        && hr >= self.min_child_weight
+                        && !self.violates_monotone(feat, gl, hl, gr, hr)
+                    {
                         let gain = self.split_gain(gl, hl, gr, hr);
                         if gain > best_gain {
                             best_gain = gain;
@@ -703,7 +804,10 @@ impl<'a> XGBTreeBuilder<'a> {
                     if nan_h > 0.0 {
                         let (gln, hln) = (gl + nan_g, hl + nan_h);
                         let (grn, hrn) = (total_g - gln, total_h - hln);
-                        if hln >= self.min_child_weight && hrn >= self.min_child_weight {
+                        if hln >= self.min_child_weight
+                            && hrn >= self.min_child_weight
+                            && !self.violates_monotone(feat, gln, hln, grn, hrn)
+                        {
                             let gain = self.split_gain(gln, hln, grn, hrn);
                             if gain > best_gain {
                                 best_gain = gain;
@@ -918,9 +1022,29 @@ impl XGBoost {
             use_exact,
             feature_importances: vec![0.0; n_features],
             pool: HistPool::new(self.max_depth, n_col, max_bins),
+            constraints: self.monotone_constraints.as_deref().unwrap_or(&[]),
         };
-        let tree = builder.build(indices, 0, n, 0);
+        let tree = builder.build(indices, 0, n, 0, f64::NEG_INFINITY, f64::INFINITY);
         (tree, builder.feature_importances)
+    }
+
+    /// Validate `monotone_constraints` against the task's feature count and
+    /// values (+1/-1/0 only).
+    fn validate_constraints(&self, n_features: usize) -> Result<()> {
+        if let Some(c) = &self.monotone_constraints {
+            if c.len() != n_features {
+                return Err(SmeltError::DimensionMismatch {
+                    expected: n_features,
+                    got: c.len(),
+                });
+            }
+            if c.iter().any(|&v| !(-1..=1).contains(&v)) {
+                return Err(SmeltError::InvalidParameter(
+                    "monotone constraints must be -1, 0, or +1".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 
 }
@@ -943,6 +1067,7 @@ impl Learner for XGBoost {
             }
         }
         let eval = validate_eval_regress(&self.eval_set, nf)?;
+        self.validate_constraints(nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         // Weighted mean as the initial prediction when sample weights are set.
         let initial = match &self.sample_weight {
@@ -1065,6 +1190,7 @@ impl XGBoost {
             }
         }
         let eval = validate_eval_classif(&self.eval_set, nf)?;
+        self.validate_constraints(nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         // Weighted positive-class fraction as the initial log-odds when
         // sample weights are set (same objective as XGBoost's base_score).
@@ -1188,6 +1314,7 @@ impl XGBoost {
             }
         }
         let eval = validate_eval_classif(&self.eval_set, nf)?;
+        self.validate_constraints(nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         // Weighted per-class frequency as the initial log-prior when sample
         // weights are set.
@@ -1418,6 +1545,124 @@ mod cat_tests {
             .count() as f64
             / n as f64;
         assert!(acc > 0.95, "categorical multiclass should be near-perfect, got acc={acc}");
+    }
+}
+
+#[cfg(test)]
+mod monotone_tests {
+    use super::*;
+    use ndarray::Array2;
+
+    /// y grows with x except for a strong dip in the middle. Unconstrained
+    /// boosting fits the dip (predictions decrease somewhere); a +1 monotone
+    /// constraint must yield non-decreasing predictions over the whole range.
+    fn dip_task(n: usize) -> (RegressionTask, Array2<f64>) {
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            let x = i as f64 / n as f64 * 100.0;
+            features[[i, 0]] = x;
+            target[i] = if (40.0..60.0).contains(&x) { x - 30.0 } else { x };
+        }
+        let task = RegressionTask::new("dip", features.clone(), target).unwrap();
+        (task, features)
+    }
+
+    fn predictions_sorted_by_x(model: &dyn TrainedModel, features: &Array2<f64>) -> Vec<f64> {
+        let Prediction::Regression { predicted, .. } = model.predict(features).unwrap() else {
+            unreachable!()
+        };
+        predicted // features are already sorted by x in dip_task
+    }
+
+    fn max_decrease(preds: &[f64]) -> f64 {
+        preds
+            .windows(2)
+            .map(|w| w[0] - w[1])
+            .fold(0.0f64, f64::max)
+    }
+
+    #[test]
+    fn increasing_constraint_enforces_monotone_predictions_histogram_mode() {
+        let (task, features) = dip_task(700); // > n_bins → histogram path
+        let config = || {
+            XGBoost::new()
+                .with_n_estimators(50)
+                .with_max_depth(4)
+                .with_learning_rate(0.3)
+        };
+
+        let m_free = config().train_regress(&task).unwrap();
+        let free = predictions_sorted_by_x(&*m_free, &features);
+        assert!(
+            max_decrease(&free) > 1.0,
+            "unconstrained model should fit the dip (otherwise this test proves nothing), \
+             max decrease = {}",
+            max_decrease(&free)
+        );
+
+        let m_mono = config()
+            .with_monotone_constraints(vec![1])
+            .train_regress(&task)
+            .unwrap();
+        let mono = predictions_sorted_by_x(&*m_mono, &features);
+        assert!(
+            max_decrease(&mono) < 1e-9,
+            "+1-constrained predictions must be non-decreasing in x, max decrease = {}",
+            max_decrease(&mono)
+        );
+    }
+
+    #[test]
+    fn increasing_constraint_enforces_monotone_predictions_exact_mode() {
+        let (task, features) = dip_task(150); // <= n_bins → exact path
+        let mut m = XGBoost::new()
+            .with_n_estimators(50)
+            .with_max_depth(4)
+            .with_learning_rate(0.3)
+            .with_monotone_constraints(vec![1]);
+        let mono = predictions_sorted_by_x(&*m.train_regress(&task).unwrap(), &features);
+        assert!(
+            max_decrease(&mono) < 1e-9,
+            "+1-constrained predictions must be non-decreasing in exact mode, max decrease = {}",
+            max_decrease(&mono)
+        );
+    }
+
+    #[test]
+    fn decreasing_constraint_enforces_non_increasing_predictions() {
+        // Mirror of the dip task: y falls with x except a bump.
+        let n = 700;
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            let x = i as f64 / n as f64 * 100.0;
+            features[[i, 0]] = x;
+            target[i] = if (40.0..60.0).contains(&x) { 130.0 - x } else { 100.0 - x };
+        }
+        let task = RegressionTask::new("bump", features.clone(), target).unwrap();
+        let mut m = XGBoost::new()
+            .with_n_estimators(50)
+            .with_max_depth(4)
+            .with_learning_rate(0.3)
+            .with_monotone_constraints(vec![-1]);
+        let preds = predictions_sorted_by_x(&*m.train_regress(&task).unwrap(), &features);
+        let max_increase = preds.windows(2).map(|w| w[1] - w[0]).fold(0.0f64, f64::max);
+        assert!(
+            max_increase < 1e-9,
+            "-1-constrained predictions must be non-increasing, max increase = {max_increase}"
+        );
+    }
+
+    #[test]
+    fn invalid_constraints_are_rejected() {
+        let (task, _) = dip_task(50);
+        // Wrong length.
+        let mut wrong_len = XGBoost::new().with_monotone_constraints(vec![1, 0]);
+        assert!(wrong_len.train_regress(&task).is_err());
+        // Out-of-range value.
+        let mut bad_val = XGBoost::new().with_monotone_constraints(vec![2]);
+        assert!(bad_val.train_regress(&task).is_err());
     }
 }
 

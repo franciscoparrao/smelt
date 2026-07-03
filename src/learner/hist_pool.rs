@@ -60,7 +60,9 @@ impl HistPool {
         }
     }
 
-    /// Find best split from histogram at depth.
+    /// Find best split from histogram at depth. `constraints` holds per-feature
+    /// monotone directions (+1/-1/0; empty slice = unconstrained).
+    #[allow(clippy::too_many_arguments)]
     pub fn find_best(
         &self,
         depth: usize,
@@ -70,6 +72,7 @@ impl HistPool {
         lambda: f64,
         _alpha: f64,
         gamma: f64,
+        constraints: &[i8],
     ) -> Option<PoolSplit> {
         let buf = &self.levels[depth];
         let mb = self.max_bins;
@@ -90,6 +93,15 @@ impl HistPool {
                     0.5 * (gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
                         - (gl + gr) * (gl + gr) / (hl + hr + lambda))
                         - gamma
+                };
+                let cons = constraints.get(feat).copied().unwrap_or(0);
+                let violates = |gl: f64, hl: f64, gr: f64, hr: f64| -> bool {
+                    if cons == 0 {
+                        return false;
+                    }
+                    let wl = -gl / (hl + lambda);
+                    let wr = -gr / (hr + lambda);
+                    if cons > 0 { wl > wr } else { wl < wr }
                 };
 
                 if bins.cat[feat].is_some() {
@@ -117,7 +129,7 @@ impl HistPool {
                     gl += bin_g[b];
                     hl += bin_h[b];
                     let (gr, hr) = (total_g - gl, total_h - hl);
-                    if hl < min_cw || hr < min_cw {
+                    if hl < min_cw || hr < min_cw || violates(gl, hl, gr, hr) {
                         continue;
                     }
                     let g = sg(gl, hl, gr, hr);
@@ -133,7 +145,7 @@ impl HistPool {
                         gl += bin_g[b];
                         hl += bin_h[b];
                         let (gr, hr) = (total_g - gl, total_h - hl);
-                        if hl < min_cw || hr < min_cw {
+                        if hl < min_cw || hr < min_cw || violates(gl, hl, gr, hr) {
                             continue;
                         }
                         let g = sg(gl, hl, gr, hr);
