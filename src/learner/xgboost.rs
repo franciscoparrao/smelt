@@ -20,6 +20,87 @@ use super::eval::{EvalSet, EvalTarget, validate_eval_classif, validate_eval_regr
 use super::hist_pool::HistPool;
 use super::histogram::{HistBins, NAN_BIN, best_categorical_split};
 
+/// Regression objective: defines the per-sample gradient/hessian the trees
+/// fit, the initial prediction, and the output transform.
+///
+/// Classification training is unaffected (it always uses log-loss /
+/// softmax); setting an objective only changes `train_regress`.
+#[derive(Clone)]
+pub enum Objective {
+    /// Squared error (the default): g = p - y, h = 1.
+    SquaredError,
+    /// Huber loss as gradient clipping: g = clamp(p - y, ±delta), h = 1.
+    /// Robust to outliers in the target.
+    Huber { delta: f64 },
+    /// Poisson regression with log link: the model fits f = log(μ),
+    /// g = exp(f) - y, h = exp(f); predictions are exp-transformed back to
+    /// the response scale. Targets must be non-negative counts/rates.
+    Poisson,
+    /// Custom objective: `f(prediction, target) -> (gradient, hessian)` on
+    /// the raw score. The hessian must be positive for stable Newton steps.
+    Custom(std::sync::Arc<dyn Fn(f64, f64) -> (f64, f64) + Send + Sync>),
+}
+
+impl Objective {
+    /// Per-sample gradient and hessian at prediction `p` for target `y`.
+    #[inline]
+    fn grad_hess(&self, p: f64, y: f64) -> (f64, f64) {
+        match self {
+            Objective::SquaredError => (p - y, 1.0),
+            Objective::Huber { delta } => ((p - y).clamp(-delta, *delta), 1.0),
+            Objective::Poisson => {
+                let mu = p.min(30.0).exp(); // cap to avoid overflow
+                (mu - y, mu.max(1e-15))
+            }
+            Objective::Custom(f) => f(p, y),
+        }
+    }
+
+    /// Initial raw score given the (weighted) target mean.
+    #[inline]
+    fn initial_score(&self, target_mean: f64) -> f64 {
+        match self {
+            Objective::Poisson => target_mean.max(1e-15).ln(),
+            _ => target_mean,
+        }
+    }
+
+    /// Monitoring loss for early stopping: the mean per-sample objective
+    /// value (MSE for squared error/Huber/custom, Poisson NLL for Poisson).
+    #[inline]
+    fn monitor_loss(&self, p: f64, y: f64) -> f64 {
+        match self {
+            Objective::Poisson => p.min(30.0).exp() - y * p,
+            _ => (p - y).powi(2),
+        }
+    }
+
+    fn transform(&self) -> PredTransform {
+        match self {
+            Objective::Poisson => PredTransform::Exp,
+            _ => PredTransform::Identity,
+        }
+    }
+}
+
+/// Output transform applied to raw regression scores at prediction time.
+#[derive(Default, Clone, Copy, Serialize, Deserialize)]
+pub(crate) enum PredTransform {
+    #[default]
+    Identity,
+    Exp,
+}
+
+impl PredTransform {
+    #[inline]
+    fn apply(&self, v: f64) -> f64 {
+        match self {
+            PredTransform::Identity => v,
+            PredTransform::Exp => v.min(30.0).exp(),
+        }
+    }
+}
+
 /// XGBoost learner (eXtreme Gradient Boosting).
 ///
 /// # Examples
@@ -68,6 +149,9 @@ pub struct XGBoost {
     /// 0 unconstrained). Splits violating the direction are rejected and leaf
     /// weights are clamped to propagated bounds, as in official XGBoost.
     monotone_constraints: Option<Vec<i8>>,
+    /// Regression objective (gradient/hessian definition). Only affects
+    /// `train_regress`; classification always uses log-loss/softmax.
+    objective: Objective,
 }
 
 impl Default for XGBoost {
@@ -88,6 +172,7 @@ impl Default for XGBoost {
             sample_weight: None,
             eval_set: None,
             monotone_constraints: None,
+            objective: Objective::SquaredError,
         }
     }
 }
@@ -152,6 +237,14 @@ impl XGBoost {
     /// (categorical splits ignore it).
     pub fn with_monotone_constraints(mut self, c: Vec<i8>) -> Self {
         self.monotone_constraints = Some(c);
+        self
+    }
+    /// Regression objective: `Objective::SquaredError` (default),
+    /// `Huber { delta }`, `Poisson`, or `Custom(f)` where
+    /// `f(prediction, target) -> (gradient, hessian)`. Only affects
+    /// `train_regress`.
+    pub fn with_objective(mut self, o: Objective) -> Self {
+        self.objective = o;
         self
     }
     /// Set a held-out set that `early_stopping_rounds` evaluates on, for
@@ -856,6 +949,10 @@ pub struct TrainedXGBoost {
     pub(crate) mode: XGBMode,
     pub(crate) feature_names: Vec<String>,
     pub(crate) feature_importances: Vec<f64>,
+    /// Output transform for regression scores (e.g. exp for Poisson).
+    /// `serde(default)` = Identity, so pre-existing serialized models load.
+    #[serde(default)]
+    pub(crate) transform: PredTransform,
 }
 
 impl TrainedModel for TrainedXGBoost {
@@ -871,7 +968,7 @@ impl TrainedModel for TrainedXGBoost {
                         for t in &self.trees {
                             v += self.learning_rate * t.predict_one(row);
                         }
-                        v
+                        self.transform.apply(v)
                     })
                     .collect();
                 Ok(Prediction::regression(predicted))
@@ -1069,8 +1166,9 @@ impl Learner for XGBoost {
         let eval = validate_eval_regress(&self.eval_set, nf)?;
         self.validate_constraints(nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
-        // Weighted mean as the initial prediction when sample weights are set.
-        let initial = match &self.sample_weight {
+        // Weighted mean as the initial prediction when sample weights are set;
+        // the objective maps it to its raw-score space (e.g. log for Poisson).
+        let target_mean = match &self.sample_weight {
             Some(w) => {
                 let wsum: f64 = w.iter().sum();
                 if wsum > 0.0 {
@@ -1081,6 +1179,7 @@ impl Learner for XGBoost {
             }
             None => target.iter().sum::<f64>() / ns as f64,
         };
+        let initial = self.objective.initial_score(target_mean);
         let mut preds = vec![initial; ns];
         let mut eval_preds = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
         let mut trees = Vec::with_capacity(self.n_estimators);
@@ -1089,8 +1188,11 @@ impl Learner for XGBoost {
         let (mut best_loss, mut no_improve, mut best_n) = (f64::INFINITY, 0usize, 0usize);
 
         for round in 0..self.n_estimators {
-            let mut grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
-            let mut hess = vec![1.0; ns];
+            let (mut grads, mut hess): (Vec<f64>, Vec<f64>) = preds
+                .iter()
+                .zip(target)
+                .map(|(&p, &y)| self.objective.grad_hess(p, y))
+                .unzip();
             if let Some(w) = &self.sample_weight {
                 // Scale gradient and hessian by the sample weight: this fits the
                 // weighted least-squares objective (XGBoost's standard mechanism).
@@ -1121,7 +1223,11 @@ impl Learner for XGBoost {
                 // boosting and rarely plateaus, so it's a poor early-stopping
                 // signal on its own.
                 let loss = if let (Some(ep), Some((_, et))) = (&eval_preds, eval) {
-                    ep.iter().zip(et).map(|(p, y)| (p - y).powi(2)).sum::<f64>() / ep.len() as f64
+                    ep.iter()
+                        .zip(et)
+                        .map(|(&p, &y)| self.objective.monitor_loss(p, y))
+                        .sum::<f64>()
+                        / ep.len() as f64
                 } else {
                     match &self.sample_weight {
                         Some(w) => {
@@ -1130,7 +1236,7 @@ impl Learner for XGBoost {
                                 .iter()
                                 .zip(target)
                                 .zip(w)
-                                .map(|((p, y), wi)| wi * (p - y).powi(2))
+                                .map(|((&p, &y), wi)| wi * self.objective.monitor_loss(p, y))
                                 .sum::<f64>()
                                 / wsum
                         }
@@ -1138,7 +1244,7 @@ impl Learner for XGBoost {
                             preds
                                 .iter()
                                 .zip(target)
-                                .map(|(p, y)| (p - y).powi(2))
+                                .map(|(&p, &y)| self.objective.monitor_loss(p, y))
                                 .sum::<f64>()
                                 / ns as f64
                         }
@@ -1164,6 +1270,7 @@ impl Learner for XGBoost {
             mode: XGBMode::Regression,
             feature_names: task.feature_names().to_vec(),
             feature_importances: imp,
+            transform: self.objective.transform(),
         }))
     }
 
@@ -1298,6 +1405,7 @@ impl XGBoost {
             mode: XGBMode::BinaryClassif,
             feature_names: task.feature_names().to_vec(),
             feature_importances: imp,
+            transform: PredTransform::Identity,
         }))
     }
 
@@ -1418,6 +1526,7 @@ impl XGBoost {
             mode: XGBMode::MultiClassif { n_classes: nc },
             feature_names: task.feature_names().to_vec(),
             feature_importances: imp,
+            transform: PredTransform::Identity,
         }))
     }
 }
@@ -1545,6 +1654,140 @@ mod cat_tests {
             .count() as f64
             / n as f64;
         assert!(acc > 0.95, "categorical multiclass should be near-perfect, got acc={acc}");
+    }
+}
+
+#[cfg(test)]
+mod objective_tests {
+    use super::*;
+    use ndarray::Array2;
+
+    fn predict_vec(model: &dyn TrainedModel, features: &Array2<f64>) -> Vec<f64> {
+        let Prediction::Regression { predicted, .. } = model.predict(features).unwrap() else {
+            unreachable!()
+        };
+        predicted
+    }
+
+    /// Huber must be far less influenced by a few extreme target outliers
+    /// than squared error: on the clean portion of the data its error stays
+    /// much smaller.
+    #[test]
+    fn huber_is_robust_to_outliers() {
+        let n = 300;
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            let x = i as f64 / 3.0;
+            features[[i, 0]] = x;
+            // Every 25th point is a wild outlier.
+            target[i] = if i % 25 == 0 { 1_000.0 } else { x };
+        }
+        let task = RegressionTask::new("outliers", features.clone(), target.clone()).unwrap();
+
+        // Enough rounds for Huber to converge despite its clipped (≤ delta)
+        // per-round gradient magnitude.
+        let config = || {
+            XGBoost::new()
+                .with_n_estimators(300)
+                .with_max_depth(3)
+                .with_learning_rate(0.3)
+        };
+        let m_sq = config().train_regress(&task).unwrap();
+        let m_hu = config()
+            .with_objective(Objective::Huber { delta: 5.0 })
+            .train_regress(&task)
+            .unwrap();
+
+        let clean_rmse = |preds: &[f64]| {
+            let pairs: Vec<(f64, f64)> = preds
+                .iter()
+                .zip(&target)
+                .enumerate()
+                .filter(|(i, _)| i % 25 != 0)
+                .map(|(_, (&p, &y))| (p, y))
+                .collect();
+            (pairs.iter().map(|(p, y)| (p - y).powi(2)).sum::<f64>() / pairs.len() as f64).sqrt()
+        };
+        let rmse_sq = clean_rmse(&predict_vec(&*m_sq, &features));
+        let rmse_hu = clean_rmse(&predict_vec(&*m_hu, &features));
+        assert!(
+            rmse_hu < rmse_sq * 0.5,
+            "Huber should resist outliers: huber clean RMSE={rmse_hu:.2}, \
+             squared-error clean RMSE={rmse_sq:.2}"
+        );
+    }
+
+    /// Poisson objective fits count data on the log scale and returns
+    /// exp-transformed (strictly positive) predictions.
+    #[test]
+    fn poisson_predictions_are_positive_and_fit_counts() {
+        let n = 400;
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            let x = i as f64 / n as f64 * 10.0;
+            features[[i, 0]] = x;
+            target[i] = (0.5 * x).exp().round(); // deterministic "counts"
+        }
+        let task = RegressionTask::new("counts", features.clone(), target.clone()).unwrap();
+        let mut m = XGBoost::new()
+            .with_n_estimators(100)
+            .with_max_depth(3)
+            .with_learning_rate(0.3)
+            .with_objective(Objective::Poisson);
+        let preds = predict_vec(&*m.train_regress(&task).unwrap(), &features);
+
+        assert!(preds.iter().all(|&p| p > 0.0), "Poisson predictions must be positive");
+        // Relative error on the larger counts should be small.
+        let rel_err: f64 = preds
+            .iter()
+            .zip(&target)
+            .filter(|(_, y)| **y >= 5.0)
+            .map(|(&p, &y)| ((p - y) / y).abs())
+            .sum::<f64>()
+            / target.iter().filter(|&&y| y >= 5.0).count() as f64;
+        assert!(rel_err < 0.2, "mean relative error should be small, got {rel_err:.3}");
+    }
+
+    /// A custom objective encoding squared error must reproduce the built-in
+    /// squared-error model (same gradients → same trees → same predictions).
+    #[test]
+    fn custom_objective_matches_equivalent_builtin() {
+        let n = 300;
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut target = vec![0.0; n];
+        for i in 0..n {
+            features[[i, 0]] = i as f64;
+            target[i] = (i as f64 * 0.7).sin() * 10.0 + i as f64 * 0.1;
+        }
+        let task = RegressionTask::new("custom", features.clone(), target).unwrap();
+
+        let config = || {
+            XGBoost::new()
+                .with_n_estimators(30)
+                .with_max_depth(3)
+                .with_learning_rate(0.3)
+        };
+        let m_builtin = config().train_regress(&task).unwrap();
+        let m_custom = config()
+            .with_objective(Objective::Custom(std::sync::Arc::new(|p, y| (p - y, 1.0))))
+            .train_regress(&task)
+            .unwrap();
+
+        let (a, b) = (
+            predict_vec(&*m_builtin, &features),
+            predict_vec(&*m_custom, &features),
+        );
+        let max_diff = a
+            .iter()
+            .zip(&b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f64, f64::max);
+        assert!(
+            max_diff < 1e-9,
+            "custom squared-error must match the builtin exactly, max diff = {max_diff}"
+        );
     }
 }
 

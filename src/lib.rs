@@ -76,7 +76,7 @@ pub mod prelude {
         BandwidthSelection, GaussianNB, GeoXGBoost, GradientBoosting, HoeffdingTree,
         KNearestNeighbors, Lasso, Learner, TrainedGeoXGBoost,
         LightGBM, LinearRegression, LinearSVM, LogisticRegression, ObliqueForest, ObliqueTree,
-        QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, XGBoost,
+        Objective, QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, XGBoost,
         learner_from_id, registered_learner_ids,
     };
     pub use crate::measure::{

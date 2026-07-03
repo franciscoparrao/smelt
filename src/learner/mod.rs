@@ -56,7 +56,7 @@ pub use tree::decision_tree::DecisionTree;
 pub use tree::extra_trees::ExtraTrees;
 pub use tree::gradient_boosting::GradientBoosting;
 pub use tree::random_forest::RandomForest;
-pub use xgboost::XGBoost;
+pub use xgboost::{Objective, XGBoost};
 
 /// Core trait for classification learners.
 ///

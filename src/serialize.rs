@@ -189,6 +189,7 @@ mod tests {
             mode: XGBMode::Regression,
             feature_names: vec!["x0".to_string()],
             feature_importances: vec![0.0],
+            transform: Default::default(),
         }
     }
 
