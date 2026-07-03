@@ -52,6 +52,7 @@ pub mod prediction;
 pub mod preprocess;
 pub mod resample;
 pub mod serialize;
+pub mod sparse;
 pub mod stats;
 pub mod survival;
 pub mod task;
@@ -98,6 +99,7 @@ pub mod prelude {
         CrossValidation, GroupCV, Holdout, Resample, SpatialBlockCV, SpatialBufferCV, StratifiedCV,
     };
     pub use crate::serialize::{SerializableModel, load_json, save_json};
+    pub use crate::sparse::CsrMatrix;
     pub use crate::task::{ClassificationTask, FeatureType, RegressionTask, Task};
     pub use crate::tuning::{
         BayesianOptimizer, GridSearch, Hyperband, ParamDistribution, RandomSearch, TuneResult,

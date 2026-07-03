@@ -1,6 +1,7 @@
 //! One-hot encoding for categorical features.
 
 use super::Transformer;
+use crate::sparse::CsrMatrix;
 use crate::{Result, SmeltError};
 use ndarray::Array2;
 
@@ -35,6 +36,59 @@ impl OneHotEncoder {
             categories: None,
             n_features_in: None,
         }
+    }
+
+    /// Like [`Transformer::transform`], but returns a [`CsrMatrix`] instead
+    /// of a dense `Array2<f64>`. Worthwhile for a high-cardinality encoded
+    /// column (e.g. bag-of-words tokens, a categorical with thousands of
+    /// levels), where the dense output would be almost entirely zero.
+    /// Passthrough (non-encoded) columns are stored as-is regardless of
+    /// whether their values happen to be zero -- they're rarely sparse in
+    /// practice, and skipping zeros there would cost an extra branch per
+    /// value for no real memory win.
+    pub fn transform_sparse(&self, features: &Array2<f64>) -> Result<CsrMatrix> {
+        let categories = self.categories.as_ref().ok_or(SmeltError::NotTrained)?;
+        let n_in = self.n_features_in.unwrap();
+        if features.ncols() != n_in {
+            return Err(SmeltError::DimensionMismatch {
+                expected: n_in,
+                got: features.ncols(),
+            });
+        }
+
+        let n_out: usize = (0..n_in)
+            .map(|j| {
+                if let Some((_, cats)) = categories.iter().find(|(c, _)| *c == j) {
+                    cats.len()
+                } else {
+                    1
+                }
+            })
+            .sum();
+
+        let nrows = features.nrows();
+        let mut triplets = Vec::new();
+        let mut out_col = 0;
+
+        for j in 0..n_in {
+            if let Some((_, cats)) = categories.iter().find(|(c, _)| *c == j) {
+                for i in 0..nrows {
+                    let val = features[[i, j]];
+                    if let Some(pos) = cats.iter().position(|&c| (c - val).abs() < f64::EPSILON) {
+                        triplets.push((i, out_col + pos, 1.0));
+                    }
+                    // Unseen category: no nonzero entry (implicit zero row).
+                }
+                out_col += cats.len();
+            } else {
+                for i in 0..nrows {
+                    triplets.push((i, out_col, features[[i, j]]));
+                }
+                out_col += 1;
+            }
+        }
+
+        CsrMatrix::from_triplets(nrows, n_out, triplets)
     }
 }
 

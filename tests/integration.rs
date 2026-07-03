@@ -1301,6 +1301,28 @@ fn one_hot_encoder_transform_names() {
     assert_eq!(new_names, vec!["color_0", "color_1", "value"]);
 }
 
+#[test]
+fn one_hot_encoder_transform_sparse_matches_dense() {
+    let mut enc = OneHotEncoder::new(vec![0]);
+    let data = array![[0.0, 10.0], [1.0, 20.0], [2.0, 30.0], [0.0, 40.0]];
+    let dense = enc.fit_transform(&data).unwrap();
+    let sparse = enc.transform_sparse(&data).unwrap();
+    assert_eq!(sparse.to_dense(), dense);
+}
+
+#[test]
+fn one_hot_encoder_transform_sparse_high_cardinality_is_mostly_zero() {
+    let n = 200;
+    let mut enc = OneHotEncoder::new(vec![0]);
+    let data = Array2::from_shape_fn((n, 1), |(i, _)| i as f64); // n distinct categories
+    enc.fit(&data).unwrap();
+    let sparse = enc.transform_sparse(&data).unwrap();
+    assert_eq!(sparse.n_rows(), n);
+    assert_eq!(sparse.n_cols(), n);
+    assert_eq!(sparse.nnz(), n, "exactly one nonzero per row for a pure one-hot column");
+    assert!(sparse.density() < 0.01, "density should be ~1/n, got {}", sparse.density());
+}
+
 // ── LabelEncoder tests ────────────────────────────────────────────
 
 #[test]

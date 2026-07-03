@@ -56,6 +56,7 @@ src/
 ├── multilabel/, multioutput/  # ClassifierChain, RegressorChain
 ├── stats.rs        # Wilcoxon, sign test, Friedman, Nemenyi, McNemar, bootstrap CI
 ├── data/           # CsvLoader; ParquetLoader behind the `parquet` feature
+├── sparse.rs       # CsrMatrix (hand-rolled CSR); OneHotEncoder::transform_sparse
 ├── serialize.rs    # SerializableModel (JSON, versioned envelope)
 ├── benchmark.rs, benchmark_design.rs  # resample+measure loop, multi-learner tables
 └── validate.rs     # dimension/NaN checks shared across public entry points
@@ -134,8 +135,17 @@ competitiva" in progress):
       real speedup after, zero test regressions (74 lib + 272 integration).
       LightGBM/XGBoost deliberately left on f64 — evaluated and passed on,
       not merely deferred — see docs/fase3_progreso.md
-- [ ] Sparse data support (item 16d part 3/3) — greenfield, no existing
-      sparse matrix type; needs a `Task` design decision (e.g. CSR variant)
+- [x] Sparse data support (item 16d part 3/3) — **narrow scope**, done
+      2026-07-03. Investigated first: `Task::features() -> &Array2<f64>` is
+      concretely typed across 44 call sites with no trait-object seam, so a
+      full `SparseTask` isn't justified by current evidence (only linear
+      models would get a real algorithmic speedup; boosting would need
+      `HistBins` reworked regardless). Shipped a hand-rolled `CsrMatrix`
+      (`src/sparse.rs`, no `sprs` dependency) + `OneHotEncoder::transform_sparse`
+      — the one confirmed genuinely-wasteful path today (dense one-hot
+      output on high-cardinality columns). `SparseTask`/sparse linear-model
+      math left as separate, larger follow-ups — see
+      docs/sparse_data_2026-07-03.md
 - [ ] `README.md`/this file kept current as features land (this section itself
       was stale for a long time — reconciled 2026-07-02)
 
