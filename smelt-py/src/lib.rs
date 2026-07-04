@@ -17,7 +17,7 @@ use feature_selection::{
     filter_anova_f, filter_cmim, filter_correlation, filter_information_gain, filter_jmi,
     filter_jmim, filter_mrmr, filter_mutual_information, filter_relief, filter_variance, rfe,
 };
-use learners::boosting::{CatBoost, GeoXGBoost, LightGBM, XGBoost};
+use learners::boosting::{CatBoost, GeoXGBoost, KrigingHybrid, LightGBM, XGBoost};
 use learners::ensemble::{Bagging, DynamicEnsemble, Stacking, registered_learner_ids};
 use learners::linear::{ElasticNet, Lasso, LinearRegression, LinearSVM, LogisticRegression, Ridge};
 use learners::misc::{AdaBoost, EBM, GaussianNB, KNearestNeighbors, QuantileForest, QuantileGB};
@@ -29,7 +29,7 @@ use measures::{
     accuracy_score, auc_roc_score, balanced_accuracy_score, brier_score, cohens_kappa_score,
     f1_score, mae_score, mcc_score, precision_score, r2_score, recall_score, rmse_score,
 };
-use preprocess::StandardScaler;
+use preprocess::{Smote, SpatialSmote, StandardScaler};
 use py_stats::{bootstrap_ci, sign_test, wilcoxon_signed_rank};
 use resample::{CrossValidation, GroupCV, SpatialBlockCV, SpatialBufferCV, StratifiedCV};
 use tuning::PyBayesianOptimizer;
@@ -49,6 +49,7 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<KNearestNeighbors>()?;
     m.add_class::<GaussianNB>()?;
     m.add_class::<GeoXGBoost>()?;
+    m.add_class::<KrigingHybrid>()?;
     m.add_class::<AdaBoost>()?;
     m.add_class::<EBM>()?;
     m.add_class::<Lasso>()?;
@@ -74,6 +75,8 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Preprocessing
     m.add_class::<StandardScaler>()?;
+    m.add_class::<Smote>()?;
+    m.add_class::<SpatialSmote>()?;
 
     // Resampling
     m.add_class::<CrossValidation>()?;

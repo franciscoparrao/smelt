@@ -1,4 +1,5 @@
-//! Gradient boosting learners: XGBoost, CatBoost, LightGBM, GeoXGBoost.
+//! Gradient boosting learners: XGBoost, CatBoost, LightGBM, GeoXGBoost,
+//! KrigingHybrid.
 
 use crate::common::{
     fit_learner_cat, not_fitted, parse_coords, parse_eval_set, perm_importance_impl,
@@ -6,11 +7,25 @@ use crate::common::{
     EvalKind,
 };
 use crate::common::{add_explain_methods, declare_support, declare_params};
+use crate::learners::ensemble::validate_learner_id;
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use smelt_ml::learner::TrainedModel;
 use smelt_ml::prediction::Prediction;
+
+/// Map the Python-facing `variogram_model` string to `smelt_ml::prelude::VariogramModel`.
+fn resolve_variogram_model(name: &str) -> PyResult<smelt_ml::prelude::VariogramModel> {
+    use smelt_ml::prelude::VariogramModel;
+    match name {
+        "spherical" => Ok(VariogramModel::Spherical),
+        "exponential" => Ok(VariogramModel::Exponential),
+        "gaussian" => Ok(VariogramModel::Gaussian),
+        other => Err(PyRuntimeError::new_err(format!(
+            "unknown variogram_model '{other}'; expected one of: spherical, exponential, gaussian"
+        ))),
+    }
+}
 
 /// Map the Python-facing `objective` string to `smelt_ml::prelude::Objective`.
 /// `Objective::Custom` (an arbitrary Rust closure) isn't exposed here --
@@ -603,6 +618,145 @@ impl GeoXGBoost {
 }
 
 
+// ── KrigingHybrid ──────────────────────────────────────────────────────
+//
+// Wraps a base learner (selected by id string, same rationale as
+// `Bagging`/`Stacking` in `ensemble.rs`: bridging a Python object back
+// into the `Fn() -> Box<dyn Learner>` factory the Rust struct needs would
+// mean re-acquiring the GIL on internal calls) plus ordinary kriging of
+// its residuals -- regression-only, so no `predict_proba`/`is_classif`.
+
+#[pyclass]
+pub(crate) struct KrigingHybrid {
+    trained: Option<smelt_ml::prelude::TrainedKrigingHybrid>,
+    base: String,
+    variogram_model: String,
+    n_lags: usize,
+    n_neighbors: usize,
+}
+
+#[pymethods]
+impl KrigingHybrid {
+    /// Regression-kriging: trains `base` then krige-interpolates its
+    /// residuals spatially, combining as `base(x) + kriged_residual(coords)`.
+    ///
+    /// Args:
+    ///     base: base learner id string (see `smelt.registered_learner_ids()`).
+    ///     variogram_model: "spherical" (default), "exponential", or "gaussian".
+    ///     n_lags: number of lag bins used to build the empirical variogram.
+    ///     n_neighbors: local kriging neighborhood size at predict time.
+    #[new]
+    #[pyo3(signature = (base, variogram_model="spherical".to_string(), n_lags=15, n_neighbors=20))]
+    fn new(base: String, variogram_model: String, n_lags: usize, n_neighbors: usize) -> PyResult<Self> {
+        validate_learner_id(&base)?;
+        Ok(Self {
+            trained: None,
+            base,
+            variogram_model,
+            n_lags,
+            n_neighbors,
+        })
+    }
+
+    /// Train the model. `coords` is an (N, 2) array-like of (x, y) per sample.
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: Vec<f64>,
+        coords: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let parsed = parse_coords(coords)?;
+        let features = to_array2(x);
+        if parsed.len() != features.nrows() {
+            return Err(PyRuntimeError::new_err(format!(
+                "coords length ({}) must match number of samples ({})",
+                parsed.len(),
+                features.nrows()
+            )));
+        }
+        let model_kind = resolve_variogram_model(&self.variogram_model)?;
+        let task =
+            smelt_ml::task::RegressionTask::new("kriging_hybrid", features, y).map_err(smelt_err)?;
+        let base = self.base.clone();
+        let mut learner = smelt_ml::prelude::KrigingHybrid::new(
+            move || smelt_ml::prelude::learner_from_id(&base).expect("validated in KrigingHybrid::new"),
+            parsed,
+        )
+        .with_variogram_model(model_kind)
+        .with_n_lags(self.n_lags)
+        .with_n_neighbors(self.n_neighbors);
+        let trained = py
+            .allow_threads(|| learner.train_regress_geo(&task))
+            .map_err(smelt_err)?;
+        self.trained = Some(trained);
+        Ok(())
+    }
+
+    /// Predict. If `coords` is provided, applies the kriging correction
+    /// (`base(x) + kriged_residual(coords)`); otherwise returns the base
+    /// model's prediction alone (no spatial correction).
+    #[pyo3(signature = (x, coords=None))]
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+        coords: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        use smelt_ml::learner::TrainedModel;
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let features = to_array2(x);
+        let pred = if let Some(c) = coords {
+            let new_coords = parse_coords(c)?;
+            if new_coords.len() != features.nrows() {
+                return Err(PyRuntimeError::new_err(format!(
+                    "coords length ({}) must match number of samples ({})",
+                    new_coords.len(),
+                    features.nrows()
+                )));
+            }
+            model.predict_spatial(&features, &new_coords).map_err(smelt_err)?
+        } else {
+            model.predict(&features).map_err(smelt_err)?
+        };
+        let values: Vec<f64> = match &pred {
+            Prediction::Regression { predicted, .. } => predicted.clone(),
+            _ => return Err(PyRuntimeError::new_err("Expected regression prediction")),
+        };
+        Ok(PyArray1::from_vec(py, values))
+    }
+
+    /// Fitted variogram parameters: dict with `nugget`, `sill`, `range`
+    /// (floats) and `model` (the model family string).
+    #[getter]
+    fn variogram_fit_(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let fit = model.variogram_fit();
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("nugget", fit.nugget)?;
+        dict.set_item("sill", fit.sill)?;
+        dict.set_item("range", fit.range)?;
+        dict.set_item("model", format!("{:?}", fit.model).to_lowercase())?;
+        Ok(dict.into())
+    }
+
+    #[getter]
+    fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
+        use smelt_ml::learner::TrainedModel;
+        Ok(self
+            .trained
+            .as_ref()
+            .ok_or_else(not_fitted)?
+            .feature_importance())
+    }
+
+    #[getter]
+    fn supports_classification(&self) -> bool { false }
+
+    #[getter]
+    fn supports_regression(&self) -> bool { true }
+}
+
 add_explain_methods!(XGBoost, CatBoost, LightGBM);
 
 declare_support!(XGBoost,  classif = true, regress = true);
@@ -649,3 +803,49 @@ declare_params!(GeoXGBoost, {
     alpha => "alpha",
     seed => "seed",
 });
+
+// `base` is a learner id string re-validated on `set_params` (same reason
+// `Bagging`/`Stacking` in `ensemble.rs` hand-write `get_params`/`set_params`
+// instead of using `declare_params!`: the macro can't express re-running
+// `validate_learner_id`, and a bad id would otherwise only surface as the
+// `.expect("validated in KrigingHybrid::new")` panic in `fit()`).
+#[pymethods]
+impl KrigingHybrid {
+    fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("base", self.base.clone())?;
+        dict.set_item("variogram_model", self.variogram_model.clone())?;
+        dict.set_item("n_lags", self.n_lags)?;
+        dict.set_item("n_neighbors", self.n_neighbors)?;
+        Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+
+    #[pyo3(signature = (**kwargs))]
+    fn set_params(&mut self, kwargs: Option<&Bound<'_, pyo3::types::PyDict>>) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                let key: String = k.extract()?;
+                match key.as_str() {
+                    "base" => {
+                        let base: String = v.extract()?;
+                        validate_learner_id(&base)?;
+                        self.base = base;
+                    }
+                    "variogram_model" => {
+                        let m: String = v.extract()?;
+                        resolve_variogram_model(&m)?;
+                        self.variogram_model = m;
+                    }
+                    "n_lags" => self.n_lags = v.extract()?,
+                    "n_neighbors" => self.n_neighbors = v.extract()?,
+                    other => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "invalid parameter '{other}' for this estimator"
+                        )))
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}

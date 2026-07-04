@@ -215,10 +215,20 @@ pulled from `docs/roadmap_checklist.md` (Prioridad 4).
       stored in `Task`" idiom as `SpatialBlockCV`/`SpatialBufferCV`/
       `GeoXGBoost`). Matches plain `Smote`'s output exactly when
       `max_spatial_distance` is unset.
-- Python bindings for both deliberately deferred — the kriging solver is the
-  numerically riskiest code in this pass (variogram fitting, per-point linear
-  solves, degenerate/singular systems); hardening it in Rust first before
-  locking in a pyo3-facing signature. Follow-up, not forgotten.
+- [x] Python bindings (2026-07-04, same-day fast-follow once the Rust side
+      was test-hardened): `KrigingHybrid` in `smelt-py/src/learners/boosting.rs`
+      (alongside `GeoXGBoost` — same "inherent `predict_spatial` beyond the
+      trait" shape) selects its base learner by id string and hand-writes
+      `get_params`/`set_params` (not `declare_params!`) to re-validate that id
+      on `set_params`, exactly like `Bagging`/`Stacking` in `ensemble.rs` (the
+      macro can't express the re-validation). `Smote` (bound for the first
+      time) and `SpatialSmote` live in `smelt-py/src/preprocess.rs`, using the
+      project's existing `parse_coords` convention for the `coords` param.
+      Verified via `maturin develop --release` + a direct Python script
+      (not just `cargo check`) — confirmed the kriging correction cuts MSE
+      from 8.8 to 0.036 on synthetic spatially-structured residuals and that
+      an invalid `base` id raises cleanly from both `__new__` and
+      `set_params`.
 
 ## Dependencies
 
