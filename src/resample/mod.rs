@@ -13,7 +13,12 @@ pub use spatial::{SpatialBlockCV, SpatialBufferCV};
 pub use stratified::{GroupCV, StratifiedCV};
 
 /// Trait for resampling strategies.
-pub trait Resample {
+///
+/// `Send + Sync` (all built-in implementers are plain data, trivially both)
+/// so a `&dyn Resample` can be shared across threads -- e.g. by tuning
+/// methods that evaluate independent hyperparameter candidates in parallel
+/// with rayon.
+pub trait Resample: Send + Sync {
     /// Generate train/test index splits. Fails if `n_samples` is
     /// inconsistent with this strategy's own configuration (e.g. a
     /// coordinate/group/label vector supplied at construction time whose

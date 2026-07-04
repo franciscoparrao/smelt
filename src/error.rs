@@ -52,6 +52,21 @@ pub enum SmeltError {
     #[error("JSON error: {0}")]
     Json(String),
 
+    /// A `Prediction` was the wrong variant (or missing a required field,
+    /// e.g. probabilities) for the operation that received it -- a
+    /// regression measure given a `Classification` prediction, a measure
+    /// that needs probabilities given `probabilities: None`, etc. Lets
+    /// callers `match` on this specific failure mode instead of pattern-
+    /// matching an opaque string.
+    #[error("incompatible prediction: {0}")]
+    IncompatiblePrediction(String),
+
+    /// A numerical computation failed in a way callers may want to detect
+    /// specifically (e.g. a singular matrix in a linear solve), rather than
+    /// an invalid input parameter or a malformed file.
+    #[error("numerical error: {0}")]
+    NumericalError(String),
+
     /// Catch-all for errors that don't fit the other variants.
     #[error("{0}")]
     Other(String),

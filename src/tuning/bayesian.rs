@@ -107,6 +107,16 @@ impl BayesianOptimizer {
     }
 
     /// Tune for classification.
+    ///
+    /// Unlike `GridSearch`/`RandomSearch`/`Hyperband`, this loop is NOT
+    /// parallelized: TPE is inherently sequential -- `sample_tpe` builds its
+    /// proposal from the density of ALL previous iterations' scores, so
+    /// iteration `i` cannot start before iteration `i-1`'s result is known.
+    /// Evaluating in parallel would require a genuinely different batch/
+    /// parallel-BO algorithm (propose a batch from the current history,
+    /// evaluate it concurrently, then update history once per batch), a
+    /// different design decision rather than "just connect existing
+    /// parallelism", so it's left sequential here.
     pub fn tune_classif(
         &self,
         task: &ClassificationTask,

@@ -170,13 +170,13 @@ pub fn save_json(model: &SerializableModel, path: impl AsRef<Path>) -> Result<()
 pub fn load_json(path: impl AsRef<Path>) -> Result<SerializableModel> {
     let metadata = fs::metadata(&path)?;
     if metadata.len() > 100_000_000 {
-        return Err(SmeltError::Other("Model file too large (>100MB)".into()));
+        return Err(SmeltError::Json("Model file too large (>100MB)".into()));
     }
     let json = fs::read_to_string(path)?;
     let file: ModelFile =
         serde_json::from_str(&json).map_err(|e| SmeltError::Json(e.to_string()))?;
     if file.format_version != SERIALIZATION_FORMAT_VERSION {
-        return Err(SmeltError::Other(format!(
+        return Err(SmeltError::Json(format!(
             "model file has serialization format version {}, this build of smelt-ml ({}) expects version {} (file was written by smelt-ml {})",
             file.format_version,
             env!("CARGO_PKG_VERSION"),

@@ -1611,6 +1611,55 @@ fn grid_search_multi_param() {
     assert_eq!(result.all_results.len(), 4);
 }
 
+/// Regression/determinism test for the rayon-parallelized combination loop:
+/// running the same grid twice must produce byte-identical best results, and
+/// `all_results` must contain every combination exactly once regardless of
+/// which thread evaluated it (parallel iteration must not drop, duplicate,
+/// or race on shared state).
+#[test]
+fn grid_search_parallel_evaluation_is_deterministic() {
+    use smelt_ml::tuning::ParamGrid;
+
+    let features = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("gs_det", features, target).unwrap();
+
+    let mut grid = ParamGrid::new();
+    grid.insert("max_depth".into(), vec![1.0, 2.0, 3.0, 4.0, 5.0]);
+    grid.insert("min_samples_split".into(), vec![2.0, 3.0, 4.0]);
+    let cv = CrossValidation::new(2).with_seed(42);
+
+    let make_gs = || {
+        GridSearch::new(
+            |params| {
+                Box::new(
+                    DecisionTree::new()
+                        .with_max_depth(params["max_depth"] as usize)
+                        .with_min_samples_split(params["min_samples_split"] as usize),
+                )
+            },
+            grid.clone(),
+        )
+    };
+
+    let r1 = make_gs().tune_classif(&task, &cv, &Accuracy).unwrap();
+    let r2 = make_gs().tune_classif(&task, &cv, &Accuracy).unwrap();
+
+    assert_eq!(r1.best_params, r2.best_params);
+    assert!((r1.best_score - r2.best_score).abs() < 1e-10);
+    assert_eq!(r1.all_results.len(), 15);
+    assert_eq!(r2.all_results.len(), 15);
+}
+
 // ── RandomSearch tests ─────────────────────────────────────────────
 
 #[test]
@@ -5192,6 +5241,52 @@ fn hyperband_classif() {
     let result = hb.tune_classif(&task, &Accuracy).unwrap();
     assert!(result.best_score >= 0.5);
     assert!(!result.all_results.is_empty());
+}
+
+/// Determinism test for Hyperband's rayon-parallelized per-round evaluation
+/// loop: two runs with the same seed must agree exactly.
+#[test]
+fn hyperband_parallel_evaluation_is_deterministic() {
+    use smelt_ml::tuning::{Hyperband, ParamDistribution, ParamSpace};
+
+    let features = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0],
+        [0.9, 1.0],
+        [1.0, 1.1],
+        [1.1, 1.1]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("hb_det", features, target).unwrap();
+
+    let make_hb = || {
+        let mut space = ParamSpace::new();
+        space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 8.0));
+        Hyperband::new(
+            |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
+            space,
+        )
+        .with_max_folds(4)
+        .with_seed(7)
+    };
+
+    let r1 = make_hb().tune_classif(&task, &Accuracy).unwrap();
+    let r2 = make_hb().tune_classif(&task, &Accuracy).unwrap();
+
+    assert_eq!(r1.best_params, r2.best_params);
+    assert!((r1.best_score - r2.best_score).abs() < 1e-10);
+    assert_eq!(r1.all_results.len(), r2.all_results.len());
 }
 
 // ── Isolation Forest tests ─────────────────────────────────────────

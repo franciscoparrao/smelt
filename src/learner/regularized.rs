@@ -166,7 +166,7 @@ impl Learner for Ridge {
         let xty = x_aug.t().dot(&y_arr);
 
         let weights = solve(&xtx, &xty)
-            .ok_or_else(|| SmeltError::Other("Singular matrix in Ridge".into()))?;
+            .ok_or_else(|| SmeltError::NumericalError("Singular matrix in Ridge".into()))?;
 
         Ok(Box::new(TrainedRegularizedRegression {
             weights,

@@ -301,14 +301,61 @@ C o una iniciativa dedicada.
      (con normalización correcta e incorrecta calculadas aparte para
      confirmar que difieren sustancialmente: valores correctos ~0.02/0.18
      vs. los que daría el bug, ~−0.94/−0.70).
-   - 512 tests verdes acumulados al cierre de Fase C (153 lib + 285
+   - 512 tests verdes acumulados al cierre de la parte de correctness de
+     Fase C (153 lib + 285 integración + 4 parquet + 70 doctests), 0
+     fallos; `smelt-py` recompilado tras cada fix.
+
+### Fase C, parte 2 — refactors arquitectónicos — **COMPLETADA 2026-07-04**
+   - ✅ **Errores tipados**: agregadas dos variantes nuevas a `SmeltError`
+     (`IncompatiblePrediction`, `NumericalError`), sumadas a las ya
+     existentes (`InvalidParameter`, `Json`, etc.). Migrados 47 de 51 usos
+     de `SmeltError::Other` — la concentración principal era `measure/mod.rs`
+     (19 sitios, todos "predicción no coincide con lo esperado" →
+     `IncompatiblePrediction`), más `conformal/` (4), `geo_xgboost.rs`,
+     `kriging_hybrid.rs`, `shap.rs` (mismatches de predicción →
+     `IncompatiblePrediction`; un `target_class out of range` →
+     `InvalidParameter`), matrices singulares en `regularized.rs`/
+     `linear_regression.rs`/`kriging_hybrid.rs` → `NumericalError`,
+     `select_bandwidth`/loaders sin columna target → `InvalidParameter`,
+     versión de formato de `serialize.rs` → `Json`. Quedan 4 sin migrar y
+     documentados como tal (`s_learner.rs` ×3, wrapping defensivo de un
+     error de `ndarray::concatenate` con baja probabilidad real de
+     disparar; `label_encoder.rs` ×1, "unknown label", caso único sin un
+     patrón repetido que justifique una variante nueva).
+   - ✅ **Paralelismo con rayon**: `Resample` ahora requiere `Send + Sync`
+     (todos los implementadores ya lo eran — structs planos con
+     `Vec`/`f64`/`usize` — así que esto es puramente habilitante, sin
+     cambios de comportamiento). Paralelizados:
+     - `GridSearch`/`RandomSearch`: el loop sobre combinaciones/candidatos
+       (cada uno construye su propio learner vía la factory `Send+Sync`,
+       sin estado compartido). En `RandomSearch` el muestreo de parámetros
+       se mantiene secuencial (barato, depende de `&mut rng`) y solo la
+       evaluación (entrenar+puntuar) se paraleliza.
+     - `Hyperband`: el loop de evaluación de configuraciones dentro de cada
+       ronda de successive halving.
+     - `benchmark_design::benchmark_classif`/`benchmark_regress`: el loop
+       sobre `learners` para cada `task`, vía `par_iter_mut()` (cada
+       `&mut Box<dyn Learner>` del slice es una porción disjunta, segura de
+       mutar en paralelo sin aliasing).
+     - **Deliberadamente NO paralelizado**: `BayesianOptimizer` (TPE es
+       inherentemente secuencial — cada candidato se muestrea de la
+       densidad de TODO el historial previo, así que la iteración *i* no
+       puede empezar antes de conocer el resultado de la *i-1*; paralelizar
+       de verdad requeriría un algoritmo de BO por lotes genuinamente
+       distinto, no solo "conectar" el paralelismo existente — documentado
+       en el código). Tampoco se tocó el loop de folds dentro de
+       `benchmark::resample_classif`/`resample_regress` (recibe
+       `&mut dyn Learner`, no una factory, así que paralelizar folds
+       requeriría cambiar esa firma pública — invasivo, y ya se cubre el
+       nivel exterior de candidatos/learners en todos los llamadores).
+   - 3 tests nuevos de determinismo (`grid_search_parallel_evaluation_is_deterministic`,
+     `hyperband_parallel_evaluation_is_deterministic`, más el
+     `random_search_deterministic` ya existente): dos corridas con la misma
+     semilla deben dar exactamente el mismo mejor resultado, verificando que
+     la paralelización no introdujo condiciones de carrera.
+   - 514 tests verdes al cierre completo de Fase C (153 lib + 287
      integración + 4 parquet + 70 doctests), 0 fallos; `smelt-py`
-     recompilado tras cada fix.
-   - ⏸️ **Pendiente de esta pasada** (refactors arquitectónicos más grandes,
-     no bugs de corrección): errores tipados (51 `SmeltError::Other`);
-     `ParamSet` tipado (`HashMap<String,f64>` stringly-typed); paralelismo de
-     folds/grid con rayon (el andamiaje — factories `Send+Sync` — ya existe,
-     falta conectarlo); README/registry/versionado (M20, bump semver 2.0).
-10. Python: exponer cluster/persistencia/CausalForest/loaders; streaming API; `.pyi` + `__repr__`. No abordado esta pasada.
+     recompilado.
+10. Python: exponer cluster/persistencia/CausalForest/loaders; streaming API; `.pyi` + `__repr__`. No abordado — README/registry/versionado (M20, bump semver 2.0) tampoco. Quedan para otra iniciativa.
 
 **Regla de proceso que esta auditoría reafirma**: ningún fix estadístico se declara cerrado sin su golden test, y ningún ítem del plan se elimina de una tabla de progreso sin nota explícita de por qué.

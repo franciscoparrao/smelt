@@ -8,6 +8,7 @@ use crate::learner::Learner;
 use crate::measure::Measure;
 use crate::resample::Resample;
 use crate::task::{ClassificationTask, RegressionTask};
+use rayon::prelude::*;
 
 /// Result of a benchmark design experiment.
 #[derive(Debug)]
@@ -93,18 +94,26 @@ pub fn benchmark_classif(
 ) -> Result<BenchmarkDesign> {
     let mut entries = Vec::new();
 
+    // Each learner in the slice is already an independent, disjoint `&mut`
+    // (rayon's par_iter_mut splits the slice, not aliasing any element), so
+    // evaluating them concurrently for a given task is safe -- no shared
+    // mutable state crosses threads.
     for task in tasks {
-        for learner in learners.iter_mut() {
-            let result = benchmark::resample_classif(&mut **learner, task, resampling, measures)?;
-            let means = result.mean_scores();
-            entries.push(BenchmarkEntry {
-                learner_id: result.learner_id,
-                task_id: task.id().to_string(),
-                measure_ids: result.measure_ids,
-                mean_scores: means,
-                fold_scores: result.scores,
-            });
-        }
+        let task_entries: Result<Vec<BenchmarkEntry>> = learners
+            .par_iter_mut()
+            .map(|learner| {
+                let result = benchmark::resample_classif(&mut **learner, task, resampling, measures)?;
+                let means = result.mean_scores();
+                Ok(BenchmarkEntry {
+                    learner_id: result.learner_id,
+                    task_id: task.id().to_string(),
+                    measure_ids: result.measure_ids,
+                    mean_scores: means,
+                    fold_scores: result.scores,
+                })
+            })
+            .collect();
+        entries.extend(task_entries?);
     }
 
     Ok(BenchmarkDesign { entries })
@@ -120,17 +129,21 @@ pub fn benchmark_regress(
     let mut entries = Vec::new();
 
     for task in tasks {
-        for learner in learners.iter_mut() {
-            let result = benchmark::resample_regress(&mut **learner, task, resampling, measures)?;
-            let means = result.mean_scores();
-            entries.push(BenchmarkEntry {
-                learner_id: result.learner_id,
-                task_id: task.id().to_string(),
-                measure_ids: result.measure_ids,
-                mean_scores: means,
-                fold_scores: result.scores,
-            });
-        }
+        let task_entries: Result<Vec<BenchmarkEntry>> = learners
+            .par_iter_mut()
+            .map(|learner| {
+                let result = benchmark::resample_regress(&mut **learner, task, resampling, measures)?;
+                let means = result.mean_scores();
+                Ok(BenchmarkEntry {
+                    learner_id: result.learner_id,
+                    task_id: task.id().to_string(),
+                    measure_ids: result.measure_ids,
+                    mean_scores: means,
+                    fold_scores: result.scores,
+                })
+            })
+            .collect();
+        entries.extend(task_entries?);
     }
 
     Ok(BenchmarkDesign { entries })

@@ -38,7 +38,7 @@ impl Measure for Accuracy {
                 let correct = predicted.iter().zip(truth).filter(|(p, t)| p == t).count();
                 Ok(correct as f64 / predicted.len() as f64)
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "Accuracy requires classification prediction with truth".into(),
             )),
         }
@@ -70,7 +70,7 @@ impl Measure for Rmse {
                     / predicted.len() as f64;
                 Ok(mse.sqrt())
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "RMSE requires regression prediction with truth".into(),
             )),
         }
@@ -102,7 +102,7 @@ impl Measure for Mae {
                     / predicted.len() as f64;
                 Ok(mae)
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "MAE requires regression prediction with truth".into(),
             )),
         }
@@ -171,7 +171,7 @@ impl Measure for Precision {
                     .sum();
                 Ok(if nc > 0 { sum / nc as f64 } else { 0.0 })
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "Precision requires classification prediction with truth".into(),
             )),
         }
@@ -206,7 +206,7 @@ impl Measure for Recall {
                     .sum();
                 Ok(if nc > 0 { sum / nc as f64 } else { 0.0 })
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "Recall requires classification prediction with truth".into(),
             )),
         }
@@ -248,7 +248,7 @@ impl Measure for F1Score {
                     .sum();
                 Ok(if nc > 0 { sum / nc as f64 } else { 0.0 })
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "F1 requires classification prediction with truth".into(),
             )),
         }
@@ -289,8 +289,8 @@ impl Measure for LogLoss {
             Prediction::Classification {
                 probabilities: None,
                 ..
-            } => Err(SmeltError::Other("LogLoss requires probabilities".into())),
-            _ => Err(SmeltError::Other(
+            } => Err(SmeltError::IncompatiblePrediction("LogLoss requires probabilities".into())),
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "LogLoss requires classification prediction with truth and probabilities".into(),
             )),
         }
@@ -342,8 +342,8 @@ impl Measure for AucRoc {
             Prediction::Classification {
                 probabilities: None,
                 ..
-            } => Err(SmeltError::Other("AUC-ROC requires probabilities".into())),
-            _ => Err(SmeltError::Other(
+            } => Err(SmeltError::IncompatiblePrediction("AUC-ROC requires probabilities".into())),
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "AUC-ROC requires classification prediction with truth and probabilities".into(),
             )),
         }
@@ -436,7 +436,7 @@ impl Measure for BalancedAccuracy {
                 }
                 Ok(if valid > 0 { sum / valid as f64 } else { 0.0 })
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "BalancedAccuracy requires classification prediction with truth".into(),
             )),
         }
@@ -481,7 +481,7 @@ impl Measure for CohensKappa {
                     1.0
                 })
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "CohensKappa requires classification prediction with truth".into(),
             )),
         }
@@ -532,7 +532,7 @@ impl Measure for Mcc {
                     0.0
                 })
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "MCC requires classification prediction with truth".into(),
             )),
         }
@@ -579,8 +579,8 @@ impl Measure for Brier {
             Prediction::Classification {
                 probabilities: None,
                 ..
-            } => Err(SmeltError::Other("Brier requires probabilities".into())),
-            _ => Err(SmeltError::Other(
+            } => Err(SmeltError::IncompatiblePrediction("Brier requires probabilities".into())),
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "Brier requires classification prediction with truth and probabilities".into(),
             )),
         }
@@ -619,7 +619,7 @@ impl Measure for RSquared {
                     0.0
                 })
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "R² requires regression prediction with truth".into(),
             )),
         }
@@ -658,7 +658,7 @@ impl Measure for Mape {
                     / n;
                 Ok(mape)
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "MAPE requires regression prediction with truth".into(),
             )),
         }
@@ -696,7 +696,7 @@ impl Measure for Pehe {
                     / estimated.len() as f64;
                 Ok(mse.sqrt())
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "PEHE requires a CausalEffect prediction with known ground truth".into(),
             )),
         }
@@ -727,7 +727,7 @@ impl Measure for AteBias {
                 let true_ate = truth.iter().sum::<f64>() / truth.len() as f64;
                 Ok((est_ate - true_ate).abs())
             }
-            _ => Err(SmeltError::Other(
+            _ => Err(SmeltError::IncompatiblePrediction(
                 "AteBias requires a CausalEffect prediction with known ground truth".into(),
             )),
         }

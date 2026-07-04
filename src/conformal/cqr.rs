@@ -71,11 +71,11 @@ impl<'a> CQR<'a> {
 
         let lower_vals = match &lower_pred {
             Prediction::Regression { predicted, .. } => predicted,
-            _ => return Err(SmeltError::Other("Expected regression prediction".into())),
+            _ => return Err(SmeltError::IncompatiblePrediction("Expected regression prediction".into())),
         };
         let upper_vals = match &upper_pred {
             Prediction::Regression { predicted, .. } => predicted,
-            _ => return Err(SmeltError::Other("Expected regression prediction".into())),
+            _ => return Err(SmeltError::IncompatiblePrediction("Expected regression prediction".into())),
         };
 
         // Conformity scores: max(lower - y, y - upper)
@@ -109,11 +109,11 @@ impl<'a> CQR<'a> {
 
         let lower_vals = match &lower_pred {
             Prediction::Regression { predicted, .. } => predicted,
-            _ => return Err(SmeltError::Other("Expected regression prediction".into())),
+            _ => return Err(SmeltError::IncompatiblePrediction("Expected regression prediction".into())),
         };
         let upper_vals = match &upper_pred {
             Prediction::Regression { predicted, .. } => predicted,
-            _ => return Err(SmeltError::Other("Expected regression prediction".into())),
+            _ => return Err(SmeltError::IncompatiblePrediction("Expected regression prediction".into())),
         };
 
         Ok(lower_vals

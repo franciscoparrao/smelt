@@ -10,6 +10,7 @@ use crate::task::{ClassificationTask, RegressionTask};
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rayon::prelude::*;
 
 /// Random search over hyperparameter distributions.
 ///
@@ -105,18 +106,24 @@ impl RandomSearch {
         resampling: &dyn Resample,
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
+        // Sampling stays sequential (it's cheap and depends on shared &mut
+        // rng state, so the sequence -- and hence reproducibility for a
+        // given seed -- is unaffected); only the expensive train+evaluate
+        // step per candidate runs in parallel.
         let mut rng = StdRng::seed_from_u64(self.seed);
-        let mut results = Vec::with_capacity(self.n_iter);
+        let param_sets: Vec<ParamSet> = (0..self.n_iter).map(|_| self.sample_params(&mut rng)).collect();
 
-        for _ in 0..self.n_iter {
-            let params = self.sample_params(&mut rng);
-            let mut learner = (self.factory)(&params);
-            let bench = benchmark::resample_classif(&mut *learner, task, resampling, &[measure])?;
-            let mean_score = bench.mean_scores()[0];
-            results.push((params, mean_score));
-        }
+        let results: Result<Vec<(ParamSet, f64)>> = param_sets
+            .into_par_iter()
+            .map(|params| {
+                let mut learner = (self.factory)(&params);
+                let bench = benchmark::resample_classif(&mut *learner, task, resampling, &[measure])?;
+                let mean_score = bench.mean_scores()[0];
+                Ok((params, mean_score))
+            })
+            .collect();
 
-        TuneResult::select_best(results, measure.id().to_string(), measure.maximize())
+        TuneResult::select_best(results?, measure.id().to_string(), measure.maximize())
     }
 
     /// Tune for regression.
@@ -127,16 +134,18 @@ impl RandomSearch {
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
         let mut rng = StdRng::seed_from_u64(self.seed);
-        let mut results = Vec::with_capacity(self.n_iter);
+        let param_sets: Vec<ParamSet> = (0..self.n_iter).map(|_| self.sample_params(&mut rng)).collect();
 
-        for _ in 0..self.n_iter {
-            let params = self.sample_params(&mut rng);
-            let mut learner = (self.factory)(&params);
-            let bench = benchmark::resample_regress(&mut *learner, task, resampling, &[measure])?;
-            let mean_score = bench.mean_scores()[0];
-            results.push((params, mean_score));
-        }
+        let results: Result<Vec<(ParamSet, f64)>> = param_sets
+            .into_par_iter()
+            .map(|params| {
+                let mut learner = (self.factory)(&params);
+                let bench = benchmark::resample_regress(&mut *learner, task, resampling, &[measure])?;
+                let mean_score = bench.mean_scores()[0];
+                Ok((params, mean_score))
+            })
+            .collect();
 
-        TuneResult::select_best(results, measure.id().to_string(), measure.maximize())
+        TuneResult::select_best(results?, measure.id().to_string(), measure.maximize())
     }
 }

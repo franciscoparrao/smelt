@@ -210,7 +210,7 @@ fn gaussian_elimination_solve(mut matrix: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> R
             }
         }
         if pivot_val < 1e-10 {
-            return Err(SmeltError::Other(
+            return Err(SmeltError::NumericalError(
                 "singular kriging system (duplicate or degenerate coordinates?)".into(),
             ));
         }
@@ -395,7 +395,7 @@ impl KrigingHybrid {
         let base_pred = base_model.predict(task.features())?;
         let base_vals = match &base_pred {
             Prediction::Regression { predicted, .. } => predicted.clone(),
-            _ => return Err(SmeltError::Other("expected regression prediction".into())),
+            _ => return Err(SmeltError::IncompatiblePrediction("expected regression prediction".into())),
         };
 
         let target = task.target();
@@ -465,7 +465,7 @@ impl TrainedKrigingHybrid {
         let base_pred = self.base_model.predict(features)?;
         let base_vals = match &base_pred {
             Prediction::Regression { predicted, .. } => predicted.clone(),
-            _ => return Err(SmeltError::Other("expected regression prediction".into())),
+            _ => return Err(SmeltError::IncompatiblePrediction("expected regression prediction".into())),
         };
 
         let k = self.n_neighbors.min(self.coords.len());

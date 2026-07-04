@@ -70,7 +70,7 @@ impl ParquetLoader {
         let target_name = self
             .target_col
             .as_ref()
-            .ok_or_else(|| SmeltError::Other("target column not specified".into()))?;
+            .ok_or_else(|| SmeltError::InvalidParameter("target column not specified".into()))?;
         df.get_column_names()
             .iter()
             .position(|h| h.as_str() == target_name)

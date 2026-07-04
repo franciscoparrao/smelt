@@ -7,6 +7,7 @@ use crate::learner::Learner;
 use crate::measure::Measure;
 use crate::resample::Resample;
 use crate::task::{ClassificationTask, RegressionTask};
+use rayon::prelude::*;
 
 /// Exhaustive search over a grid of hyperparameter values.
 ///
@@ -64,16 +65,21 @@ impl GridSearch {
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
         let combinations = cartesian_product(&self.param_grid);
-        let mut results = Vec::with_capacity(combinations.len());
 
-        for params in combinations {
-            let mut learner = (self.factory)(&params);
-            let bench = benchmark::resample_classif(&mut *learner, task, resampling, &[measure])?;
-            let mean_score = bench.mean_scores()[0];
-            results.push((params, mean_score));
-        }
+        // Each combination builds and evaluates its own learner independently
+        // (the factory is Send + Sync precisely to allow this) -- embarrassingly
+        // parallel across combinations, which usually far outnumber CPU cores.
+        let results: Result<Vec<(ParamSet, f64)>> = combinations
+            .into_par_iter()
+            .map(|params| {
+                let mut learner = (self.factory)(&params);
+                let bench = benchmark::resample_classif(&mut *learner, task, resampling, &[measure])?;
+                let mean_score = bench.mean_scores()[0];
+                Ok((params, mean_score))
+            })
+            .collect();
 
-        TuneResult::select_best(results, measure.id().to_string(), measure.maximize())
+        TuneResult::select_best(results?, measure.id().to_string(), measure.maximize())
     }
 
     /// Tune for regression. Returns the best hyperparameter configuration.
@@ -84,15 +90,17 @@ impl GridSearch {
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
         let combinations = cartesian_product(&self.param_grid);
-        let mut results = Vec::with_capacity(combinations.len());
 
-        for params in combinations {
-            let mut learner = (self.factory)(&params);
-            let bench = benchmark::resample_regress(&mut *learner, task, resampling, &[measure])?;
-            let mean_score = bench.mean_scores()[0];
-            results.push((params, mean_score));
-        }
+        let results: Result<Vec<(ParamSet, f64)>> = combinations
+            .into_par_iter()
+            .map(|params| {
+                let mut learner = (self.factory)(&params);
+                let bench = benchmark::resample_regress(&mut *learner, task, resampling, &[measure])?;
+                let mean_score = bench.mean_scores()[0];
+                Ok((params, mean_score))
+            })
+            .collect();
 
-        TuneResult::select_best(results, measure.id().to_string(), measure.maximize())
+        TuneResult::select_best(results?, measure.id().to_string(), measure.maximize())
     }
 }

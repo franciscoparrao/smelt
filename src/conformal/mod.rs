@@ -86,7 +86,7 @@ impl<'a> ConformalRegressor<'a> {
         let predicted = match &pred {
             Prediction::Regression { predicted, .. } => predicted,
             _ => {
-                return Err(crate::SmeltError::Other(
+                return Err(crate::SmeltError::IncompatiblePrediction(
                     "Expected regression prediction".into(),
                 ));
             }
@@ -125,7 +125,7 @@ impl<'a> ConformalRegressor<'a> {
         let predicted = match &pred {
             Prediction::Regression { predicted, .. } => predicted,
             _ => {
-                return Err(crate::SmeltError::Other(
+                return Err(crate::SmeltError::IncompatiblePrediction(
                     "Expected regression prediction".into(),
                 ));
             }
@@ -200,7 +200,7 @@ impl<'a> ConformalClassifier<'a> {
                 ..
             } => p,
             _ => {
-                return Err(crate::SmeltError::Other(
+                return Err(crate::SmeltError::IncompatiblePrediction(
                     "Conformal classification requires model with probabilities".into(),
                 ));
             }
@@ -243,7 +243,7 @@ impl<'a> ConformalClassifier<'a> {
                 ..
             } => (predicted, p),
             _ => {
-                return Err(crate::SmeltError::Other(
+                return Err(crate::SmeltError::IncompatiblePrediction(
                     "Conformal classification requires model with probabilities".into(),
                 ));
             }

@@ -12,6 +12,7 @@ use crate::resample::CrossValidation;
 use crate::task::{ClassificationTask, RegressionTask};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rayon::prelude::*;
 
 /// Hyperband tuner for efficient hyperparameter optimization.
 ///
@@ -137,15 +138,18 @@ impl Hyperband {
             for _i in 0..=s {
                 folds = folds.min(self.max_folds).max(2);
 
-                // Evaluate each config with current budget
+                // Evaluate each config with current budget -- independent
+                // across configs (each builds its own learner), so this
+                // round's evaluations run in parallel.
                 let cv = CrossValidation::new(folds).with_seed(self.seed);
-                let mut scored: Vec<(ParamSet, f64)> = Vec::new();
-
-                for params in &configs {
-                    let mut learner = (self.factory)(params);
-                    let result = benchmark::resample_classif(&mut *learner, task, &cv, &[measure])?;
-                    scored.push((params.clone(), result.mean_scores()[0]));
-                }
+                let mut scored: Vec<(ParamSet, f64)> = configs
+                    .par_iter()
+                    .map(|params| {
+                        let mut learner = (self.factory)(params);
+                        let result = benchmark::resample_classif(&mut *learner, task, &cv, &[measure])?;
+                        Ok::<_, crate::SmeltError>((params.clone(), result.mean_scores()[0]))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
 
                 all_results.extend(scored.iter().cloned());
 
@@ -191,13 +195,14 @@ impl Hyperband {
             for _i in 0..=s {
                 folds = folds.min(self.max_folds).max(2);
                 let cv = CrossValidation::new(folds).with_seed(self.seed);
-                let mut scored: Vec<(ParamSet, f64)> = Vec::new();
-
-                for params in &configs {
-                    let mut learner = (self.factory)(params);
-                    let result = benchmark::resample_regress(&mut *learner, task, &cv, &[measure])?;
-                    scored.push((params.clone(), result.mean_scores()[0]));
-                }
+                let mut scored: Vec<(ParamSet, f64)> = configs
+                    .par_iter()
+                    .map(|params| {
+                        let mut learner = (self.factory)(params);
+                        let result = benchmark::resample_regress(&mut *learner, task, &cv, &[measure])?;
+                        Ok::<_, crate::SmeltError>((params.clone(), result.mean_scores()[0]))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
 
                 all_results.extend(scored.iter().cloned());
 
