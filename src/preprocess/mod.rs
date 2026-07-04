@@ -11,6 +11,7 @@ pub mod pipeline;
 pub mod rfe;
 pub mod scaler;
 pub mod smote;
+pub mod spatial_smote;
 
 use crate::Result;
 use ndarray::Array2;
@@ -25,6 +26,7 @@ pub use pipeline::Pipeline;
 pub use rfe::RFE;
 pub use scaler::{MinMaxScaler, StandardScaler};
 pub use smote::Smote;
+pub use spatial_smote::SpatialSmote;
 
 /// Trait for feature transformers (scalers, encoders, imputers).
 ///

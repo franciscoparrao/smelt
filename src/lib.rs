@@ -82,10 +82,10 @@ pub mod prelude {
     pub use crate::learner::{
         AdaBoost, Bagging, CatBoost, DecisionTree, DynamicEnsemble, EBM, ElasticNet, ExtraTrees,
         BandwidthSelection, GaussianNB, GeoXGBoost, GradientBoosting, HoeffdingTree,
-        KNearestNeighbors, Lasso, Learner, TrainedGeoXGBoost,
+        KNearestNeighbors, KrigingHybrid, Lasso, Learner, TrainedGeoXGBoost, TrainedKrigingHybrid,
         LightGBM, LinearRegression, LinearSVM, LogisticRegression, ObliqueForest, ObliqueTree,
-        Objective, QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, XGBoost,
-        learner_from_id, registered_learner_ids,
+        Objective, QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, VariogramFit,
+        VariogramModel, XGBoost, learner_from_id, registered_learner_ids,
     };
     pub use crate::measure::{
         Accuracy, AteBias, AucRoc, BalancedAccuracy, Brier, CohensKappa, F1Score, LogLoss, Mae,
@@ -94,7 +94,7 @@ pub mod prelude {
     pub use crate::prediction::Prediction;
     pub use crate::preprocess::{
         Adasyn, FilterSelector, ImputeStrategy, Imputer, LabelEncoder, MinMaxScaler, OneHotEncoder,
-        PCA, Pipeline, RFE, Smote, StandardScaler, Transformer,
+        PCA, Pipeline, RFE, Smote, SpatialSmote, StandardScaler, Transformer,
     };
     pub use crate::resample::{
         CrossValidation, GroupCV, Holdout, Resample, SpatialBlockCV, SpatialBufferCV, StratifiedCV,

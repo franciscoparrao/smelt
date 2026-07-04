@@ -44,8 +44,8 @@
 
 ## Prioridad 4: DIFERENCIADORES (único en Rust)
 
-- [ ] **Kriging-ML Hybrid** — Regression-kriging con XGBoost/RF para residuos espaciales. 15+ papers en Q5_3. ~300 líneas.
-- [ ] **Spatial-SMOTE** — SMOTE geoespacialmente informado. ~150 líneas.
+- [x] **Kriging-ML Hybrid** — Regression-kriging con XGBoost/RF para residuos espaciales. 15+ papers en Q5_3. ✅ `src/learner/kriging_hybrid.rs` (2026-07-04)
+- [x] **Spatial-SMOTE** — SMOTE geoespacialmente informado. ✅ `src/preprocess/spatial_smote.rs` (2026-07-04)
 - [ ] **Uplift Modeling (X/R/DR-Learners)** — Meta-learners para efectos causales. Extiende CausalForest. ~250 líneas.
 - [ ] **Online Adaptive Random Forest** — RF incremental con detección de concept drift (ADWIN). ~400 líneas.
 - [ ] **Mondrian Forest** — Árboles con proceso de Mondrian para partición incremental consistente. ~300 líneas.

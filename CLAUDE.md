@@ -35,15 +35,16 @@ src/
 ├── error.rs        # SmeltError enum (thiserror)
 ├── task/mod.rs     # Task, ClassificationTask, RegressionTask
 ├── learner/        # Learner trait, TrainedModel trait, learner_from_id registry,
-│                   # 26 learners (tree/, xgboost, lightgbm, catboost, geo_xgboost,
-│                   # oblique, stacking, bagging, des, ebm, quantile*, regularized, ...)
+│                   # 27 learners (tree/, xgboost, lightgbm, catboost, geo_xgboost,
+│                   # kriging_hybrid, oblique, stacking, bagging, des, ebm, quantile*,
+│                   # regularized, ...)
 ├── prediction/     # Prediction enum (Classification/Regression)
 ├── measure/        # Accuracy, F1, AUC-ROC, BalancedAccuracy, Kappa, MCC, Brier,
 │                   # RMSE, MAE, R², MAPE (+ trait Measure)
 ├── resample/       # CrossValidation, Holdout, SpatialBlockCV, SpatialBufferCV,
 │                   # StratifiedCV, GroupCV (+ trait Resample)
 ├── preprocess/     # StandardScaler, MinMaxScaler, Imputer, OneHot/LabelEncoder,
-│                   # SMOTE, Adasyn, PCA, FilterSelector, RFE, Pipeline
+│                   # SMOTE, SpatialSmote, Adasyn, PCA, FilterSelector, RFE, Pipeline
 ├── tuning/         # GridSearch, RandomSearch, BayesianOptimizer, Hyperband
 ├── cluster/        # KMeans, DBSCAN, IsolationForest
 ├── causal/         # CausalForest (honest splitting, CATE/ATE, jackknife SE);
@@ -186,6 +187,38 @@ the full design rationale.
 - [ ] Generic per-sample-weight support on `Learner`/`RegressionTask` —
       would let R-learner use the paper's weighted R-loss instead of the
       documented unweighted simplification; cross-cutting, out of scope
+
+### Geospatial differentiators (2026-07-04, not part of Fase 3)
+
+Separate initiative — with Fase 3 fully closed, the user chose to open a new
+phase scoped to features unique to smelt's GIS niche versus sklearn/xgboost,
+pulled from `docs/roadmap_checklist.md` (Prioridad 4).
+
+- [x] Kriging-ML Hybrid (`src/learner/kriging_hybrid.rs`) — regression-kriging:
+      trains a base `Learner` via the same `Fn() -> Box<dyn Learner> + Send +
+      Sync` factory pattern `Bagging`/`Stacking`/the causal meta-learners use,
+      fits a semivariogram (Spherical/Exponential/Gaussian, grid-search fit —
+      no nonlinear-least-squares dependency, same "hand-roll the small
+      numeric routine" precedent as `CsrMatrix` in `src/sparse.rs`) to its
+      residuals, and krige-interpolates them at prediction time via a
+      hand-rolled Gaussian-elimination solver (local neighborhood, not a
+      global n×n solve). `TrainedModel::predict` is base-model-only (the
+      trait carries no coordinates); `TrainedKrigingHybrid::predict_spatial`
+      does the kriging correction — same split as `TrainedGeoXGBoost`.
+- [x] Spatial-SMOTE (`src/preprocess/spatial_smote.rs`) — SMOTE restricted to
+      same-class neighbors within an optional `max_spatial_distance`, so it
+      can't splice together feature-similar but geographically distant
+      minority samples the way plain `Smote` can. Interpolates a synthetic
+      coordinate alongside each synthetic sample (same lambda as the feature
+      interpolation) and returns it alongside the balanced task, since `Task`
+      itself carries no coordinates (same "coords passed alongside, not
+      stored in `Task`" idiom as `SpatialBlockCV`/`SpatialBufferCV`/
+      `GeoXGBoost`). Matches plain `Smote`'s output exactly when
+      `max_spatial_distance` is unset.
+- Python bindings for both deliberately deferred — the kriging solver is the
+  numerically riskiest code in this pass (variogram fitting, per-point linear
+  solves, degenerate/singular systems); hardening it in Rust first before
+  locking in a pyo3-facing signature. Follow-up, not forgotten.
 
 ## Dependencies
 
