@@ -240,21 +240,62 @@ fn gaussian_elimination_solve(mut matrix: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> R
     Ok(x)
 }
 
+/// Training locations closer to each other than this are treated as
+/// coincident (e.g. repeat samples from the same borehole): kriging them as
+/// distinct points produces identical matrix rows and a singular system.
+const COINCIDENT_COORD_EPS: f64 = 1e-8;
+
 /// Local ordinary kriging of the residual at one query point, given its
 /// distances to the `k` nearest training points (already sorted/truncated).
+///
+/// Two failure modes that used to make this return `Err` on every query are
+/// handled before building the system: a degenerate (near-zero-variance)
+/// fitted variogram, and coincident/near-coincident training coordinates
+/// among the neighbors.
 fn ordinary_kriging(
     neighbors: &[(usize, f64)],
     coords: &[(f64, f64)],
     residuals: &[f64],
     fit: &VariogramFit,
 ) -> Result<f64> {
-    let k = neighbors.len();
-    if k == 0 {
+    if neighbors.is_empty() {
         return Ok(0.0);
     }
-    if k == 1 {
-        return Ok(residuals[neighbors[0].0]);
+
+    // Degenerate variogram: the base learner's residuals have ~zero variance
+    // (e.g. it already interpolates the training data), so γ(h) ≈ 0 for
+    // every lag — there's no spatially-structured signal to krige, and the
+    // system built from an all-zero variogram is singular. `nugget <= sill`
+    // by construction (see `fit_variogram`), so checking the sill suffices.
+    if fit.sill < 1e-9 {
+        return Ok(0.0);
     }
+
+    // Merge neighbors at (near-)identical training locations into groups
+    // before solving, representing each group by its mean residual. This is
+    // O(k²) in the neighborhood size (bounded by `n_neighbors`, small).
+    let mut groups: Vec<Vec<usize>> = Vec::new(); // indices into `neighbors`
+    'outer: for (ni, &(idx, _)) in neighbors.iter().enumerate() {
+        for g in groups.iter_mut() {
+            if dist(coords[neighbors[g[0]].0], coords[idx]) < COINCIDENT_COORD_EPS {
+                g.push(ni);
+                continue 'outer;
+            }
+        }
+        groups.push(vec![ni]);
+    }
+
+    let group_residual = |g: &[usize]| -> f64 {
+        g.iter().map(|&ni| residuals[neighbors[ni].0]).sum::<f64>() / g.len() as f64
+    };
+
+    let k = groups.len();
+    if k == 1 {
+        return Ok(group_residual(&groups[0]));
+    }
+
+    let group_coord = |g: &[usize]| coords[neighbors[g[0]].0];
+    let group_query_dist = |g: &[usize]| neighbors[g[0]].1;
 
     let n = k + 1;
     let mut matrix = vec![vec![0.0; n]; n];
@@ -262,17 +303,17 @@ fn ordinary_kriging(
 
     for a in 0..k {
         for b in 0..k {
-            let h = dist(coords[neighbors[a].0], coords[neighbors[b].0]);
+            let h = dist(group_coord(&groups[a]), group_coord(&groups[b]));
             matrix[a][b] = fit.model.value(h, fit.nugget, fit.sill, fit.range);
         }
         matrix[a][k] = 1.0;
         matrix[k][a] = 1.0;
-        rhs[a] = fit.model.value(neighbors[a].1, fit.nugget, fit.sill, fit.range);
+        rhs[a] = fit.model.value(group_query_dist(&groups[a]), fit.nugget, fit.sill, fit.range);
     }
     rhs[k] = 1.0;
 
     let weights = gaussian_elimination_solve(matrix, rhs)?;
-    Ok((0..k).map(|a| weights[a] * residuals[neighbors[a].0]).sum())
+    Ok((0..k).map(|a| weights[a] * group_residual(&groups[a])).sum())
 }
 
 /// Regression-kriging: a base `Learner` plus ordinary kriging of its
@@ -715,6 +756,85 @@ mod tests {
         assert!(
             spatial_mse < base_mse,
             "kriging-corrected MSE ({spatial_mse}) should be lower than base-model-only MSE ({base_mse})"
+        );
+    }
+
+    /// Regression test: when the base learner already fits the target
+    /// exactly (residuals ~0), the fitted variogram degenerates to
+    /// nugget=sill=0 and used to make `predict_spatial` return `Err` for
+    /// every query (an all-zero-variogram kriging system is singular). The
+    /// honest correction in that case is simply 0.
+    #[test]
+    fn predict_spatial_handles_degenerate_zero_variance_residuals() {
+        let n = 12;
+        let feats: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let target: Vec<f64> = feats.iter().map(|&x| 2.0 * x + 1.0).collect(); // exactly linear
+        let coords: Vec<(f64, f64)> = (0..n).map(|i| (i as f64, 0.0)).collect();
+        let features = Array2::from_shape_vec((n, 1), feats.clone()).unwrap();
+        let task = RegressionTask::new("t", features.clone(), target.clone()).unwrap();
+
+        let mut kh = KrigingHybrid::new(|| Box::new(LinearRegression::new()), coords.clone())
+            .with_n_neighbors(5);
+        let model = kh.train_regress_geo(&task).unwrap();
+
+        let pred = model
+            .predict_spatial(&features, &coords)
+            .expect("degenerate (zero-variance) variogram must not fail predict_spatial");
+        let Prediction::Regression { predicted, .. } = pred else {
+            panic!("expected regression");
+        };
+        for (i, &p) in predicted.iter().enumerate() {
+            assert!(
+                (p - target[i]).abs() < 1e-6,
+                "base model already fits exactly, correction should be ~0: point {i} got {p}, expected {}",
+                target[i]
+            );
+        }
+    }
+
+    /// Regression test: duplicate training coordinates (e.g. repeated
+    /// samples from the same borehole) used to make the local kriging
+    /// system singular whenever both copies fell in the same query's
+    /// neighborhood, failing `predict_spatial` for any nearby query.
+    #[test]
+    fn predict_spatial_handles_duplicate_training_coordinates() {
+        let side = 5;
+        let mut feats = Vec::new();
+        let mut target = Vec::new();
+        let mut coords = Vec::new();
+        for r in 0..side {
+            for c in 0..side {
+                let x = c as f64;
+                let y = r as f64;
+                coords.push((x, y));
+                feats.push(x - y);
+                let spatial_trend = (x * 0.5).sin() * 2.0;
+                target.push((x - y) * 0.1 + spatial_trend);
+            }
+        }
+        // Duplicate one location exactly (same coords, slightly different
+        // residual-inducing target) — the classic "two analyses of the same
+        // borehole" case.
+        coords.push(coords[0]);
+        feats.push(feats[0]);
+        target.push(target[0] + 0.05);
+
+        let features = Array2::from_shape_vec((coords.len(), 1), feats).unwrap();
+        let task = RegressionTask::new("t", features.clone(), target).unwrap();
+
+        let mut kh = KrigingHybrid::new(|| Box::new(DecisionTree::new()), coords.clone())
+            .with_n_neighbors(6);
+        let model = kh.train_regress_geo(&task).unwrap();
+
+        // Query right at the duplicated location: its neighborhood is
+        // guaranteed to contain both coincident training points.
+        let (qx, qy) = coords[0];
+        let query_features = Array2::from_shape_vec((1, 1), vec![qx - qy]).unwrap();
+        let result = model.predict_spatial(&query_features, &[coords[0]]);
+        assert!(
+            result.is_ok(),
+            "duplicate training coordinates should not make predict_spatial fail: {:?}",
+            result.err()
         );
     }
 }

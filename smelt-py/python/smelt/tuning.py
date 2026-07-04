@@ -3,6 +3,25 @@
 import numpy as np
 from itertools import product
 
+# Metrics where a lower score is better (error/loss metrics). Everything else
+# bound in smelt.measures is a higher-is-better score (accuracy, F1, R^2, ...).
+_MINIMIZE_METRIC_NAMES = frozenset({
+    "rmse_score", "mae_score", "brier_score", "mape_score", "logloss_score",
+})
+
+
+def _resolve_maximize(metric, maximize):
+    """Direction of optimization for `metric`.
+
+    Mirrors the Rust core's `Measure::maximize()`: error metrics like RMSE/MAE
+    must be minimized, not maximized. `maximize=None` (default) infers the
+    direction from the metric's name; pass an explicit bool for custom
+    metrics the name-based heuristic doesn't recognize.
+    """
+    if maximize is not None:
+        return maximize
+    return getattr(metric, "__name__", "") not in _MINIMIZE_METRIC_NAMES
+
 
 class RandomSearch:
     """Random search hyperparameter tuning with any CV strategy.
@@ -21,6 +40,11 @@ class RandomSearch:
         Number of random parameter combinations to try.
     use_proba : bool
         If True, pass predict_proba output to metric (for AUC-ROC).
+    maximize : bool or None
+        Whether a higher `metric` score is better. Defaults to `None`, which
+        infers the direction from `metric`'s name (RMSE/MAE/Brier/MAPE/logloss
+        are minimized, everything else — accuracy, F1, R^2, AUC, ... — is
+        maximized). Pass an explicit bool for custom metrics.
     seed : int
         Random seed.
 
@@ -41,13 +65,14 @@ class RandomSearch:
     """
 
     def __init__(self, learner_class, param_grid, cv, metric, n_iter=50,
-                 use_proba=False, seed=42):
+                 use_proba=False, maximize=None, seed=42):
         self.learner_class = learner_class
         self.param_grid = param_grid
         self.cv = cv
         self.metric = metric
         self.n_iter = n_iter
         self.use_proba = use_proba
+        self.maximize = _resolve_maximize(metric, maximize)
         self.seed = seed
 
     def fit(self, X, y):
@@ -73,7 +98,8 @@ class RandomSearch:
         else:
             combos = all_combos
 
-        best_score = -np.inf
+        maximize = self.maximize
+        best_score = -np.inf if maximize else np.inf
         best_params = None
         all_results = []
 
@@ -105,11 +131,12 @@ class RandomSearch:
             all_results.append({"params": params, "score": mean_score,
                                 "fold_scores": fold_scores})
 
-            if mean_score > best_score:
+            better = mean_score > best_score if maximize else mean_score < best_score
+            if better:
                 best_score = mean_score
                 best_params = params
 
-        all_results.sort(key=lambda x: x["score"], reverse=True)
+        all_results.sort(key=lambda x: x["score"], reverse=maximize)
 
         return {
             "score": best_score,
@@ -125,9 +152,10 @@ class GridSearch(RandomSearch):
     """
 
     def __init__(self, learner_class, param_grid, cv, metric,
-                 use_proba=False, seed=42):
+                 use_proba=False, maximize=None, seed=42):
         n_combos = 1
         for v in param_grid.values():
             n_combos *= len(v)
         super().__init__(learner_class, param_grid, cv, metric,
-                         n_iter=n_combos, use_proba=use_proba, seed=seed)
+                         n_iter=n_combos, use_proba=use_proba,
+                         maximize=maximize, seed=seed)

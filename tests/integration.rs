@@ -2138,6 +2138,29 @@ mod parquet_tests {
     }
 
     #[test]
+    fn load_parquet_string_target_with_null_errors() {
+        // A null in a string target used to silently become the empty
+        // string "" — a phantom class distinct from any real label —
+        // instead of erroring like the numeric-target null path already did.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.parquet");
+        write_parquet(
+            &path,
+            3,
+            vec![
+                Column::new("x".into(), vec![1.0f64, 2.0, 3.0]),
+                Column::new(
+                    "species".into(),
+                    vec![Some("cat".to_string()), None, Some("dog".to_string())],
+                ),
+            ],
+        );
+
+        let err = ParquetLoader::from_path(&path).target("species").load_classif();
+        assert!(err.is_err(), "null in string target must error, not become a phantom \"\" class");
+    }
+
+    #[test]
     fn load_parquet_missing_column_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.parquet");

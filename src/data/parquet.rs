@@ -178,7 +178,16 @@ impl ParquetLoader {
                 .collect::<Result<Vec<_>>>()?
         } else {
             let strings = Self::column_to_strings(target_col, n_samples)?;
-            let owned: Vec<&str> = strings.iter().map(|s| s.as_deref().unwrap_or("")).collect();
+            let owned: Vec<&str> = strings
+                .iter()
+                .map(|s| {
+                    s.as_deref().ok_or_else(|| {
+                        SmeltError::Parquet(
+                            "target column contains a null value".into(),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
             let encoder = LabelEncoder::fit(&owned);
             encoder.encode(&owned)?
         };

@@ -88,10 +88,12 @@ struct TrainedQuantileGB {
     trees: Vec<Node>,
     initial: f64,
     learning_rate: f64,
+    n_features: usize,
 }
 
 impl TrainedModel for TrainedQuantileGB {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.n_features)?;
         let predicted: Vec<f64> = features
             .rows()
             .into_iter()
@@ -116,6 +118,12 @@ impl Learner for QuantileGB {
 
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        if !(self.quantile > 0.0 && self.quantile < 1.0) {
+            return Err(crate::SmeltError::InvalidParameter(format!(
+                "quantile must be in (0, 1), got {}",
+                self.quantile
+            )));
+        }
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
@@ -126,8 +134,8 @@ impl Learner for QuantileGB {
         // Initial prediction: quantile of target
         let mut sorted_target: Vec<f64> = target.to_vec();
         sorted_target.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let q_idx = ((n_samples as f64 * tau).ceil() as usize).min(n_samples) - 1;
-        let initial = sorted_target[q_idx.max(0)];
+        let q_idx = ((n_samples as f64 * tau).ceil() as usize).clamp(1, n_samples) - 1;
+        let initial = sorted_target[q_idx];
 
         let mut preds = vec![initial; n_samples];
         let mut trees = Vec::with_capacity(self.n_estimators);
@@ -165,6 +173,39 @@ impl Learner for QuantileGB {
             trees,
             initial,
             learning_rate: self.learning_rate,
+            n_features,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test: `QuantileGB::new(0.0)` (or `1.0`) used to panic with
+    /// a `usize` subtraction overflow in `train_regress`'s initial-quantile
+    /// index computation instead of returning a clean error.
+    #[test]
+    fn quantile_out_of_open_unit_interval_is_rejected() {
+        let features = Array2::from_shape_vec((10, 1), (0..10).map(|i| i as f64).collect()).unwrap();
+        let target: Vec<f64> = (0..10).map(|i| i as f64).collect();
+        let task = RegressionTask::new("q", features, target).unwrap();
+
+        for tau in [0.0, 1.0, -0.1, 1.1] {
+            let mut q = QuantileGB::new(tau).with_n_estimators(2);
+            assert!(q.train_regress(&task).is_err(), "tau={tau} should be rejected");
+        }
+    }
+
+    #[test]
+    fn predict_rejects_wrong_feature_count() {
+        let features = Array2::from_shape_vec((10, 2), (0..20).map(|i| i as f64).collect()).unwrap();
+        let target: Vec<f64> = (0..10).map(|i| i as f64).collect();
+        let task = RegressionTask::new("q", features, target).unwrap();
+        let mut q = QuantileGB::new(0.5).with_n_estimators(2);
+        let model = q.train_regress(&task).unwrap();
+
+        let wrong = Array2::from_shape_vec((3, 5), vec![0.0; 15]).unwrap();
+        assert!(model.predict(&wrong).is_err());
     }
 }

@@ -25,7 +25,7 @@
 //! assert!(w.p_value < 0.05); // XGBoost significantly better
 //!
 //! // Bootstrap 95% CI for XGBoost accuracy
-//! let ci = bootstrap_ci(&xgb_scores, 0.95, 10000, 42);
+//! let ci = bootstrap_ci(&xgb_scores, 0.95, 10000, 42).unwrap();
 //! assert!(ci.lower > 0.85);
 //! ```
 
@@ -412,9 +412,29 @@ pub fn mcnemar_test(pred_a: &[usize], pred_b: &[usize], truth: &[usize]) -> Resu
 /// * `confidence` - Confidence level (e.g., 0.95 for 95% CI)
 /// * `n_bootstrap` - Number of bootstrap resamples (recommended: 10000)
 /// * `seed` - Random seed for reproducibility
-pub fn bootstrap_ci(scores: &[f64], confidence: f64, n_bootstrap: usize, seed: u64) -> BootstrapCI {
+///
+/// # Errors
+/// Returns [`SmeltError::EmptyDataset`] if `scores` is empty, and
+/// [`SmeltError::InvalidParameter`] if `n_bootstrap == 0` — both used to
+/// panic (an empty-range `random_range` and a `usize` underflow,
+/// respectively) instead of returning a clean error.
+pub fn bootstrap_ci(
+    scores: &[f64],
+    confidence: f64,
+    n_bootstrap: usize,
+    seed: u64,
+) -> Result<BootstrapCI> {
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
+
+    if scores.is_empty() {
+        return Err(SmeltError::EmptyDataset);
+    }
+    if n_bootstrap == 0 {
+        return Err(SmeltError::InvalidParameter(
+            "n_bootstrap must be > 0".into(),
+        ));
+    }
 
     let n = scores.len();
     let estimate = scores.iter().sum::<f64>() / n as f64;
@@ -439,12 +459,12 @@ pub fn bootstrap_ci(scores: &[f64], confidence: f64, n_bootstrap: usize, seed: u
     let lo_idx = lo_idx.min(n_bootstrap - 1);
     let hi_idx = hi_idx.min(n_bootstrap - 1);
 
-    BootstrapCI {
+    Ok(BootstrapCI {
         estimate,
         lower: boot_means[lo_idx],
         upper: boot_means[hi_idx],
         confidence,
-    }
+    })
 }
 
 // ── Helper: standard normal CDF ────────────────────────────────────
@@ -566,8 +586,8 @@ pub fn compare_models(
     let mean_b = scores_b.iter().sum::<f64>() / scores_b.len() as f64;
 
     let w = wilcoxon_signed_rank(scores_a, scores_b)?;
-    let ci_a = bootstrap_ci(scores_a, 0.95, 10000, 42);
-    let ci_b = bootstrap_ci(scores_b, 0.95, 10000, 43);
+    let ci_a = bootstrap_ci(scores_a, 0.95, 10000, 42)?;
+    let ci_b = bootstrap_ci(scores_b, 0.95, 10000, 43)?;
 
     let winner = if mean_a > mean_b { name_a } else { name_b };
     let sig = if w.significant {
@@ -641,10 +661,19 @@ mod tests {
     #[test]
     fn test_bootstrap_ci() {
         let scores = vec![0.90, 0.89, 0.91, 0.90, 0.92, 0.88, 0.91, 0.90, 0.89, 0.91];
-        let ci = bootstrap_ci(&scores, 0.95, 10000, 42);
+        let ci = bootstrap_ci(&scores, 0.95, 10000, 42).unwrap();
         assert!(ci.lower > 0.88);
         assert!(ci.upper < 0.93);
         assert!((ci.estimate - 0.901).abs() < 0.01);
+    }
+
+    /// Regression test: `bootstrap_ci` used to panic on an empty `scores`
+    /// slice (`rng.random_range(0..0)`) or `n_bootstrap == 0` (a `usize`
+    /// underflow computing `n_bootstrap - 1`) instead of returning `Err`.
+    #[test]
+    fn bootstrap_ci_rejects_empty_scores_and_zero_resamples() {
+        assert!(bootstrap_ci(&[], 0.95, 100, 42).is_err());
+        assert!(bootstrap_ci(&[0.9, 0.8], 0.95, 0, 42).is_err());
     }
 
     #[test]

@@ -176,6 +176,19 @@ pub(crate) fn not_fitted() -> PyErr {
 
 /// Parse coords from numpy array (Nx2), list of tuples, or list of lists.
 pub(crate) fn parse_coords(coords: &Bound<'_, PyAny>) -> PyResult<Vec<(f64, f64)>> {
+    let parsed = parse_coords_unchecked(coords)?;
+    for (i, &(x, y)) in parsed.iter().enumerate() {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(PyRuntimeError::new_err(format!(
+                "coords[{i}] = ({x}, {y}) must be finite (no NaN/inf) — \
+                 non-finite coordinates silently corrupt spatial distance calculations"
+            )));
+        }
+    }
+    Ok(parsed)
+}
+
+fn parse_coords_unchecked(coords: &Bound<'_, PyAny>) -> PyResult<Vec<(f64, f64)>> {
     // Try numpy 2D array first (most common case)
     if let Ok(arr) = coords.extract::<PyReadonlyArray2<'_, f64>>() {
         let a = arr.as_array();

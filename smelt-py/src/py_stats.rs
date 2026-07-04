@@ -46,9 +46,9 @@ pub(crate) fn bootstrap_ci(
     confidence: f64,
     n_bootstrap: usize,
     seed: u64,
-) -> (f64, f64, f64) {
-    let r = smelt_ml::stats::bootstrap_ci(&scores, confidence, n_bootstrap, seed);
-    (r.estimate, r.lower, r.upper)
+) -> PyResult<(f64, f64, f64)> {
+    let r = smelt_ml::stats::bootstrap_ci(&scores, confidence, n_bootstrap, seed).map_err(smelt_err)?;
+    Ok((r.estimate, r.lower, r.upper))
 }
 
 #[pyfunction]

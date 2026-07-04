@@ -637,16 +637,35 @@ impl<'a> XGBTreeBuilder<'a> {
         let left_count = left_end - start;
         let right_count = end - left_end;
 
-        // Subtraction: scan+save SMALLER, process, subtract → LARGER (skip scan)
+        // Subtraction: scan+save SMALLER, process, subtract → LARGER (skip scan).
+        // Only valid if the smaller side actually scans and stores its histogram —
+        // if it hits the early-leaf return in build_hist_sub (n<=1 or h_sum <
+        // min_child_weight; depth>=max_depth is impossible here since
+        // children_are_leaves was already handled above), pool[depth+1] is never
+        // written and subtract_in_place would produce garbage from a stale level.
+        // Detect that case ahead of time and fall back to an explicit scan for
+        // the larger sibling too.
         if left_count <= right_count {
+            let left_h_sum: f64 = indices[start..left_end].iter().map(|&i| self.hess[i]).sum();
+            let left_is_trivial = left_count <= 1 || left_h_sum < self.min_child_weight;
             let left = self.build_hist_sub(indices, start, left_end, depth + 1, false, llo, lhi);
-            self.pool.subtract_in_place(depth, depth + 1);
-            let right = self.build_hist_sub(indices, left_end, end, depth + 1, true, rlo, rhi);
+            let right = if left_is_trivial {
+                self.build_hist_sub(indices, left_end, end, depth + 1, false, rlo, rhi)
+            } else {
+                self.pool.subtract_in_place(depth, depth + 1);
+                self.build_hist_sub(indices, left_end, end, depth + 1, true, rlo, rhi)
+            };
             best.into_node(left, right)
         } else {
+            let right_h_sum: f64 = indices[left_end..end].iter().map(|&i| self.hess[i]).sum();
+            let right_is_trivial = right_count <= 1 || right_h_sum < self.min_child_weight;
             let right = self.build_hist_sub(indices, left_end, end, depth + 1, false, rlo, rhi);
-            self.pool.subtract_in_place(depth, depth + 1);
-            let left = self.build_hist_sub(indices, start, left_end, depth + 1, true, llo, lhi);
+            let left = if right_is_trivial {
+                self.build_hist_sub(indices, start, left_end, depth + 1, false, llo, lhi)
+            } else {
+                self.pool.subtract_in_place(depth, depth + 1);
+                self.build_hist_sub(indices, start, left_end, depth + 1, true, llo, lhi)
+            };
             best.into_node(left, right)
         }
     }
@@ -2016,6 +2035,65 @@ mod weight_tests {
             / n as f64)
             .sqrt();
         assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
+    }
+
+    /// Regression test for the stale-histogram bug in `build_hist_sub`
+    /// (histogram-subtraction trick): when the smaller child of a split hits
+    /// the early-leaf return (n<=1 or h_sum < min_child_weight) it never
+    /// scans/stores its histogram, so `subtract_in_place` used to compute the
+    /// larger sibling's histogram from stale pool data left over from an
+    /// unrelated level, collapsing whole subtrees to a single leaf.
+    ///
+    /// n=600 forces histogram mode; a single extreme-outlier row is isolated
+    /// by the root split as a 1-sample child, leaving the other 599 rows (a
+    /// clean step function) to be built from the (previously) corrupted
+    /// sibling histogram.
+    #[test]
+    fn outlier_isolated_as_singleton_child_does_not_corrupt_sibling_histogram() {
+        let n = 600;
+        let mut feats = Vec::with_capacity(n);
+        let mut target = Vec::with_capacity(n);
+        for i in 0..n - 1 {
+            let x = i as f64;
+            feats.push(x);
+            target.push(if x >= 300.0 { 10.0 } else { 0.0 });
+        }
+        feats.push(1e9);
+        target.push(1e6);
+
+        let features = Array2::from_shape_vec((n, 1), feats.clone()).unwrap();
+        let task = RegressionTask::new("stale", features.clone(), target.clone()).unwrap();
+        let mut model = XGBoost::new()
+            .with_n_estimators(1)
+            .with_max_depth(3)
+            .with_learning_rate(1.0)
+            .with_lambda(1e-9);
+        let trained = model.train_regress(&task).unwrap();
+        let pred = match trained.predict(&features).unwrap() {
+            Prediction::Regression { predicted, .. } => predicted,
+            _ => unreachable!(),
+        };
+
+        // RMSE on the 599 clean rows only — the outlier's own leaf may be
+        // arbitrarily off (that's expected: it's a singleton leaf).
+        let sse: f64 = pred[..n - 1]
+            .iter()
+            .zip(&target[..n - 1])
+            .map(|(p, t)| (p - t).powi(2))
+            .sum();
+        let rmse = (sse / (n - 1) as f64).sqrt();
+        assert!(
+            rmse < 1.0,
+            "clean rows should still fit the step despite the outlier sibling, got RMSE={rmse}"
+        );
+
+        let mut distinct: Vec<f64> = pred[..n - 1].to_vec();
+        distinct.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        distinct.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        assert!(
+            distinct.len() > 1,
+            "clean rows collapsed to a single predicted value (stale-histogram bug): {distinct:?}"
+        );
     }
 
     /// Regression test: `with_sample_weights` was documented as

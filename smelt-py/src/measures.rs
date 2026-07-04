@@ -8,9 +8,28 @@ use smelt_ml::prediction::Prediction;
 
 // ── Measures ───────────────────────────────────────────────────────────
 
+/// Converts predicted class labels from `f64` (as returned by `predict()`)
+/// to `usize`, rejecting negative or non-integer values instead of letting
+/// Rust's saturating float-to-int cast silently turn e.g. `-1.0` into class
+/// `0` — which would then count as a correct prediction against a true `0`.
+fn to_class_labels(y_pred: &[f64]) -> PyResult<Vec<usize>> {
+    y_pred
+        .iter()
+        .map(|&v| {
+            if v.is_finite() && v >= 0.0 && v.fract() == 0.0 {
+                Ok(v as usize)
+            } else {
+                Err(PyRuntimeError::new_err(format!(
+                    "y_pred must contain non-negative integer class labels, got {v}"
+                )))
+            }
+        })
+        .collect()
+}
+
 #[pyfunction]
 pub(crate) fn accuracy_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
-    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred_u = to_class_labels(&y_pred)?;
     let pred = Prediction::classification_with_truth(pred_u, y_true);
     smelt_ml::prelude::Accuracy.score(&pred).map_err(smelt_err)
 }
@@ -35,28 +54,28 @@ pub(crate) fn mae_score(y_true: Vec<f64>, y_pred: Vec<f64>) -> PyResult<f64> {
 
 #[pyfunction]
 pub(crate) fn f1_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
-    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred_u = to_class_labels(&y_pred)?;
     let pred = Prediction::classification_with_truth(pred_u, y_true);
     smelt_ml::prelude::F1Score.score(&pred).map_err(smelt_err)
 }
 
 #[pyfunction]
 pub(crate) fn precision_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
-    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred_u = to_class_labels(&y_pred)?;
     let pred = Prediction::classification_with_truth(pred_u, y_true);
     smelt_ml::prelude::Precision.score(&pred).map_err(smelt_err)
 }
 
 #[pyfunction]
 pub(crate) fn recall_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
-    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred_u = to_class_labels(&y_pred)?;
     let pred = Prediction::classification_with_truth(pred_u, y_true);
     smelt_ml::prelude::Recall.score(&pred).map_err(smelt_err)
 }
 
 #[pyfunction]
 pub(crate) fn balanced_accuracy_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
-    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred_u = to_class_labels(&y_pred)?;
     let pred = Prediction::classification_with_truth(pred_u, y_true);
     smelt_ml::prelude::BalancedAccuracy
         .score(&pred)
@@ -65,14 +84,14 @@ pub(crate) fn balanced_accuracy_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> P
 
 #[pyfunction]
 pub(crate) fn cohens_kappa_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
-    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred_u = to_class_labels(&y_pred)?;
     let pred = Prediction::classification_with_truth(pred_u, y_true);
     smelt_ml::prelude::CohensKappa.score(&pred).map_err(smelt_err)
 }
 
 #[pyfunction]
 pub(crate) fn mcc_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResult<f64> {
-    let pred_u: Vec<usize> = y_pred.iter().map(|&v| v as usize).collect();
+    let pred_u = to_class_labels(&y_pred)?;
     let pred = Prediction::classification_with_truth(pred_u, y_true);
     smelt_ml::prelude::Mcc.score(&pred).map_err(smelt_err)
 }

@@ -169,7 +169,18 @@ _NON_PARAM_ATTRS = {
 
 
 def _get_params(learner):
-    """Extract constructor parameters from a learner instance."""
+    """Extract constructor parameters from a learner instance.
+
+    Uses the estimator's own `get_params()` (sklearn-style, added to every
+    wrapper). Falls back to a `dir()` scan only for objects without it — the
+    scan finds nothing on `#[pyclass]` wrappers (their fields aren't `get`
+    properties), which used to make `benchmark()` silently clone every
+    learner with its constructor defaults instead of the params passed in.
+    """
+    get_params = getattr(learner, "get_params", None)
+    if callable(get_params):
+        return get_params()
+
     params = {}
     for attr in dir(learner):
         if attr.startswith("_") or attr in _NON_PARAM_ATTRS:

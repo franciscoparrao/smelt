@@ -343,6 +343,7 @@ struct TrainedObliqueTree {
     root: ObliqueNode,
     feature_names: Vec<String>,
     feature_importances: Vec<f64>,
+    n_classes: Option<usize>,
     is_classifier: bool,
 }
 
@@ -353,7 +354,7 @@ impl TrainedModel for TrainedObliqueTree {
             &[&self.root],
             features,
             self.is_classifier,
-            self.feature_names.len(),
+            self.n_classes.unwrap_or(0),
         )
     }
 
@@ -561,6 +562,7 @@ impl Learner for ObliqueTree {
             root,
             feature_names: task.feature_names().to_vec(),
             feature_importances: builder.feature_importances,
+            n_classes: Some(task.n_classes()),
             is_classifier: true,
         }))
     }
@@ -589,6 +591,7 @@ impl Learner for ObliqueTree {
             root,
             feature_names: task.feature_names().to_vec(),
             feature_importances: builder.feature_importances,
+            n_classes: None,
             is_classifier: false,
         }))
     }
@@ -776,5 +779,66 @@ impl Learner for ObliqueForest {
             n_classes: None,
             is_classifier: false,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test: `TrainedObliqueTree::predict` used to pass
+    /// `feature_names.len()` (the feature count) as `n_classes` — with
+    /// n_features != n_classes this either panics (index out of bounds when
+    /// n_classes < n_features) or silently returns probability rows of the
+    /// wrong width.
+    #[test]
+    fn predict_uses_n_classes_not_n_features_for_probability_width() {
+        // 2 features, 3 classes: n_classes (3) > n_features (2).
+        let n = 90;
+        let mut feats = Vec::with_capacity(n * 2);
+        let mut target = Vec::with_capacity(n);
+        for i in 0..n {
+            let c = i % 3;
+            feats.push(c as f64 + (i as f64) * 1e-3);
+            feats.push((c as f64) * 2.0);
+            target.push(c);
+        }
+        let features = Array2::from_shape_vec((n, 2), feats).unwrap();
+        let task = ClassificationTask::new("obl", features.clone(), target).unwrap();
+        let mut t = ObliqueTree::new().with_max_depth(4);
+        let model = t.train_classif(&task).unwrap();
+        let Prediction::Classification {
+            probabilities: Some(probs),
+            ..
+        } = model.predict(&features).unwrap()
+        else {
+            panic!("expected classification with probabilities");
+        };
+        assert_eq!(probs[0].len(), 3, "probability rows must be n_classes wide, not n_features wide");
+
+        // 5 features, 2 classes: n_classes (2) < n_features (5) — the
+        // silent-wrong-length failure mode (no panic, but wrong width).
+        let n2 = 40;
+        let mut f2 = Vec::new();
+        let mut t2v = Vec::new();
+        for i in 0..n2 {
+            let c = i % 2;
+            for j in 0..5 {
+                f2.push(c as f64 * (j + 1) as f64 + i as f64 * 1e-3);
+            }
+            t2v.push(c);
+        }
+        let features2 = Array2::from_shape_vec((n2, 5), f2).unwrap();
+        let task2 = ClassificationTask::new("obl2", features2.clone(), t2v).unwrap();
+        let mut t2 = ObliqueTree::new().with_max_depth(3);
+        let model2 = t2.train_classif(&task2).unwrap();
+        let Prediction::Classification {
+            probabilities: Some(probs2),
+            ..
+        } = model2.predict(&features2).unwrap()
+        else {
+            panic!("expected classification with probabilities");
+        };
+        assert_eq!(probs2[0].len(), 2, "probability rows must be n_classes wide, not n_features wide");
     }
 }
