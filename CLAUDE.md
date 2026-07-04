@@ -35,9 +35,9 @@ src/
 ├── error.rs        # SmeltError enum (thiserror)
 ├── task/mod.rs     # Task, ClassificationTask, RegressionTask
 ├── learner/        # Learner trait, TrainedModel trait, learner_from_id registry,
-│                   # 27 learners (tree/, xgboost, lightgbm, catboost, geo_xgboost,
-│                   # kriging_hybrid, oblique, stacking, bagging, des, ebm, quantile*,
-│                   # regularized, ...)
+│                   # 28 learners (tree/, xgboost, lightgbm, catboost, geo_xgboost,
+│                   # kriging_hybrid, hoeffding + adaptive_rf (streaming/online),
+│                   # oblique, stacking, bagging, des, ebm, quantile*, regularized, ...)
 ├── prediction/     # Prediction enum (Classification/Regression)
 ├── measure/        # Accuracy, F1, AUC-ROC, BalancedAccuracy, Kappa, MCC, Brier,
 │                   # RMSE, MAE, R², MAPE (+ trait Measure)
@@ -229,6 +229,40 @@ pulled from `docs/roadmap_checklist.md` (Prioridad 4).
       from 8.8 to 0.036 on synthetic spatially-structured residuals and that
       an invalid `base` id raises cleanly from both `__new__` and
       `set_params`.
+- [x] Adaptive Random Forest / ADWIN (2026-07-04) — `src/learner/adaptive_rf.rs`.
+      Ensemble of `HoeffdingTree`s (`src/learner/hoeffding.rs`) with online
+      bagging (Poisson(λ) resampling weight per sample, hand-rolled via
+      Knuth's algorithm — no `rand_distr` dependency) and two `Adwin`
+      concept-drift detectors per tree (warning: starts a background tree;
+      drift: swaps it in). `Adwin` is a simplified "exact scan every cut
+      point" version of Bifet & Gavaldà's algorithm (not the paper's O(log n)
+      exponential-histogram buckets — a deliberately smaller data structure,
+      bounded instead via `with_max_window`). Required one purely-additive
+      change to `HoeffdingTree` (`predict_one`, since `TrainedModel::predict`
+      only existed on the post-training snapshot, not the live streaming
+      tree) plus registering `"adaptive_random_forest"` in
+      `src/learner/registry.rs` (self-contained, no factory/coords needed —
+      matches `ObliqueForest`'s precedent, not `Bagging`/`GeoXGBoost`'s
+      exclusion).
+    - **Found and fixed a pre-existing bug while building on `HoeffdingTree`**
+      (which had zero tests before this): `find_best_split` estimated split
+      quality by comparing each class's *mean* feature value against a
+      single threshold as an all-or-nothing assignment — since two classes'
+      means are almost never on the exact same side of a threshold, this made
+      *every* feature, including pure noise, look like a "perfect" split, so
+      the Hoeffding-bound gain-difference test could never clear its
+      confidence bar and the tree never split at all (confirmed via a
+      diagnostic test: online accuracy stuck at ~50% — chance level — even on
+      a trivial single-feature threshold rule). Fixed by estimating left/right
+      counts from each class's running Gaussian (mean/variance already
+      tracked in `FeatureStats`) via the normal CDF at the candidate
+      threshold, instead of the single mean-point comparison; needed a
+      hand-rolled `erf`/`normal_cdf` (Abramowitz & Stegun 7.1.26 approximation
+      — no `f64::erf` in stable Rust, no numerics crate in this workspace).
+      Added `hoeffding.rs`'s first tests as part of this fix.
+    - Python bindings deferred, same reasoning as Kriging-ML Hybrid: this is a
+      genuinely new (not just bound) statistical algorithm — verify Rust-side
+      correctness first before locking in a pyo3-facing signature.
 
 ## Dependencies
 

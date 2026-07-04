@@ -118,6 +118,15 @@ impl HoeffdingTree {
         }
     }
 
+    /// Predicts from the tree's current (possibly still-streaming) state,
+    /// without requiring [`Learner::train_classif`]. Returns `None` before
+    /// the first `partial_fit` call. This is what lets an ensemble like
+    /// `AdaptiveRandomForest` get live per-sample votes from trees that are
+    /// still being updated.
+    pub fn predict_one(&self, features: &[f64]) -> Option<(usize, Vec<f64>)> {
+        self.root.as_ref().map(|r| r.predict_class(features))
+    }
+
     fn update_node(
         node: &mut HNode,
         features: &[f64],
@@ -321,6 +330,45 @@ fn entropy(counts: &[usize], total: usize) -> f64 {
         .sum()
 }
 
+/// Entropy from possibly-fractional (Gaussian-estimated) class weights.
+fn entropy_weighted(weights: &[f64], total: f64) -> f64 {
+    if total <= 0.0 {
+        return 0.0;
+    }
+    weights
+        .iter()
+        .filter(|&&w| w > 1e-12)
+        .map(|&w| {
+            let p = w / total;
+            -p * p.ln()
+        })
+        .sum()
+}
+
+/// Standard normal CDF via the Abramowitz & Stegun 7.1.26 `erf`
+/// approximation (accurate to ~1.5e-7). There's no `f64::erf` in stable
+/// Rust and no numerics crate in this workspace, so this is hand-rolled
+/// rather than adding a dependency for one function -- same "hand-roll
+/// small numerics" precedent as `CsrMatrix` in `src/sparse.rs`.
+fn normal_cdf(x: f64, mean: f64, std: f64) -> f64 {
+    if std <= 1e-9 {
+        // Degenerate (near-zero variance): treat as a step function at the mean.
+        return if x < mean { 0.0 } else { 1.0 };
+    }
+    let z = (x - mean) / (std * std::f64::consts::SQRT_2);
+    let sign = if z < 0.0 { -1.0 } else { 1.0 };
+    let z = z.abs();
+    let a1 = 0.254829592;
+    let a2 = -0.284496736;
+    let a3 = 1.421413741;
+    let a4 = -1.453152027;
+    let a5 = 1.061405429;
+    let p = 0.3275911;
+    let t = 1.0 / (1.0 + p * z);
+    let erf = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * (-z * z).exp();
+    0.5 * (1.0 + sign * erf)
+}
+
 fn find_best_split(
     feature_stats: &HashMap<usize, FeatureStats>,
     parent_counts: &[usize],
@@ -333,35 +381,46 @@ fn find_best_split(
     for (&feat, stats) in feature_stats {
         let threshold = stats.best_threshold(n_classes);
 
-        // Estimate left/right counts using class means
-        let mut left_counts = vec![0usize; n_classes];
-        let mut right_counts = vec![0usize; n_classes];
+        // Estimate left/right counts from each class's running Gaussian
+        // (mean, variance from `sum`/`sum_sq`/`count`) via the normal CDF at
+        // `threshold`, rather than comparing a single per-class mean point
+        // against the threshold: the mean-point comparison assigns an
+        // entire class to one side or the other regardless of how much its
+        // distribution actually overlaps the other class's, which makes a
+        // pure-noise feature look just as "perfectly separating" as a
+        // genuinely predictive one (both classes' means almost never land
+        // exactly on the same side of a threshold, so gain reads as ~perfect
+        // for every feature) -- starving the Hoeffding-bound gain-difference
+        // test, which can then never clear its confidence bar.
+        let mut left_counts = vec![0.0f64; n_classes];
+        let mut right_counts = vec![0.0f64; n_classes];
 
-        for (c, &(sum, _, count)) in stats.class_stats.iter().enumerate() {
+        for (c, &(sum, sum_sq, count)) in stats.class_stats.iter().enumerate() {
             if count == 0 {
                 continue;
             }
-            let mean = sum / count as f64;
-            if mean <= threshold {
-                left_counts[c] = count;
-            } else {
-                right_counts[c] = count;
-            }
+            let count_f = count as f64;
+            let mean = sum / count_f;
+            let var = (sum_sq / count_f - mean * mean).max(0.0);
+            let std = var.sqrt();
+            let left_frac = normal_cdf(threshold, mean, std);
+            left_counts[c] = count_f * left_frac;
+            right_counts[c] = count_f * (1.0 - left_frac);
         }
 
-        let n_left: usize = left_counts.iter().sum();
-        let n_right: usize = right_counts.iter().sum();
+        let n_left: f64 = left_counts.iter().sum();
+        let n_right: f64 = right_counts.iter().sum();
 
-        if n_left == 0 || n_right == 0 {
+        if n_left < 1e-6 || n_right < 1e-6 {
             continue;
         }
 
-        let left_ent = entropy(&left_counts, n_left);
-        let right_ent = entropy(&right_counts, n_right);
+        let left_ent = entropy_weighted(&left_counts, n_left);
+        let right_ent = entropy_weighted(&right_counts, n_right);
 
         let gain = parent_ent
-            - (n_left as f64 / n_total as f64) * left_ent
-            - (n_right as f64 / n_total as f64) * right_ent;
+            - (n_left / n_total as f64) * left_ent
+            - (n_right / n_total as f64) * right_ent;
 
         gains.push((feat, gain));
     }
@@ -439,5 +498,99 @@ impl TrainedModel for TrainedHoeffdingTree {
             truth: None,
             probabilities: Some(probabilities),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    /// Regression test for `find_best_split`'s split-quality estimation: it
+    /// must actually distinguish a genuinely predictive feature from pure
+    /// noise. The previous implementation compared each class's mean
+    /// feature value against a single threshold as an all-or-nothing
+    /// assignment -- since two classes' means are almost never on the exact
+    /// same side of a threshold, this made every feature (including pure
+    /// noise) look like a "perfect" split, so the Hoeffding-bound
+    /// gain-difference test could never clear its confidence bar and the
+    /// tree never split at all.
+    #[test]
+    fn partial_fit_learns_a_single_feature_threshold_rule() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let mut tree = HoeffdingTree::new().with_grace_period(50);
+
+        for _ in 0..2000 {
+            let x0 = rng.random::<f64>();
+            let x1 = rng.random::<f64>(); // pure noise, independent of label
+            let y = if x0 > 0.5 { 1 } else { 0 };
+            tree.partial_fit(&[x0, x1], y, 2);
+        }
+
+        let mut correct = 0;
+        let n_eval = 500;
+        for _ in 0..n_eval {
+            let x0 = rng.random::<f64>();
+            let x1 = rng.random::<f64>();
+            let y = if x0 > 0.5 { 1 } else { 0 };
+            if let Some((pred, _)) = tree.predict_one(&[x0, x1]) {
+                if pred == y {
+                    correct += 1;
+                }
+            }
+        }
+        let acc = correct as f64 / n_eval as f64;
+        assert!(
+            acc > 0.85,
+            "HoeffdingTree should learn this trivial single-feature rule well, got accuracy {acc}"
+        );
+    }
+
+    #[test]
+    fn predict_one_is_none_before_any_partial_fit() {
+        let tree = HoeffdingTree::new();
+        assert!(tree.predict_one(&[0.5, 0.5]).is_none());
+    }
+
+    #[test]
+    fn train_classif_matches_partial_fit_accuracy() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let mut feats = Vec::new();
+        let mut target = Vec::new();
+        for _ in 0..1000 {
+            let x0 = rng.random::<f64>();
+            feats.push(x0);
+            target.push(if x0 > 0.5 { 1usize } else { 0 });
+        }
+        let features = Array2::from_shape_vec((1000, 1), feats).unwrap();
+        let task = ClassificationTask::new("ht", features.clone(), target).unwrap();
+
+        let mut tree = HoeffdingTree::new().with_grace_period(50);
+        let model = tree.train_classif(&task).unwrap();
+        let pred = model.predict(&features).unwrap();
+        let Prediction::Classification { predicted, .. } = pred else {
+            panic!("expected classification");
+        };
+        let correct = predicted
+            .iter()
+            .zip(task.target())
+            .filter(|(p, t)| *p == *t)
+            .count();
+        let acc = correct as f64 / predicted.len() as f64;
+        assert!(acc > 0.85, "batch train_classif should fit this simple rule well, got {acc}");
+    }
+
+    #[test]
+    fn normal_cdf_matches_known_values() {
+        // Standard normal: CDF(0) = 0.5, CDF(mean) = 0.5 regardless of std.
+        assert!((normal_cdf(0.0, 0.0, 1.0) - 0.5).abs() < 1e-6);
+        assert!((normal_cdf(5.0, 5.0, 2.0) - 0.5).abs() < 1e-6);
+        // CDF(mean + 1.96*std) ~ 0.975 for a standard normal.
+        assert!((normal_cdf(1.96, 0.0, 1.0) - 0.975).abs() < 1e-3);
+        // Degenerate (zero variance): step function at the mean.
+        assert_eq!(normal_cdf(0.4, 0.5, 0.0), 0.0);
+        assert_eq!(normal_cdf(0.6, 0.5, 0.0), 1.0);
     }
 }

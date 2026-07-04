@@ -5,10 +5,10 @@
 //! hardcoding a `match` at every call site.
 
 use super::{
-    AdaBoost, CatBoost, DecisionTree, ElasticNet, ExtraTrees, GaussianNB, GradientBoosting,
-    HoeffdingTree, KNearestNeighbors, Lasso, Learner, LightGBM, LinearRegression, LinearSVM,
-    LogisticRegression, ObliqueForest, ObliqueTree, QuantileForest, QuantileGB, RandomForest,
-    Ridge, XGBoost,
+    AdaBoost, AdaptiveRandomForest, CatBoost, DecisionTree, ElasticNet, ExtraTrees, GaussianNB,
+    GradientBoosting, HoeffdingTree, KNearestNeighbors, Lasso, Learner, LightGBM, LinearRegression,
+    LinearSVM, LogisticRegression, ObliqueForest, ObliqueTree, QuantileForest, QuantileGB,
+    RandomForest, Ridge, XGBoost,
 };
 use crate::{Result, SmeltError};
 
@@ -24,6 +24,7 @@ use crate::{Result, SmeltError};
 pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
     Ok(match id {
         "adaboost" => Box::new(AdaBoost::default()),
+        "adaptive_random_forest" => Box::new(AdaptiveRandomForest::default()),
         "catboost" => Box::new(CatBoost::default()),
         "decision_tree" => Box::new(DecisionTree::default()),
         "elastic_net" => Box::new(ElasticNet::default()),
@@ -58,6 +59,7 @@ pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
 pub fn registered_learner_ids() -> &'static [&'static str] {
     &[
         "adaboost",
+        "adaptive_random_forest",
         "catboost",
         "decision_tree",
         "elastic_net",

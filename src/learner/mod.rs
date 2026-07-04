@@ -3,6 +3,7 @@
 //! Each learner implements the `Learner` trait.
 
 pub mod adaboost;
+pub mod adaptive_rf;
 pub mod bagging;
 pub mod catboost;
 pub mod des;
@@ -35,6 +36,7 @@ use crate::{Result, SmeltError};
 use ndarray::Array2;
 
 pub use adaboost::AdaBoost;
+pub use adaptive_rf::{AdaptiveRandomForest, Adwin};
 pub use bagging::Bagging;
 pub use catboost::CatBoost;
 pub use des::DynamicEnsemble;
