@@ -260,9 +260,21 @@ pulled from `docs/roadmap_checklist.md` (Prioridad 4).
       hand-rolled `erf`/`normal_cdf` (Abramowitz & Stegun 7.1.26 approximation
       — no `f64::erf` in stable Rust, no numerics crate in this workspace).
       Added `hoeffding.rs`'s first tests as part of this fix.
-    - Python bindings deferred, same reasoning as Kriging-ML Hybrid: this is a
-      genuinely new (not just bound) statistical algorithm — verify Rust-side
-      correctness first before locking in a pyo3-facing signature.
+    - [x] Python bindings (2026-07-04, same-day fast-follow): `AdaptiveRandomForest`
+      in `smelt-py/src/learners/trees.rs`, bound via the `define_learner!`
+      macro alongside `HoeffdingTree` -- batch-only (`fit`/`predict` through
+      `Learner::train_classif`), matching `HoeffdingTree`'s own existing
+      Python binding exactly rather than introducing a new streaming
+      (`partial_fit`/`predict_one`) surface unilaterally on only one of the
+      two streaming learners. `lambda` renamed to `lambda_` for the Python
+      constructor param (`lambda` is a Python keyword), same convention as
+      XGBoost/GeoXGBoost/CatBoost's L2 term. Verified via `maturin develop
+      --release` + a direct Python script: 94.2% accuracy on a fresh
+      regime-2 holdout after adapting to an injected drift, versus 49.4%
+      (chance) for a plain `HoeffdingTree` trained identically -- matching
+      the Rust-side test's qualitative result end-to-end through the actual
+      Python API. Streaming API parity (`partial_fit`/`n_drifts`/`predict_one`
+      exposed to Python for both learners) is a natural follow-up, not done here.
 
 ## Dependencies
 

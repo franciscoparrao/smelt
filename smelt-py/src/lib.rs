@@ -22,8 +22,8 @@ use learners::ensemble::{Bagging, DynamicEnsemble, Stacking, registered_learner_
 use learners::linear::{ElasticNet, Lasso, LinearRegression, LinearSVM, LogisticRegression, Ridge};
 use learners::misc::{AdaBoost, EBM, GaussianNB, KNearestNeighbors, QuantileForest, QuantileGB};
 use learners::trees::{
-    DecisionTree, ExtraTrees, GradientBoosting, HoeffdingTree, ObliqueForest, ObliqueTree,
-    RandomForest,
+    AdaptiveRandomForest, DecisionTree, ExtraTrees, GradientBoosting, HoeffdingTree, ObliqueForest,
+    ObliqueTree, RandomForest,
 };
 use measures::{
     accuracy_score, auc_roc_score, balanced_accuracy_score, brier_score, cohens_kappa_score,
@@ -56,6 +56,7 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ElasticNet>()?;
     m.add_class::<GradientBoosting>()?;
     m.add_class::<HoeffdingTree>()?;
+    m.add_class::<AdaptiveRandomForest>()?;
     m.add_class::<LinearSVM>()?;
     m.add_class::<ObliqueTree>()?;
     m.add_class::<ObliqueForest>()?;

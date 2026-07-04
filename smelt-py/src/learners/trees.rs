@@ -1,5 +1,6 @@
 //! Tree-based learners: RandomForest, ExtraTrees, DecisionTree,
-//! GradientBoosting, HoeffdingTree, ObliqueTree, ObliqueForest.
+//! GradientBoosting, HoeffdingTree, AdaptiveRandomForest, ObliqueTree,
+//! ObliqueForest.
 
 use crate::common::{define_learner, add_explain_methods, declare_support, declare_params};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
@@ -178,6 +179,33 @@ define_learner! {
 }
 
 define_learner! {
+    name = AdaptiveRandomForest,
+    // `lambda_` (not `lambda`): `lambda` is a Python keyword and can't be
+    // used as a keyword-argument name, same reason XGBoost/GeoXGBoost/
+    // CatBoost expose their L2 term as `lambda_`.
+    params = {
+        n_trees: usize = 10,
+        lambda_: f64 = 6.0,
+        delta_warning: f64 = 0.01,
+        delta_drift: f64 = 0.001,
+        split_confidence: f64 = 1e-7,
+        grace_period: usize = 200,
+        max_depth: usize = 10,
+        seed: u64 = 42
+    },
+    ctor = |slf| smelt_ml::prelude::AdaptiveRandomForest::new()
+        .with_n_trees(slf.n_trees)
+        .with_lambda(slf.lambda_)
+        .with_delta_warning(slf.delta_warning)
+        .with_delta_drift(slf.delta_drift)
+        .with_split_confidence(slf.split_confidence)
+        .with_grace_period(slf.grace_period)
+        .with_max_depth(slf.max_depth)
+        .with_seed(slf.seed),
+    proba = true,
+}
+
+define_learner! {
     name = ObliqueTree,
     params = { max_depth: usize = 10, n_projections: usize = 10, seed: u64 = 42 },
     ctor = |slf| smelt_ml::prelude::ObliqueTree::default()
@@ -198,13 +226,14 @@ define_learner! {
     proba = true,
 }
 
-add_explain_methods!(RandomForest, ExtraTrees, DecisionTree, GradientBoosting, HoeffdingTree, ObliqueTree, ObliqueForest);
+add_explain_methods!(RandomForest, ExtraTrees, DecisionTree, GradientBoosting, HoeffdingTree, AdaptiveRandomForest, ObliqueTree, ObliqueForest);
 
 declare_support!(RandomForest,      classif = true,  regress = true);
 declare_support!(ExtraTrees,        classif = true,  regress = true);
 declare_support!(DecisionTree,      classif = true,  regress = true);
 declare_support!(GradientBoosting,  classif = true,  regress = true);
 declare_support!(HoeffdingTree,     classif = true,  regress = false);
+declare_support!(AdaptiveRandomForest, classif = true, regress = false);
 declare_support!(ObliqueTree,       classif = true,  regress = true);
 declare_support!(ObliqueForest,     classif = true,  regress = true);
 
