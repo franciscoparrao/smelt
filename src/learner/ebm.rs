@@ -110,22 +110,16 @@ impl TrainedModel for TrainedEBM {
         }
 
         if self.is_classifier {
+            // Always binary: train_classif rejects n_classes > 2 (EBM would
+            // need one shape-function ensemble per class, one-vs-rest, to
+            // support multiclass -- not implemented).
+            debug_assert_eq!(self.n_classes, 2);
             let mut predicted = Vec::with_capacity(n_samples);
             let mut probabilities = Vec::with_capacity(n_samples);
-
-            if self.n_classes == 2 {
-                for &s in &scores {
-                    let p = sigmoid(s);
-                    predicted.push(if p >= 0.5 { 1 } else { 0 });
-                    probabilities.push(vec![1.0 - p, p]);
-                }
-            } else {
-                // For multiclass, we'd need per-class EBMs. Simplified: use binary for now.
-                for &s in &scores {
-                    let p = sigmoid(s);
-                    predicted.push(if p >= 0.5 { 1 } else { 0 });
-                    probabilities.push(vec![1.0 - p, p]);
-                }
+            for &s in &scores {
+                let p = sigmoid(s);
+                predicted.push(if p >= 0.5 { 1 } else { 0 });
+                probabilities.push(vec![1.0 - p, p]);
             }
 
             Ok(Prediction::Classification {
@@ -185,6 +179,14 @@ impl Learner for EBM {
         let n_samples = task.n_samples();
         let n_features = task.n_features();
         let n_classes = task.n_classes();
+
+        if n_classes > 2 {
+            return Err(crate::SmeltError::InvalidParameter(format!(
+                "EBM only supports binary classification (got {n_classes} classes) -- \
+                 multiclass would need one EBM per class (one-vs-rest), not implemented; \
+                 the previous behavior silently treated any target as binary"
+            )));
+        }
 
         // Binary classification: log-loss
         let p_pos = target.iter().filter(|&&t| t == 1).count() as f64 / n_samples as f64;

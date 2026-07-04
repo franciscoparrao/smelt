@@ -263,8 +263,52 @@ de estos se tocó en Fase A/B. `tests/real_benchmark.rs` (comparación vs
 sklearn real) sigue `#[ignore]` y fuera de `cargo test`/CI. Quedan para Fase
 C o una iniciativa dedicada.
 
-### Fase C — Deudas estructurales (cuando toque)
-9. Los abiertos crónicos: ADASYN k-NN, DES DSEL, EBM Err multiclase, RSF TrainedModel, PCA init, Relief; errores tipados (51 `Other`); ParamSet tipado; paralelismo folds/grid con rayon (andamiaje listo); README/prelude/registry/versionado (M20 + bump semver 2.0).
-10. Python: exponer cluster/persistencia/CausalForest/loaders; streaming API; `.pyi` + `__repr__`.
+### Fase C — Deudas estructurales — **correctness items COMPLETADOS 2026-07-04, refactors arquitectónicos pendientes**
+9. Los abiertos crónicos, todos con test de regresión:
+   - ✅ **ADASYN**: interpolaba hacia cualquier punto de la misma clase, no
+     hacia los k-NN reales (He et al. 2008). Fix: restringir candidatos a los
+     k vecinos más cercanos (mismo patrón que `smote.rs`). Test con 2 clusters
+     minoritarios lejanos separados por mayoría: sin el fix, un sintético
+     aparecía en (5.57, 5.57) — justo en territorio de la clase mayoritaria
+     (distancia a ambos clusters >6.2); con el fix, siempre <3.0 de un cluster.
+   - ✅ **DES/KNORA-E**: la competencia se evaluaba sobre el mismo training set
+     usado para entrenar los modelos base (comentario literal "same training
+     set as validation"). Fix: split interno train/DSEL (`dsel_fraction`,
+     default 0.3) — los modelos base entrenan solo en `train_idx`, competencia
+     y vecinos-k se calculan solo en `dsel_idx`, sin reentrenar después
+     (reentrenar volvería obsoletas las estimaciones de competencia).
+     Expuesto en Python (`dsel_fraction`/`seed` en el constructor).
+   - ✅ **EBM multiclase**: `train_classif` trataba cualquier target como
+     binario sin importar `n_classes` (docstring decía literalmente
+     "Simplified: use binary for now" sin el `Err`). Fix: `Err` explícito si
+     `n_classes>2`; simplificada la rama muerta duplicada en `predict()`.
+   - ✅ **RandomSurvivalForest**: solo existía `fit_predict` (bosque
+     descartado, sin poder predecir datos nuevos) y el C-index era in-sample.
+     Fix: nuevo `fit()` devuelve `(TrainedRandomSurvivalForest, oob_c_index)`
+     — el modelo persiste para predecir sobre datos nuevos, y el C-index se
+     computa agregando por muestra solo los árboles OOB (mismo patrón que el
+     fix de CausalForest de Fase B). `fit_predict` se reimplementó sobre
+     `fit()+predict()` preservando su salida numérica exacta (verificado con
+     test dedicado). 3 tests nuevos: predicción sobre datos genuinamente
+     nuevos, OOB C-index estrictamente menor que in-sample con un bosque
+     forzado a sobreajustar (`min_node_size=1`), y equivalencia
+     `fit_predict` == `fit().predict()`. Añadido `survival` al prelude
+     (no estaba, gap M2 de arquitectura).
+   - ✅ **Relief (RReliefF)**: ambos términos (positivo y negativo) dividían
+     por `n_dc`; Robnik-Šikonja & Kononenko exigen normalizar el término
+     negativo por `N_total − N_dC`. Fix + golden test contra una
+     reimplementación independiente en Python/numpy de la misma fórmula
+     (con normalización correcta e incorrecta calculadas aparte para
+     confirmar que difieren sustancialmente: valores correctos ~0.02/0.18
+     vs. los que daría el bug, ~−0.94/−0.70).
+   - 512 tests verdes acumulados al cierre de Fase C (153 lib + 285
+     integración + 4 parquet + 70 doctests), 0 fallos; `smelt-py`
+     recompilado tras cada fix.
+   - ⏸️ **Pendiente de esta pasada** (refactors arquitectónicos más grandes,
+     no bugs de corrección): errores tipados (51 `SmeltError::Other`);
+     `ParamSet` tipado (`HashMap<String,f64>` stringly-typed); paralelismo de
+     folds/grid con rayon (el andamiaje — factories `Send+Sync` — ya existe,
+     falta conectarlo); README/registry/versionado (M20, bump semver 2.0).
+10. Python: exponer cluster/persistencia/CausalForest/loaders; streaming API; `.pyi` + `__repr__`. No abordado esta pasada.
 
 **Regla de proceso que esta auditoría reafirma**: ningún fix estadístico se declara cerrado sin su golden test, y ningún ítem del plan se elimina de una tabla de progreso sin nota explícita de por qué.

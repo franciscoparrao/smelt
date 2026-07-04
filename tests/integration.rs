@@ -3877,6 +3877,24 @@ fn ebm_feature_importance() {
     assert!(imp.is_some(), "EBM should provide feature importance");
 }
 
+/// Regression test for HIGH-14: EBM used to silently treat any target as
+/// binary, regardless of the actual number of classes -- a 3-class target
+/// would train and predict without error, producing meaningless
+/// (effectively binary, always predicting 0 or 1) output. It must now error
+/// instead.
+#[test]
+fn ebm_rejects_multiclass_target() {
+    let features = array![
+        [0.0], [0.1], [0.2], [1.0], [1.1], [1.2], [2.0], [2.1], [2.2]
+    ];
+    let target = vec![0, 0, 0, 1, 1, 1, 2, 2, 2];
+    let task = ClassificationTask::new("ebm_multiclass", features, target).unwrap();
+
+    let mut ebm = EBM::new().with_n_rounds(10);
+    let err = ebm.train_classif(&task);
+    assert!(err.is_err(), "EBM must reject a 3-class target instead of silently treating it as binary");
+}
+
 // ── SMOTE tests ────────────────────────────────────────────────────
 
 #[test]

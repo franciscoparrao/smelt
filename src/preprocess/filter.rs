@@ -715,9 +715,21 @@ impl Filter for ReliefFilter {
         let t_range = (t_max - t_min).max(1e-10);
 
         // Precompute pairwise distances (Euclidean on normalized features)
-        // For each instance, find k nearest neighbours
-        let mut weights = vec![0.0_f64; p];
-        let mut n_dc = 0.0_f64;
+        // For each instance, find k nearest neighbours.
+        //
+        // RReliefF (Robnik-Šikonja & Kononenko) estimates
+        // W[A] = P(diffA | diffC) - P(diffA | equalC), where:
+        //   P(diffA|diffC)  ≈ (Σ diffA·diffC·w) / (Σ diffC·w)         =: pos/n_dc
+        //   P(diffA|equalC) ≈ (Σ diffA·(1-diffC)·w) / (Σ (1-diffC)·w) =: neg/n_equal
+        // The two terms are normalized by DIFFERENT denominators (n_dc vs.
+        // n_equal = total_w - n_dc) since they estimate different
+        // conditional probabilities; dividing both by n_dc collapses them
+        // onto the same scale and understates the "same-target" (noise)
+        // term whenever n_equal != n_dc (the common case).
+        let mut pos = vec![0.0_f64; p]; // Σ diffA · diffC · w
+        let mut neg = vec![0.0_f64; p]; // Σ diffA · (1 - diffC) · w
+        let mut n_dc = 0.0_f64; // Σ diffC · w
+        let mut total_w = 0.0_f64; // Σ w
 
         for i in 0..n {
             // Compute distances to all other instances
@@ -744,23 +756,63 @@ impl Filter for ReliefFilter {
                 let w = (-d * d / (sigma * sigma)).exp();
                 let diff_target = ((target[i] - target[j]) / t_range).abs();
                 n_dc += diff_target * w;
+                total_w += w;
 
                 for f in 0..p {
                     let diff_f = ((features[[i, f]] - features[[j, f]]) / col_range[f]).abs();
-                    // Positive: different target → feature is relevant
-                    weights[f] += diff_target * diff_f * w;
-                    // Negative: same target → feature is noise
-                    weights[f] -= (1.0 - diff_target) * diff_f * w;
+                    pos[f] += diff_target * diff_f * w;
+                    neg[f] += (1.0 - diff_target) * diff_f * w;
                 }
             }
         }
 
-        // Normalize by total target difference
-        if n_dc > 0.0 {
-            for w in &mut weights {
-                *w /= n_dc;
-            }
+        let n_equal = (total_w - n_dc).max(0.0);
+        (0..p)
+            .map(|f| {
+                let pos_term = if n_dc > 1e-10 { pos[f] / n_dc } else { 0.0 };
+                let neg_term = if n_equal > 1e-10 { neg[f] / n_equal } else { 0.0 };
+                pos_term - neg_term
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod relief_tests {
+    use super::*;
+    use ndarray::array;
+
+    /// Golden test against an independent re-implementation of the same
+    /// weighted-RReliefF formula, computed in Python/numpy. On this fixture
+    /// (7 samples share one target value, 1 outlier differs -- so n_dc is
+    /// small relative to n_equal), the M11 normalization bug (dividing BOTH
+    /// the positive and negative terms by n_dc, instead of the negative
+    /// term by n_equal = total_weight - n_dc) produces wildly different,
+    /// mostly-negative scores; the corrected normalization gives small
+    /// positive scores.
+    #[test]
+    fn golden_normalization_matches_independent_reference() {
+        let features = array![
+            [0.0, 5.0],
+            [0.1, 1.0],
+            [0.2, 8.0],
+            [0.3, 2.0],
+            [5.0, 9.0],
+            [5.1, 0.0],
+            [5.2, 6.0],
+            [5.3, 3.0],
+        ];
+        let target = vec![0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0];
+
+        let scores = ReliefFilter.score(&features, &target);
+        let expected = [0.01938867, 0.17590801];
+        for (got, exp) in scores.iter().zip(expected) {
+            assert!(
+                (got - exp).abs() < 1e-6,
+                "Relief score {got} should match the independently-computed reference {exp} \
+                 (the bug's normalization would give a large negative value like -0.94 or \
+                 -0.70 instead)"
+            );
         }
-        weights
     }
 }

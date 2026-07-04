@@ -199,15 +199,19 @@ pub(crate) struct DynamicEnsemble {
     is_classif: bool,
     base_learners: Vec<String>,
     k_neighbors: usize,
+    dsel_fraction: f64,
+    seed: u64,
 }
 
 #[pymethods]
 impl DynamicEnsemble {
     /// KNORA-E dynamic ensemble selection (classification only).
-    /// `base_learners`: list of learner id strings.
+    /// `base_learners`: list of learner id strings. `dsel_fraction`: fraction
+    /// of training data held out as the Dynamic Selection set used only to
+    /// evaluate each base model's local competence, never to train them.
     #[new]
-    #[pyo3(signature = (base_learners, k_neighbors=7))]
-    fn new(base_learners: Vec<String>, k_neighbors: usize) -> PyResult<Self> {
+    #[pyo3(signature = (base_learners, k_neighbors=7, dsel_fraction=0.3, seed=42))]
+    fn new(base_learners: Vec<String>, k_neighbors: usize, dsel_fraction: f64, seed: u64) -> PyResult<Self> {
         if base_learners.is_empty() {
             return Err(PyRuntimeError::new_err(
                 "DynamicEnsemble requires at least 1 base learner",
@@ -221,6 +225,8 @@ impl DynamicEnsemble {
             is_classif: false,
             base_learners,
             k_neighbors,
+            dsel_fraction,
+            seed,
         })
     }
 
@@ -241,8 +247,10 @@ impl DynamicEnsemble {
                     })
                 })
                 .collect();
-        let mut learner =
-            smelt_ml::prelude::DynamicEnsemble::new(base_factories).with_k_neighbors(self.k_neighbors);
+        let mut learner = smelt_ml::prelude::DynamicEnsemble::new(base_factories)
+            .with_k_neighbors(self.k_neighbors)
+            .with_dsel_fraction(self.dsel_fraction)
+            .with_seed(self.seed);
         let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
@@ -368,6 +376,8 @@ impl DynamicEnsemble {
         let dict = PyDict::new(py);
         dict.set_item("base_learners", self.base_learners.clone())?;
         dict.set_item("k_neighbors", self.k_neighbors)?;
+        dict.set_item("dsel_fraction", self.dsel_fraction)?;
+        dict.set_item("seed", self.seed)?;
         Ok(dict.into_pyobject(py)?.into_any().unbind())
     }
 
@@ -390,6 +400,8 @@ impl DynamicEnsemble {
                         self.base_learners = ids;
                     }
                     "k_neighbors" => self.k_neighbors = v.extract()?,
+                    "dsel_fraction" => self.dsel_fraction = v.extract()?,
+                    "seed" => self.seed = v.extract()?,
                     other => {
                         return Err(PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"

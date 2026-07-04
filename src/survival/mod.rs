@@ -375,12 +375,19 @@ impl RandomSurvivalForest {
         self
     }
 
-    /// Fit the forest and predict survival functions for each sample.
-    pub fn fit_predict(
+    /// Fit the forest, keeping it for prediction on new data.
+    ///
+    /// Also returns an out-of-bag (OOB) concordance index: each training
+    /// sample's risk score is averaged only over the trees whose bootstrap
+    /// sample excluded it, so the C-index reflects genuine generalization
+    /// instead of the optimistic in-sample score `concordance_index` gives
+    /// when applied to `fit_predict`'s output (every tree saw every
+    /// training row it predicts on there).
+    pub fn fit(
         &self,
         features: &Array2<f64>,
         events: &[SurvivalEvent],
-    ) -> Result<Vec<SurvivalPrediction>> {
+    ) -> Result<(TrainedRandomSurvivalForest, f64)> {
         let n = features.nrows();
         let nf = features.ncols();
 
@@ -391,13 +398,18 @@ impl RandomSurvivalForest {
             });
         }
 
-        // Build trees
-        let trees: Vec<RSFNode> = (0..self.n_estimators)
+        // Build trees, tracking each tree's in-bag indicator so OOB
+        // predictions can be formed below.
+        let tree_results: Vec<(RSFNode, Vec<bool>)> = (0..self.n_estimators)
             .into_par_iter()
             .map(|i| {
                 let mut rng = StdRng::seed_from_u64(self.seed.wrapping_add(i as u64));
                 let indices: Vec<usize> = (0..n).map(|_| rng.random_range(0..n)).collect();
-                build_rsf_tree(
+                let mut in_bag = vec![false; n];
+                for &idx in &indices {
+                    in_bag[idx] = true;
+                }
+                let tree = build_rsf_tree(
                     features,
                     events,
                     &indices,
@@ -406,54 +418,243 @@ impl RandomSurvivalForest {
                     nf,
                     0,
                     &mut rng,
-                )
+                );
+                (tree, in_bag)
             })
             .collect();
 
-        // Predict: average cumulative hazard across trees
-        let mut predictions = Vec::with_capacity(n);
-
-        // Collect all unique event times
-        let mut all_times: Vec<f64> = events.iter().filter(|e| e.event).map(|e| e.time).collect();
-        all_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        all_times.dedup();
-
-        for i in 0..n {
-            let row = features.row(i);
-
-            // Average cumulative hazard from all trees at each time point
-            let mut cum_hazard_at_times = vec![0.0; all_times.len()];
-
-            for tree in &trees {
-                let leaf_hazards = tree.find_leaf(row);
-                for (ti, &t) in all_times.iter().enumerate() {
-                    // Find cumulative hazard at time t in this tree's leaf
-                    let mut h = 0.0;
-                    for &(ht, hv) in leaf_hazards {
-                        if ht <= t {
-                            h = hv;
-                        } else {
-                            break;
-                        }
-                    }
-                    cum_hazard_at_times[ti] += h;
-                }
-            }
-
-            let n_trees = self.n_estimators as f64;
-            let cumulative_hazard: Vec<f64> =
-                cum_hazard_at_times.iter().map(|&h| h / n_trees).collect();
-            let survival: Vec<f64> = cumulative_hazard.iter().map(|&h| (-h).exp()).collect();
-            let risk_score = cumulative_hazard.last().copied().unwrap_or(0.0);
-
-            predictions.push(SurvivalPrediction {
-                times: all_times.clone(),
-                survival,
-                cumulative_hazard,
-                risk_score,
-            });
+        let mut trees = Vec::with_capacity(self.n_estimators);
+        let mut in_bags = Vec::with_capacity(self.n_estimators);
+        for (tree, in_bag) in tree_results {
+            trees.push(tree);
+            in_bags.push(in_bag);
         }
 
-        Ok(predictions)
+        // Collect all unique event times -- the common grid every
+        // prediction's survival/hazard curve is reported on.
+        let mut event_times: Vec<f64> = events.iter().filter(|e| e.event).map(|e| e.time).collect();
+        event_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        event_times.dedup();
+
+        // OOB risk score per training sample: only trees where this sample
+        // was NOT in the bootstrap draw contribute.
+        let oob_predictions: Vec<SurvivalPrediction> = (0..n)
+            .map(|i| {
+                let row = features.row(i);
+                let oob_trees = trees
+                    .iter()
+                    .zip(&in_bags)
+                    .filter(|(_, in_bag)| !in_bag[i])
+                    .map(|(tree, _)| tree);
+                let (hazard_sum, n_trees) = sum_hazard_from_trees(oob_trees, row, &event_times);
+                survival_prediction_from_hazard_sum(&event_times, hazard_sum, n_trees)
+            })
+            .collect();
+        let oob_c_index = concordance_index(&oob_predictions, events);
+
+        Ok((
+            TrainedRandomSurvivalForest {
+                trees,
+                event_times,
+            },
+            oob_c_index,
+        ))
+    }
+
+    /// Fit the forest and predict survival functions for each training
+    /// sample (in-sample: every tree that saw a sample during its bootstrap
+    /// draw still contributes to that sample's prediction here). For an
+    /// honest estimate of generalization, or to predict genuinely new data,
+    /// use [`RandomSurvivalForest::fit`] instead.
+    pub fn fit_predict(
+        &self,
+        features: &Array2<f64>,
+        events: &[SurvivalEvent],
+    ) -> Result<Vec<SurvivalPrediction>> {
+        let (trained, _oob_c_index) = self.fit(features, events)?;
+        Ok(trained.predict(features))
+    }
+}
+
+/// Sums cumulative hazard across `trees` at each of `times`, for the leaf
+/// `row` falls into in each tree. Returns `(sum_per_time, n_trees_summed)`.
+fn sum_hazard_from_trees<'a>(
+    trees: impl Iterator<Item = &'a RSFNode>,
+    row: ArrayView1<f64>,
+    times: &[f64],
+) -> (Vec<f64>, usize) {
+    let mut sum = vec![0.0; times.len()];
+    let mut n_trees = 0usize;
+    for tree in trees {
+        n_trees += 1;
+        let leaf_hazards = tree.find_leaf(row);
+        for (ti, &t) in times.iter().enumerate() {
+            let mut h = 0.0;
+            for &(ht, hv) in leaf_hazards {
+                if ht <= t {
+                    h = hv;
+                } else {
+                    break;
+                }
+            }
+            sum[ti] += h;
+        }
+    }
+    (sum, n_trees)
+}
+
+/// Turns a per-time hazard sum (from [`sum_hazard_from_trees`]) into a full
+/// [`SurvivalPrediction`] by averaging over however many trees contributed.
+/// `n_trees == 0` (every tree happened to have this sample in-bag -- only
+/// plausible with very few trees) falls back to a flat zero-hazard/100%-
+/// survival curve rather than dividing by zero.
+fn survival_prediction_from_hazard_sum(
+    times: &[f64],
+    hazard_sum: Vec<f64>,
+    n_trees: usize,
+) -> SurvivalPrediction {
+    let denom = n_trees.max(1) as f64;
+    let cumulative_hazard: Vec<f64> = hazard_sum.iter().map(|&h| h / denom).collect();
+    let survival: Vec<f64> = cumulative_hazard.iter().map(|&h| (-h).exp()).collect();
+    let risk_score = cumulative_hazard.last().copied().unwrap_or(0.0);
+    SurvivalPrediction {
+        times: times.to_vec(),
+        survival,
+        cumulative_hazard,
+        risk_score,
+    }
+}
+
+/// A fitted [`RandomSurvivalForest`], retained so it can predict on new
+/// (not just training) data -- unlike `fit_predict`, which discarded the
+/// forest after producing in-sample predictions.
+pub struct TrainedRandomSurvivalForest {
+    trees: Vec<RSFNode>,
+    event_times: Vec<f64>,
+}
+
+impl TrainedRandomSurvivalForest {
+    /// Predicts survival functions for `features` (new data, or the
+    /// training data) by averaging cumulative hazard across every tree in
+    /// the forest.
+    pub fn predict(&self, features: &Array2<f64>) -> Vec<SurvivalPrediction> {
+        (0..features.nrows())
+            .map(|i| {
+                let row = features.row(i);
+                let (hazard_sum, n_trees) =
+                    sum_hazard_from_trees(self.trees.iter(), row, &self.event_times);
+                survival_prediction_from_hazard_sum(&self.event_times, hazard_sum, n_trees)
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array2;
+
+    fn synthetic_survival_data(n: usize, seed: u64) -> (Array2<f64>, Vec<SurvivalEvent>) {
+        use rand::Rng;
+        use rand::SeedableRng;
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut features = Array2::zeros((n, 2));
+        let mut events = Vec::with_capacity(n);
+        for i in 0..n {
+            let x0: f64 = rng.random_range(0.0..10.0);
+            let x1: f64 = rng.random_range(0.0..10.0);
+            features[[i, 0]] = x0;
+            features[[i, 1]] = x1;
+            // Higher x0 -> shorter survival time (higher risk).
+            let base_time = 20.0 - x0 + rng.random_range(-1.0..1.0);
+            let censor_time: f64 = rng.random_range(0.0..25.0);
+            if base_time <= censor_time {
+                events.push(SurvivalEvent { time: base_time.max(0.1), event: true });
+            } else {
+                events.push(SurvivalEvent { time: censor_time.max(0.1), event: false });
+            }
+        }
+        (features, events)
+    }
+
+    /// Regression test for HIGH-15: previously only `fit_predict` existed,
+    /// which discards the forest after producing in-sample predictions --
+    /// there was no way to predict a genuinely new (held-out) sample. This
+    /// checks `fit()` returns a model that can score new feature rows never
+    /// seen during training.
+    #[test]
+    fn fit_returns_a_model_that_predicts_new_unseen_data() {
+        let (features, events) = synthetic_survival_data(60, 7);
+        let rsf = RandomSurvivalForest::new().with_n_estimators(30).with_seed(1);
+        let (trained, _oob_c_index) = rsf.fit(&features, &events).unwrap();
+
+        // New data, not part of the training set at all.
+        let new_features = Array2::from_shape_vec((2, 2), vec![9.0, 1.0, 1.0, 9.0]).unwrap();
+        let preds = trained.predict(&new_features);
+        assert_eq!(preds.len(), 2);
+        // High x0 (row 0) -> higher risk than low x0 (row 1), matching the
+        // synthetic data-generating process (higher x0 -> shorter survival).
+        assert!(
+            preds[0].risk_score > preds[1].risk_score,
+            "high-x0 new sample should have a higher predicted risk score than low-x0: {} vs {}",
+            preds[0].risk_score,
+            preds[1].risk_score
+        );
+    }
+
+    /// Regression test for HIGH-15's second half: the C-index reported
+    /// alongside `fit_predict` was in-sample (every tree saw every row it
+    /// predicts on). The OOB C-index instead only aggregates a sample's
+    /// prediction from trees that did NOT have it in their bootstrap draw,
+    /// so it should be noticeably less optimistic than plugging
+    /// `fit_predict`'s in-sample predictions into `concordance_index`
+    /// directly -- if the forest can perfectly overfit small training data
+    /// (spuriously separating essentially every pair), in-sample C-index
+    /// tends toward 1.0 while the honest OOB estimate does not.
+    #[test]
+    fn oob_c_index_is_less_optimistic_than_in_sample_c_index() {
+        let (features, events) = synthetic_survival_data(40, 11);
+        let rsf = RandomSurvivalForest::new()
+            .with_n_estimators(50)
+            .with_min_node_size(1) // encourage overfitting on this small n
+            .with_seed(2);
+
+        let (trained, oob_c_index) = rsf.fit(&features, &events).unwrap();
+        let in_sample_predictions = trained.predict(&features);
+        let in_sample_c_index = concordance_index(&in_sample_predictions, &events);
+
+        assert!(
+            oob_c_index <= in_sample_c_index + 1e-9,
+            "OOB C-index ({oob_c_index}) should not exceed the in-sample C-index \
+             ({in_sample_c_index}) -- in-sample is optimistic by construction"
+        );
+        assert!(
+            in_sample_c_index > oob_c_index,
+            "with min_node_size=1 the forest should overfit enough that in-sample \
+             ({in_sample_c_index}) is measurably higher than OOB ({oob_c_index})"
+        );
+    }
+
+    /// `fit_predict` must keep its exact previous (in-sample, all-trees)
+    /// behavior -- it's built on top of the new `fit`/`predict` split, and
+    /// existing callers depend on its numeric output being unchanged.
+    #[test]
+    fn fit_predict_matches_fit_then_predict_on_training_data() {
+        let (features, events) = synthetic_survival_data(30, 5);
+        let rsf = RandomSurvivalForest::new().with_n_estimators(20).with_seed(9);
+
+        let via_fit_predict = rsf.fit_predict(&features, &events).unwrap();
+        let (trained, _) = rsf.fit(&features, &events).unwrap();
+        let via_fit_then_predict = trained.predict(&features);
+
+        assert_eq!(via_fit_predict.len(), via_fit_then_predict.len());
+        for (a, b) in via_fit_predict.iter().zip(&via_fit_then_predict) {
+            assert!(
+                (a.risk_score - b.risk_score).abs() < 1e-9,
+                "fit_predict's risk score ({}) should exactly match fit().predict() ({})",
+                a.risk_score,
+                b.risk_score
+            );
+        }
     }
 }

@@ -150,25 +150,43 @@ impl Adasyn {
                 .map(|&r| (r * n_to_generate as f64).round() as usize)
                 .collect();
 
+            let interp_k = self.k_neighbors.min(n_class - 1).max(1);
+
             for (ci, &idx) in class_indices.iter().enumerate() {
                 let n_gen = samples_per_point[ci];
                 let sample = features.row(idx);
 
-                // Find same-class neighbors
-                let same_class: Vec<usize> = class_indices
+                // Find the k nearest same-class neighbors (not just any
+                // same-class point, per He et al. 2008): interpolating
+                // toward an arbitrary same-class point can cross into
+                // majority-class regions when the minority class spans a
+                // large or multi-modal area of feature space.
+                let mut same_class_dists: Vec<(usize, f64)> = class_indices
                     .iter()
                     .filter(|&&j| j != idx)
-                    .copied()
+                    .map(|&j| {
+                        let d: f64 = features
+                            .row(j)
+                            .iter()
+                            .zip(sample.iter())
+                            .map(|(a, b)| (a - b).powi(2))
+                            .sum::<f64>()
+                            .sqrt();
+                        (j, d)
+                    })
                     .collect();
+                same_class_dists
+                    .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
                 for _ in 0..n_gen {
-                    let synthetic = if same_class.is_empty() {
+                    let synthetic = if same_class_dists.is_empty() {
                         sample
                             .iter()
                             .map(|&s| s + rng.random_range(-0.01..0.01))
                             .collect()
                     } else {
-                        let nn = same_class[rng.random_range(0..same_class.len())];
+                        let k_nn = interp_k.min(same_class_dists.len());
+                        let nn = same_class_dists[rng.random_range(0..k_nn)].0;
                         let neighbor = features.row(nn);
                         let lambda: f64 = rng.random_range(0.0..1.0);
                         sample
@@ -193,5 +211,68 @@ impl Adasyn {
         }
 
         ClassificationTask::new(task.id(), result, new_target)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for HIGH-12 in the audit: interpolation used to pick
+    /// ANY same-class point, not one of the k nearest same-class neighbors
+    /// (as He et al. 2008 requires). With a bimodal minority class (two
+    /// tight, far-apart clusters) and majority samples occupying the region
+    /// between them, the old code could pair a point in one cluster with a
+    /// point in the other, generating a synthetic sample squarely in
+    /// majority territory. Restricting to the k nearest neighbors keeps
+    /// synthetics local to whichever cluster they came from.
+    #[test]
+    fn synthetic_samples_stay_within_local_cluster_not_across_the_gap() {
+        let mut feats: Vec<Vec<f64>> = Vec::new();
+        let mut target: Vec<usize> = Vec::new();
+        // Minority cluster A, near (0, 0).
+        for i in 0..6 {
+            feats.push(vec![i as f64 * 0.01, i as f64 * 0.01]);
+            target.push(1);
+        }
+        // Minority cluster B, near (10, 10) -- far from cluster A.
+        for i in 0..6 {
+            feats.push(vec![10.0 + i as f64 * 0.01, 10.0 + i as f64 * 0.01]);
+            target.push(1);
+        }
+        // Majority samples fill the gap between the two minority clusters.
+        for i in 0..30 {
+            let x = 4.0 + (i as f64 * 0.13) % 3.0;
+            let y = 4.0 + (i as f64 * 0.17) % 3.0;
+            feats.push(vec![x, y]);
+            target.push(0);
+        }
+        let n_original = feats.len();
+        let flat: Vec<f64> = feats.into_iter().flatten().collect();
+        let features = Array2::from_shape_vec((n_original, 2), flat).unwrap();
+        let task = ClassificationTask::new("t", features, target).unwrap();
+
+        let adasyn = Adasyn::new().with_k_neighbors(2).with_seed(0);
+        let balanced = adasyn.balance(&task).unwrap();
+        let feats_out = balanced.features();
+        let target_out = balanced.target();
+
+        let mut checked_any = false;
+        for i in n_original..target_out.len() {
+            if target_out[i] != 1 {
+                continue;
+            }
+            checked_any = true;
+            let x = feats_out[[i, 0]];
+            let y = feats_out[[i, 1]];
+            let dist_a = (x * x + y * y).sqrt();
+            let dist_b = ((x - 10.0).powi(2) + (y - 10.0).powi(2)).sqrt();
+            assert!(
+                dist_a.min(dist_b) < 3.0,
+                "synthetic minority sample ({x}, {y}) should stay near cluster A or B \
+                 (dist_a={dist_a}, dist_b={dist_b}), not cross into the majority-occupied gap"
+            );
+        }
+        assert!(checked_any, "test should have generated at least one synthetic minority sample");
     }
 }
