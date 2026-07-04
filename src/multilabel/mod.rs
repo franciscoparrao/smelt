@@ -55,6 +55,7 @@ pub struct ClassifierChain {
 }
 
 impl ClassifierChain {
+    /// Creates a classifier chain that builds one binary learner per label from `factory`.
     pub fn new(factory: impl Fn() -> Box<dyn Learner> + Send + Sync + 'static) -> Self {
         Self {
             factory: Box::new(factory),

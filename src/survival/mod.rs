@@ -349,21 +349,27 @@ impl Default for RandomSurvivalForest {
 }
 
 impl RandomSurvivalForest {
+    /// Creates a forest with default hyperparameters (100 trees, unbounded
+    /// depth, min node size 6, seed 42).
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the number of survival trees in the ensemble.
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the maximum depth of each survival tree.
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = Some(d);
         self
     }
+    /// Sets the minimum number of samples required in a leaf node.
     pub fn with_min_node_size(mut self, n: usize) -> Self {
         self.min_node_size = n;
         self
     }
+    /// Sets the RNG seed used for bootstrap sampling across trees.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self

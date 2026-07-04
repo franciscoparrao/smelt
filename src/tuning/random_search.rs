@@ -51,6 +51,8 @@ pub struct RandomSearch {
 }
 
 impl RandomSearch {
+    /// Create a random search over `param_space` using `factory` to build a
+    /// learner from a sampled parameter set.
     pub fn new(
         factory: impl Fn(&ParamSet) -> Box<dyn Learner> + Send + Sync + 'static,
         param_space: ParamSpace,
@@ -63,11 +65,13 @@ impl RandomSearch {
         }
     }
 
+    /// Set the number of random configurations to sample and evaluate.
     pub fn with_n_iter(mut self, n: usize) -> Self {
         self.n_iter = n;
         self
     }
 
+    /// Set the RNG seed for reproducible configuration sampling.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self

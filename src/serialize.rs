@@ -47,20 +47,35 @@ pub const SERIALIZATION_FORMAT_VERSION: u32 = 1;
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "model_type")]
 pub enum SerializableModel {
+    /// A trained decision tree.
     DecisionTree(TrainedDecisionTree),
+    /// A trained random forest.
     RandomForest(TrainedRandomForest),
+    /// A trained gradient boosting model.
     GradientBoosting(TrainedGradientBoosting),
+    /// A trained k-nearest-neighbors classifier.
     KnnClassifier(TrainedKnnClassifier),
+    /// A trained k-nearest-neighbors regressor.
     KnnRegressor(TrainedKnnRegressor),
+    /// A trained linear regression model.
     LinearRegression(TrainedLinearRegression),
+    /// A trained logistic regression model.
     LogisticRegression(TrainedLogisticRegression),
+    /// A trained XGBoost model.
     XGBoost(TrainedXGBoost),
+    /// A trained LightGBM model.
     LightGBM(TrainedLightGBM),
+    /// A trained CatBoost model.
     CatBoost(TrainedCatBoost),
+    /// A trained extra-trees ensemble.
     ExtraTrees(TrainedExtraTrees),
+    /// A trained AdaBoost ensemble.
     AdaBoost(TrainedAdaBoost),
+    /// A trained linear support vector machine.
     LinearSVM(TrainedLinearSVM),
+    /// A trained Gaussian naive Bayes classifier.
     GaussianNB(TrainedGaussianNB),
+    /// A trained regularized (ridge/lasso) regression model.
     RegularizedRegression(TrainedRegularizedRegression),
 }
 

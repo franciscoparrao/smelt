@@ -44,6 +44,8 @@ pub struct GridSearch {
 }
 
 impl GridSearch {
+    /// Create a grid search over `param_grid` using `factory` to build a
+    /// learner from each parameter combination.
     pub fn new(
         factory: impl Fn(&ParamSet) -> Box<dyn Learner> + Send + Sync + 'static,
         param_grid: ParamGrid,

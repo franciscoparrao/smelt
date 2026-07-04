@@ -25,6 +25,7 @@ pub struct StandardScaler {
 }
 
 impl StandardScaler {
+    /// Create an unfitted standard scaler.
     pub fn new() -> Self {
         Self {
             means: None,
@@ -108,6 +109,7 @@ pub struct MinMaxScaler {
 }
 
 impl MinMaxScaler {
+    /// Create an unfitted min-max scaler.
     pub fn new() -> Self {
         Self {
             mins: None,

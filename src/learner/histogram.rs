@@ -22,6 +22,8 @@ pub const MAX_BINS: usize = 254;
 /// Categorical features (declared via `build_typed`) are binned by category
 /// code directly: bin b == category b, and `cat[feature] = Some(n_bins)`.
 pub struct HistBins {
+    /// Per-feature bin boundary values (upper edge of each bin, in ascending
+    /// order) used to map a raw feature value to its bin index.
     pub boundaries: Vec<Vec<f64>>,
     cols: Vec<Vec<u8>>,
     /// `Some(n_categories)` for categorical features, `None` for numeric.

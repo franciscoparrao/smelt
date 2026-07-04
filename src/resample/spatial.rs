@@ -29,6 +29,8 @@ pub struct SpatialBlockCV {
 }
 
 impl SpatialBlockCV {
+    /// Create a spatial block CV splitting `coords` into `n_folds` grid
+    /// cells.
     pub fn new(n_folds: usize, coords: Vec<(f64, f64)>) -> Self {
         Self { n_folds, coords }
     }
@@ -112,6 +114,8 @@ pub struct SpatialBufferCV {
 }
 
 impl SpatialBufferCV {
+    /// Create a spatial buffer CV with `n_folds` folds and the given
+    /// exclusion buffer distance around each test sample.
     pub fn new(n_folds: usize, coords: Vec<(f64, f64)>, buffer_distance: f64) -> Self {
         Self {
             n_folds,
@@ -121,6 +125,7 @@ impl SpatialBufferCV {
         }
     }
 
+    /// Set the RNG seed used for the initial k-fold assignment.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self

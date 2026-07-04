@@ -46,13 +46,17 @@ impl Default for Smote {
 }
 
 impl Smote {
+    /// Create a SMOTE oversampler with default parameters.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Set the number of nearest neighbors used to synthesize new
+    /// minority-class samples.
     pub fn with_k_neighbors(mut self, k: usize) -> Self {
         self.k_neighbors = k;
         self
     }
+    /// Set the RNG seed for reproducible synthetic sample generation.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self

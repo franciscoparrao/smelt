@@ -88,9 +88,11 @@ impl CsrMatrix {
         })
     }
 
+    /// Number of rows in the matrix.
     pub fn n_rows(&self) -> usize {
         self.n_rows
     }
+    /// Number of columns in the matrix.
     pub fn n_cols(&self) -> usize {
         self.n_cols
     }

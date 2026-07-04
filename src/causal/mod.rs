@@ -102,25 +102,34 @@ impl Default for CausalForest {
 }
 
 impl CausalForest {
+    /// Creates a causal forest with default hyperparameters (100 trees, no
+    /// max depth, min leaf size 5, honesty fraction 0.5, seed 42).
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the number of trees in the forest.
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the maximum tree depth (unlimited by default).
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = Some(d);
         self
     }
+    /// Sets the minimum number of samples required in each leaf.
     pub fn with_min_samples_leaf(mut self, n: usize) -> Self {
         self.min_samples_leaf = n;
         self
     }
+    /// Sets the fraction of each tree's subsample held out for honest
+    /// leaf-effect re-estimation, rather than used to choose the tree's
+    /// splits.
     pub fn with_honesty_fraction(mut self, f: f64) -> Self {
         self.honesty_fraction = f;
         self
     }
+    /// Sets the RNG seed controlling subsampling and the honest train/estimation split.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self

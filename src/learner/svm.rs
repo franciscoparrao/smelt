@@ -46,21 +46,26 @@ impl Default for LinearSVM {
 }
 
 impl LinearSVM {
+    /// Creates a Linear SVM with C=1.0, 1000 SGD iterations, and learning rate 0.01.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the regularization strength C (higher = less regularization).
     pub fn with_c(mut self, c: f64) -> Self {
         self.c = c;
         self
     }
+    /// Sets the maximum number of SGD epochs.
     pub fn with_max_iter(mut self, n: usize) -> Self {
         self.max_iter = n;
         self
     }
+    /// Sets the initial SGD learning rate (decayed each epoch).
     pub fn with_learning_rate(mut self, lr: f64) -> Self {
         self.learning_rate = lr;
         self
     }
+    /// Sets the RNG seed used to shuffle samples during SGD.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
@@ -110,6 +115,7 @@ fn train_binary_svm(
     w
 }
 
+/// A trained Linear SVM (one binary or one-vs-rest classifier per class), ready to predict.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedLinearSVM {
     pub(crate) classifiers: Vec<Array1<f64>>, // one per class (OVR)

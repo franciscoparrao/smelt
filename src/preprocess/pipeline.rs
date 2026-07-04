@@ -35,6 +35,8 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
+    /// Create a pipeline that applies `transformers` in order, then trains
+    /// `learner` on the transformed data.
     pub fn new(transformers: Vec<Box<dyn Transformer>>, learner: Box<dyn Learner>) -> Self {
         let id = Self::build_id(&transformers, learner.id());
         Self {

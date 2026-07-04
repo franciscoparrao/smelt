@@ -30,6 +30,7 @@ pub struct OneHotEncoder {
 }
 
 impl OneHotEncoder {
+    /// Create an encoder for the given column indices to one-hot encode.
     pub fn new(columns: Vec<usize>) -> Self {
         Self {
             columns,

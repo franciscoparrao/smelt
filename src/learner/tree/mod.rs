@@ -13,20 +13,30 @@ use rand::seq::index::sample;
 
 use serde::{Deserialize, Serialize};
 
+/// A node in a decision tree: either a leaf prediction or an internal split.
 #[derive(Serialize, Deserialize)]
 pub enum Node {
+    /// A terminal node holding the prediction for samples that reach it.
     Leaf(LeafValue),
+    /// An internal node that routes samples to `left` or `right` based on `feature`/`threshold`.
     Split {
+        /// Index of the feature this split tests.
         feature: usize,
+        /// Threshold value; samples with `feature <= threshold` go left, others go right.
         threshold: f64,
+        /// Subtree for samples with `feature <= threshold`.
         left: Box<Node>,
+        /// Subtree for samples with `feature > threshold`.
         right: Box<Node>,
     },
 }
 
+/// The prediction stored at a leaf node.
 #[derive(Serialize, Deserialize)]
 pub enum LeafValue {
+    /// Classification leaf: predicted class index and per-class probability vector.
     Class(usize, Vec<f64>),
+    /// Regression leaf: predicted value.
     Value(f64),
 }
 

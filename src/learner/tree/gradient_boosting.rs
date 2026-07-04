@@ -56,40 +56,48 @@ impl Default for GradientBoosting {
 }
 
 impl GradientBoosting {
+    /// Creates a Gradient Boosting learner with default hyperparameters (100 trees, learning rate 0.1, max depth 3).
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the number of boosting stages (trees).
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
 
+    /// Sets the shrinkage factor applied to each tree's contribution.
     pub fn with_learning_rate(mut self, lr: f64) -> Self {
         self.learning_rate = lr;
         self
     }
 
+    /// Sets the maximum depth of each individual tree.
     pub fn with_max_depth(mut self, depth: usize) -> Self {
         self.max_depth = Some(depth);
         self
     }
 
+    /// Sets the minimum number of samples required to split an internal node.
     pub fn with_min_samples_split(mut self, n: usize) -> Self {
         self.min_samples_split = n;
         self
     }
 
+    /// Sets the minimum number of samples required in each leaf.
     pub fn with_min_samples_leaf(mut self, n: usize) -> Self {
         self.min_samples_leaf = n;
         self
     }
 
+    /// Sets the fraction of samples randomly drawn (without replacement) to fit each tree.
     pub fn with_subsample(mut self, ratio: f64) -> Self {
         self.subsample = ratio;
         self
     }
 
+    /// Sets the RNG seed used for subsampling.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
@@ -118,6 +126,7 @@ pub(crate) enum GBMode {
     MultiClassif { n_classes: usize },
 }
 
+/// A trained Gradient Boosting ensemble, ready to predict.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedGradientBoosting {
     pub(crate) initial: Vec<f64>,

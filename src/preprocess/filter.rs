@@ -103,6 +103,8 @@ impl FilterSelector {
         }
     }
 
+    /// Create a selector that keeps the top `n_features` by absolute
+    /// correlation with the target.
     pub fn correlation(n_features: usize) -> Self {
         Self {
             filter: FilterBox {
@@ -113,6 +115,8 @@ impl FilterSelector {
         }
     }
 
+    /// Create a selector that keeps the top `n_features` by ANOVA F-statistic
+    /// against the target.
     pub fn anova_f(n_features: usize) -> Self {
         Self {
             filter: FilterBox {
@@ -123,6 +127,8 @@ impl FilterSelector {
         }
     }
 
+    /// Create a selector that keeps the top `n_features` by information gain
+    /// (reduction in target entropy) with respect to the target.
     pub fn information_gain(n_features: usize) -> Self {
         Self {
             filter: FilterBox {
@@ -133,6 +139,8 @@ impl FilterSelector {
         }
     }
 
+    /// Create a selector that keeps the top `n_features` by mutual
+    /// information with the target.
     pub fn mutual_info(n_features: usize) -> Self {
         Self {
             filter: FilterBox {

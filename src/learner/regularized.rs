@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 // --- Shared trained model ---
 
+/// Trained Ridge/Lasso/Elastic Net model: fitted weights (including bias)
+/// shared across the three regularized-regression learners.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedRegularizedRegression {
     pub(crate) weights: Array1<f64>,
@@ -74,6 +76,7 @@ pub struct Ridge {
 }
 
 impl Ridge {
+    /// Creates a Ridge regression learner with L2 penalty strength `alpha`.
     pub fn new(alpha: f64) -> Self {
         Self { alpha }
     }
@@ -199,6 +202,7 @@ pub struct Lasso {
 }
 
 impl Lasso {
+    /// Creates a Lasso regression learner with L1 penalty strength `alpha`.
     pub fn new(alpha: f64) -> Self {
         Self {
             alpha,
@@ -206,10 +210,12 @@ impl Lasso {
             tol: 1e-6,
         }
     }
+    /// Sets the maximum number of coordinate descent iterations.
     pub fn with_max_iter(mut self, n: usize) -> Self {
         self.max_iter = n;
         self
     }
+    /// Sets the convergence tolerance on the largest coefficient change.
     pub fn with_tol(mut self, tol: f64) -> Self {
         self.tol = tol;
         self
@@ -341,6 +347,8 @@ pub struct ElasticNet {
 }
 
 impl ElasticNet {
+    /// Creates an Elastic Net learner with penalty strength `alpha` and
+    /// `l1_ratio` controlling the L1/L2 mixing (1.0 = pure Lasso, 0.0 = pure Ridge).
     pub fn new(alpha: f64, l1_ratio: f64) -> Self {
         Self {
             alpha,
@@ -349,10 +357,12 @@ impl ElasticNet {
             tol: 1e-6,
         }
     }
+    /// Sets the maximum number of coordinate descent iterations.
     pub fn with_max_iter(mut self, n: usize) -> Self {
         self.max_iter = n;
         self
     }
+    /// Sets the convergence tolerance on the largest coefficient change.
     pub fn with_tol(mut self, tol: f64) -> Self {
         self.tol = tol;
         self

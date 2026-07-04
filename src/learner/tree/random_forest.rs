@@ -54,40 +54,48 @@ impl Default for RandomForest {
 }
 
 impl RandomForest {
+    /// Creates a Random Forest learner with default hyperparameters (100 trees, sqrt feature heuristic).
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the number of trees in the forest.
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
 
+    /// Sets the maximum depth of each tree.
     pub fn with_max_depth(mut self, depth: usize) -> Self {
         self.max_depth = Some(depth);
         self
     }
 
+    /// Sets the minimum number of samples required to split an internal node.
     pub fn with_min_samples_split(mut self, n: usize) -> Self {
         self.min_samples_split = n;
         self
     }
 
+    /// Sets the minimum number of samples required in each leaf.
     pub fn with_min_samples_leaf(mut self, n: usize) -> Self {
         self.min_samples_leaf = n;
         self
     }
 
+    /// Uses the classic RF default: `sqrt(n_features)` candidate features per split.
     pub fn with_max_features_sqrt(mut self) -> Self {
         self.max_features_fraction = 0.0;
         self
     }
 
+    /// Sets the fraction of features considered at each split; `0.0` uses the sqrt(n_features) heuristic.
     pub fn with_max_features_fraction(mut self, f: f64) -> Self {
         self.max_features_fraction = f;
         self
     }
 
+    /// Sets the RNG seed used for bootstrap sampling and feature subsampling.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
@@ -107,6 +115,7 @@ impl RandomForest {
 
 use serde::{Deserialize, Serialize};
 
+/// A trained Random Forest ensemble, ready to predict.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedRandomForest {
     pub(crate) trees: Vec<Node>,

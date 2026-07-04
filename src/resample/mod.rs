@@ -23,7 +23,9 @@ pub trait Resample {
 
 /// K-fold cross-validation.
 pub struct CrossValidation {
+    /// Number of folds to split the data into.
     pub folds: usize,
+    /// RNG seed used to shuffle samples before splitting into folds.
     pub seed: u64,
 }
 
@@ -34,9 +36,11 @@ impl Default for CrossValidation {
 }
 
 impl CrossValidation {
+    /// Create a K-fold cross-validation with the given number of folds.
     pub fn new(folds: usize) -> Self {
         Self { folds, seed: 42 }
     }
+    /// Set the RNG seed used to shuffle samples before splitting into folds.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
@@ -84,7 +88,9 @@ impl Resample for CrossValidation {
 
 /// Simple train/test split.
 pub struct Holdout {
+    /// Fraction of samples assigned to the training set, in (0, 1).
     pub ratio: f64,
+    /// RNG seed used to shuffle samples before splitting.
     pub seed: u64,
 }
 
@@ -98,9 +104,11 @@ impl Default for Holdout {
 }
 
 impl Holdout {
+    /// Create a train/test split with the given training-set ratio.
     pub fn new(ratio: f64) -> Self {
         Self { ratio, seed: 42 }
     }
+    /// Set the RNG seed used to shuffle samples before splitting.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self

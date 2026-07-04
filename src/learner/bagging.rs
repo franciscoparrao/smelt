@@ -35,6 +35,8 @@ pub struct Bagging {
 }
 
 impl Bagging {
+    /// Creates a bagging ensemble from a factory that produces fresh base
+    /// learners, defaulting to 10 estimators and seed 42.
     pub fn new(factory: impl Fn() -> Box<dyn Learner> + Send + Sync + 'static) -> Self {
         Self {
             factory: Box::new(factory),
@@ -43,11 +45,13 @@ impl Bagging {
         }
     }
 
+    /// Sets the number of bootstrap samples (base learners) to train.
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
 
+    /// Sets the RNG seed used to draw bootstrap samples.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self

@@ -48,6 +48,8 @@ pub struct QuantileGB {
 }
 
 impl QuantileGB {
+    /// Creates a quantile gradient boosting learner targeting the given
+    /// quantile `τ` (e.g. 0.5 for the median) of the conditional distribution.
     pub fn new(quantile: f64) -> Self {
         Self {
             quantile,
@@ -60,18 +62,22 @@ impl QuantileGB {
         }
     }
 
+    /// Sets the number of boosting rounds (trees).
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the shrinkage applied to each tree's contribution.
     pub fn with_learning_rate(mut self, lr: f64) -> Self {
         self.learning_rate = lr;
         self
     }
+    /// Sets the maximum depth of each boosted tree.
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = Some(d);
         self
     }
+    /// Sets the RNG seed used for tree building.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self

@@ -70,6 +70,8 @@ impl RFE {
         }
     }
 
+    /// Indices of the features RFE selected as important, or `None` if not
+    /// yet fitted.
     pub fn selected_indices(&self) -> Option<&[usize]> {
         self.selected_indices.as_deref()
     }

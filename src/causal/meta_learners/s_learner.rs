@@ -41,6 +41,8 @@ pub struct SLearner {
 }
 
 impl SLearner {
+    /// Creates an S-learner that uses `factory` to build the single outcome
+    /// model trained on features augmented with the treatment indicator.
     pub fn new(factory: impl Fn() -> Box<dyn Learner> + Send + Sync + 'static) -> Self {
         Self {
             factory: Box::new(factory),

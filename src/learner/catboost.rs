@@ -85,33 +85,43 @@ impl Default for CatBoost {
 }
 
 impl CatBoost {
+    /// Creates a `CatBoost` learner with default hyperparameters.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the number of boosting rounds (oblivious trees to fit).
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the shrinkage applied to each tree's contribution.
     pub fn with_learning_rate(mut self, lr: f64) -> Self {
         self.learning_rate = lr;
         self
     }
+    /// Sets the depth of each oblivious (symmetric) tree.
     pub fn with_depth(mut self, d: usize) -> Self {
         self.depth = d;
         self
     }
+    /// Sets the L2 regularization strength on leaf weights.
     pub fn with_lambda(mut self, l: f64) -> Self {
         self.lambda = l;
         self
     }
+    /// Sets the indices of categorical features to encode with ordered
+    /// target statistics instead of treating them as numeric.
     pub fn with_cat_features(mut self, cats: Vec<usize>) -> Self {
         self.cat_features = cats;
         self
     }
+    /// Sets the Bayesian prior strength used to smooth categorical target
+    /// statistics (larger values shrink encodings toward the global mean).
     pub fn with_prior_strength(mut self, p: f64) -> Self {
         self.prior_strength = p;
         self
     }
+    /// Sets the RNG seed controlling the target-statistics permutation order.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self
@@ -503,6 +513,7 @@ pub(crate) enum CBMode {
     MultiClassif { n_classes: usize },
 }
 
+/// A trained CatBoost model, ready to predict.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedCatBoost {
     pub(crate) trees: Vec<ObliviousTree>,

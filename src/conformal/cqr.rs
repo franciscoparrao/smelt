@@ -15,8 +15,11 @@ use ndarray::Array2;
 /// CQR prediction interval.
 #[derive(Debug, Clone)]
 pub struct CQRInterval {
+    /// Point prediction: midpoint of the lower and upper quantile predictions.
     pub prediction: f64,
+    /// Lower bound of the conformalized prediction interval.
     pub lower: f64,
+    /// Upper bound of the conformalized prediction interval.
     pub upper: f64,
 }
 

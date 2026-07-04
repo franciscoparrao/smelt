@@ -54,21 +54,26 @@ impl Default for EBM {
 }
 
 impl EBM {
+    /// Creates an EBM with 100 cyclic boosting rounds and a learning rate of 0.01.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the number of cyclic boosting rounds (one stump per feature per round).
     pub fn with_n_rounds(mut self, n: usize) -> Self {
         self.n_rounds = n;
         self
     }
+    /// Sets the learning rate applied to each per-feature shape update.
     pub fn with_learning_rate(mut self, lr: f64) -> Self {
         self.learning_rate = lr;
         self
     }
+    /// Sets the maximum depth of each per-feature shape-function stump.
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = Some(d);
         self
     }
+    /// Sets the RNG seed used when building shape-function trees.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self

@@ -74,10 +74,13 @@ impl RLearner {
         }
     }
 
+    /// Sets the number of folds used for cross-fitting the outcome and
+    /// propensity models. Default `5`.
     pub fn with_cv_folds(mut self, folds: usize) -> Self {
         self.cv_folds = folds;
         self
     }
+    /// Sets the RNG seed for the cross-fitting fold assignment. Default `42`.
     pub fn with_cv_seed(mut self, seed: u64) -> Self {
         self.cv_seed = seed;
         self

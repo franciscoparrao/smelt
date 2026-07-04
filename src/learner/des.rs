@@ -47,6 +47,8 @@ pub struct DynamicEnsemble {
 }
 
 impl DynamicEnsemble {
+    /// Creates a DES ensemble from the given base-learner factories,
+    /// defaulting to 7 neighbors for the KNORA-E competence check.
     pub fn new(factories: Vec<Box<dyn Fn() -> Box<dyn Learner> + Send + Sync>>) -> Self {
         Self {
             base_factories: factories,
@@ -54,6 +56,8 @@ impl DynamicEnsemble {
         }
     }
 
+    /// Sets the number of nearest neighbors (k) used to assess each base
+    /// classifier's local competence (KNORA-E).
     pub fn with_k_neighbors(mut self, k: usize) -> Self {
         self.k_neighbors = k;
         self

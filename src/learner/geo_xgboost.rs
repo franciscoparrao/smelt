@@ -62,6 +62,8 @@ pub struct GeoXGBoost {
 }
 
 impl GeoXGBoost {
+    /// Creates a `GeoXGBoost` learner from spatial unit coordinates, with
+    /// default hyperparameters and adaptive alpha weighting.
     pub fn new(coords: Vec<(f64, f64)>) -> Self {
         Self {
             coords,
@@ -75,30 +77,43 @@ impl GeoXGBoost {
         }
     }
 
+    /// Sets the number of nearest neighbors used by the bi-square spatial
+    /// kernel; use `select_bandwidth` to pick this via leave-one-out CV.
     pub fn with_bandwidth(mut self, bw: usize) -> Self {
         self.bandwidth = bw;
         self
     }
+    /// Sets the number of boosting rounds for both the global and local
+    /// XGBoost models.
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the maximum tree depth for both the global and local XGBoost
+    /// models.
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = d;
         self
     }
+    /// Sets the shrinkage applied to each tree's contribution in both the
+    /// global and local XGBoost models.
     pub fn with_learning_rate(mut self, lr: f64) -> Self {
         self.learning_rate = lr;
         self
     }
+    /// Sets the L2 regularization strength for both the global and local
+    /// XGBoost models.
     pub fn with_lambda(mut self, l: f64) -> Self {
         self.lambda = l;
         self
     }
+    /// Fixes the global/local blending weight (0.0 = only global, 1.0 =
+    /// only local); when unset, alpha is computed adaptively per Eq. 20.
     pub fn with_alpha(mut self, a: f64) -> Self {
         self.alpha = Some(a);
         self
     }
+    /// Sets the RNG seed used by the underlying XGBoost models.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self

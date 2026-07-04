@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 pub struct GaussianNB;
 
 impl GaussianNB {
+    /// Creates a Gaussian Naive Bayes classifier.
     pub fn new() -> Self {
         Self
     }
@@ -39,6 +40,7 @@ impl Default for GaussianNB {
     }
 }
 
+/// A trained Gaussian Naive Bayes classifier, ready to predict.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedGaussianNB {
     pub(crate) means: Vec<Vec<f64>>,     // [class][feature]

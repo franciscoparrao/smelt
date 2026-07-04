@@ -96,6 +96,8 @@ pub struct ClassificationTask {
 }
 
 impl ClassificationTask {
+    /// Create a classification task from a feature matrix and integer class
+    /// labels; class names default to `"class_0"`, `"class_1"`, etc.
     pub fn new(id: impl Into<String>, features: Array2<f64>, target: Vec<usize>) -> Result<Self> {
         if features.nrows() == 0 {
             return Err(SmeltError::EmptyDataset);
@@ -130,6 +132,7 @@ impl ClassificationTask {
         Ok(self)
     }
 
+    /// Set custom feature names; must match the number of feature columns.
     pub fn with_feature_names(mut self, names: Vec<String>) -> Result<Self> {
         if names.len() != self.features.ncols() {
             return Err(SmeltError::DimensionMismatch {
@@ -141,17 +144,21 @@ impl ClassificationTask {
         Ok(self)
     }
 
+    /// Set custom class names, indexed by class label.
     pub fn with_class_names(mut self, names: Vec<String>) -> Self {
         self.class_names = names;
         self
     }
 
+    /// Integer target labels, one per sample.
     pub fn target(&self) -> &[usize] {
         &self.target
     }
+    /// Number of distinct classes.
     pub fn n_classes(&self) -> usize {
         self.class_names.len()
     }
+    /// Class names, indexed by class label.
     pub fn class_names(&self) -> &[String] {
         &self.class_names
     }
@@ -183,6 +190,8 @@ pub struct RegressionTask {
 }
 
 impl RegressionTask {
+    /// Create a regression task from a feature matrix and continuous target
+    /// values.
     pub fn new(id: impl Into<String>, features: Array2<f64>, target: Vec<f64>) -> Result<Self> {
         if features.nrows() == 0 {
             return Err(SmeltError::EmptyDataset);
@@ -215,6 +224,7 @@ impl RegressionTask {
         Ok(self)
     }
 
+    /// Set custom feature names; must match the number of feature columns.
     pub fn with_feature_names(mut self, names: Vec<String>) -> Result<Self> {
         if names.len() != self.features.ncols() {
             return Err(SmeltError::DimensionMismatch {
@@ -226,6 +236,7 @@ impl RegressionTask {
         Ok(self)
     }
 
+    /// Continuous target values, one per sample.
     pub fn target(&self) -> &[f64] {
         &self.target
     }

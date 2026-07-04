@@ -25,6 +25,7 @@ pub struct PCA {
 }
 
 impl PCA {
+    /// Create a PCA transformer that reduces to `n_components` dimensions.
     pub fn new(n_components: usize) -> Self {
         Self {
             n_components,

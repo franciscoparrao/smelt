@@ -146,8 +146,15 @@ competitiva" in progress):
       output on high-cardinality columns). `SparseTask`/sparse linear-model
       math left as separate, larger follow-ups — see
       docs/sparse_data_2026-07-03.md
-- [ ] `README.md`/this file kept current as features land (this section itself
+- [x] `README.md`/this file kept current as features land (this section itself
       was stale for a long time — reconciled 2026-07-02)
+- [x] `#![warn(missing_docs)]` (item 17b) — done 2026-07-03. 330 warnings
+      (grown from 308 at the last count, per new code added this session)
+      closed by parallelizing across 8 agents on disjoint file sets, all
+      purely additive one-line `///` docs verified against actual code
+      semantics (not paraphrased from names) — see
+      docs/missing_docs_2026-07-03.md. Zero regressions (101 lib + 66 doc +
+      274 integration tests). **Fase 3 is now fully complete.**
 
 ### Causal meta-learners (2026-07-03, not part of Fase 3)
 

@@ -14,7 +14,9 @@ use ndarray::Array2;
 pub struct MultiOutputPrediction {
     /// Predictions per target: `values[sample][target]`.
     pub values: Vec<Vec<f64>>,
+    /// Number of samples predicted.
     pub n_samples: usize,
+    /// Number of regression targets.
     pub n_targets: usize,
 }
 
@@ -47,12 +49,15 @@ pub struct RegressorChain {
 }
 
 impl RegressorChain {
+    /// Creates a regressor chain that builds one regressor per target from `factory`.
     pub fn new(factory: impl Fn() -> Box<dyn Learner> + Send + Sync + 'static) -> Self {
         Self {
             factory: Box::new(factory),
         }
     }
 
+    /// Trains one regressor per target column, each augmented with the previous
+    /// targets' values as extra features.
     pub fn fit(
         &self,
         features: &Array2<f64>,
@@ -108,6 +113,8 @@ pub struct TrainedRegressorChain {
 }
 
 impl TrainedRegressorChain {
+    /// Predicts all targets in chain order, feeding each regressor's prediction
+    /// as an extra feature to the next.
     pub fn predict(&self, features: &Array2<f64>) -> Result<MultiOutputPrediction> {
         let n_samples = features.nrows();
         let mut all_preds: Vec<Vec<f64>> = vec![vec![0.0; self.n_targets]; n_samples];

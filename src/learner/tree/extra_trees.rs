@@ -55,29 +55,36 @@ impl Default for ExtraTrees {
 }
 
 impl ExtraTrees {
+    /// Creates an Extra Trees ensemble with default hyperparameters (100 trees, sqrt feature heuristic).
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the number of trees in the ensemble.
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the maximum depth of each tree.
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = Some(d);
         self
     }
+    /// Sets the minimum number of samples required to split an internal node.
     pub fn with_min_samples_split(mut self, n: usize) -> Self {
         self.min_samples_split = n;
         self
     }
+    /// Sets the minimum number of samples required in each leaf.
     pub fn with_min_samples_leaf(mut self, n: usize) -> Self {
         self.min_samples_leaf = n;
         self
     }
+    /// Sets the fraction of features considered at each split; `0.0` uses the sqrt(n_features) heuristic.
     pub fn with_max_features_fraction(mut self, f: f64) -> Self {
         self.max_features_fraction = f;
         self
     }
+    /// Sets the RNG seed used for bootstrap-free tree construction and random thresholds.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
@@ -94,6 +101,7 @@ impl ExtraTrees {
     }
 }
 
+/// A trained Extra Trees ensemble, ready to predict.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedExtraTrees {
     pub(crate) trees: Vec<Node>,

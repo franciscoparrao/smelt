@@ -55,21 +55,27 @@ impl Default for IsolationForest {
 }
 
 impl IsolationForest {
+    /// Creates an isolation forest with default hyperparameters (100 trees,
+    /// auto subsample size, 10% contamination, seed 42).
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the number of isolation trees in the ensemble.
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the subsample size used to build each isolation tree.
     pub fn with_max_samples(mut self, n: usize) -> Self {
         self.max_samples = Some(n);
         self
     }
+    /// Sets the expected fraction of anomalies, used to derive the score threshold.
     pub fn with_contamination(mut self, c: f64) -> Self {
         self.contamination = c;
         self
     }
+    /// Sets the RNG seed used for subsampling and random splits.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self

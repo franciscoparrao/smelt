@@ -60,6 +60,8 @@ pub struct BayesianOptimizer {
 }
 
 impl BayesianOptimizer {
+    /// Create a TPE-based Bayesian optimizer over `param_space` using
+    /// `factory` to build a learner from a sampled parameter set.
     pub fn new(
         factory: impl Fn(&ParamSet) -> Box<dyn Learner> + Send + Sync + 'static,
         param_space: ParamSpace,
@@ -75,22 +77,30 @@ impl BayesianOptimizer {
         }
     }
 
+    /// Set the total number of optimization iterations.
     pub fn with_n_iter(mut self, n: usize) -> Self {
         self.n_iter = n;
         self
     }
+    /// Set the number of initial random iterations before TPE-guided
+    /// sampling begins.
     pub fn with_n_initial(mut self, n: usize) -> Self {
         self.n_initial = n;
         self
     }
+    /// Set the quantile (0-1) splitting evaluated configurations into the
+    /// "good" (top `gamma`) and "bad" density models.
     pub fn with_gamma(mut self, g: f64) -> Self {
         self.gamma = g;
         self
     }
+    /// Set how many candidates are sampled from the "good" density model
+    /// each iteration, picking the one with the best l(x)/g(x) ratio.
     pub fn with_n_candidates(mut self, n: usize) -> Self {
         self.n_candidates = n;
         self
     }
+    /// Set the RNG seed for reproducible sampling.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self

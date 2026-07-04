@@ -33,6 +33,7 @@ impl Default for LinearRegression {
 }
 
 impl LinearRegression {
+    /// Creates a new OLS linear regression learner (no hyperparameters to configure).
     pub fn new() -> Self {
         Self
     }
@@ -98,6 +99,7 @@ fn solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
 
 use serde::{Deserialize, Serialize};
 
+/// Trained OLS model: fitted weights (including bias) plus feature names.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedLinearRegression {
     pub(crate) weights: Array1<f64>,

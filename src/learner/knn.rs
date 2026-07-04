@@ -35,6 +35,7 @@ impl Default for KNearestNeighbors {
 }
 
 impl KNearestNeighbors {
+    /// Creates a KNN learner that votes/averages over the `k` closest training points.
     pub fn new(k: usize) -> Self {
         Self { k }
     }
@@ -63,6 +64,7 @@ fn k_nearest(train: &Array2<f64>, sample: ArrayView1<f64>, k: usize) -> Vec<usiz
 
 use serde::{Deserialize, Serialize};
 
+/// A trained KNN classifier, ready to predict by majority vote over neighbors.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedKnnClassifier {
     pub(crate) features: Array2<f64>,
@@ -104,6 +106,7 @@ impl TrainedModel for TrainedKnnClassifier {
     }
 }
 
+/// A trained KNN regressor, ready to predict by averaging over neighbors.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedKnnRegressor {
     pub(crate) features: Array2<f64>,

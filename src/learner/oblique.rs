@@ -498,21 +498,27 @@ impl Default for ObliqueTree {
 }
 
 impl ObliqueTree {
+    /// Creates a single oblique decision tree with default hyperparameters.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the maximum tree depth.
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = Some(d);
         self
     }
+    /// Sets the number of random sparse projections tried at each split.
     pub fn with_n_projections(mut self, n: usize) -> Self {
         self.n_projections = n;
         self
     }
+    /// Sets the number of features combined in each sparse projection
+    /// (defaults to `sqrt(n_features)` if unset).
     pub fn with_features_per_proj(mut self, k: usize) -> Self {
         self.features_per_proj = Some(k);
         self
     }
+    /// Sets the RNG seed used for projection sampling.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self
@@ -633,25 +639,32 @@ impl Default for ObliqueForest {
 }
 
 impl ObliqueForest {
+    /// Creates an oblique random forest (SPORF) with default hyperparameters.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the number of trees in the forest.
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the maximum depth of each tree.
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = Some(d);
         self
     }
+    /// Sets the number of random sparse projections tried at each split.
     pub fn with_n_projections(mut self, n: usize) -> Self {
         self.n_projections = n;
         self
     }
+    /// Sets the number of features combined in each sparse projection
+    /// (defaults to `sqrt(n_features)` if unset).
     pub fn with_features_per_proj(mut self, k: usize) -> Self {
         self.features_per_proj = Some(k);
         self
     }
+    /// Sets the RNG seed used for bootstrap sampling and projection sampling.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self

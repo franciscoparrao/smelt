@@ -45,20 +45,24 @@ impl Default for DecisionTree {
 }
 
 impl DecisionTree {
+    /// Creates a decision tree with default hyperparameters (unbounded depth, min split 2, min leaf 1).
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the maximum depth of the tree.
     pub fn with_max_depth(mut self, depth: usize) -> Self {
         self.max_depth = Some(depth);
         self
     }
 
+    /// Sets the minimum number of samples required to split an internal node.
     pub fn with_min_samples_split(mut self, n: usize) -> Self {
         self.min_samples_split = n;
         self
     }
 
+    /// Sets the minimum number of samples required in each leaf.
     pub fn with_min_samples_leaf(mut self, n: usize) -> Self {
         self.min_samples_leaf = n;
         self
@@ -67,6 +71,7 @@ impl DecisionTree {
 
 use serde::{Deserialize, Serialize};
 
+/// A trained CART decision tree, ready to predict.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedDecisionTree {
     pub(crate) root: Node,

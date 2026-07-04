@@ -35,6 +35,7 @@ pub struct Imputer {
 }
 
 impl Imputer {
+    /// Create an imputer using the given missing-value strategy.
     pub fn new(strategy: ImputeStrategy) -> Self {
         Self {
             strategy,
@@ -42,12 +43,15 @@ impl Imputer {
         }
     }
 
+    /// Create an imputer that fills NaN with the column mean.
     pub fn mean() -> Self {
         Self::new(ImputeStrategy::Mean)
     }
+    /// Create an imputer that fills NaN with the column median.
     pub fn median() -> Self {
         Self::new(ImputeStrategy::Median)
     }
+    /// Create an imputer that fills NaN with a fixed constant value.
     pub fn constant(value: f64) -> Self {
         Self::new(ImputeStrategy::Constant(value))
     }

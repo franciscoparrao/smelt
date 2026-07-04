@@ -45,6 +45,10 @@ pub struct Stacking {
 }
 
 impl Stacking {
+    /// Creates a Stacking (Super Learner) ensemble from a set of level-0 base
+    /// learner factories and a level-1 meta-learner factory. The base learners
+    /// are cross-validated (5 folds, seed 42 by default) to produce out-of-fold
+    /// predictions, which become the training features for the meta-learner.
     pub fn new(
         base_factories: Vec<Box<dyn Fn() -> Box<dyn Learner> + Send + Sync>>,
         meta_factory: impl Fn() -> Box<dyn Learner> + Send + Sync + 'static,
@@ -57,10 +61,13 @@ impl Stacking {
         }
     }
 
+    /// Sets the number of cross-validation folds used to build out-of-fold
+    /// predictions for the meta-learner.
     pub fn with_cv_folds(mut self, folds: usize) -> Self {
         self.cv_folds = folds;
         self
     }
+    /// Sets the RNG seed used to build the cross-validation splits.
     pub fn with_cv_seed(mut self, seed: u64) -> Self {
         self.cv_seed = seed;
         self

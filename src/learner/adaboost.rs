@@ -41,19 +41,23 @@ impl Default for AdaBoost {
 }
 
 impl AdaBoost {
+    /// Creates an AdaBoost with 50 estimators and a learning rate of 1.0.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the number of boosting rounds (decision stumps to train).
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the learning rate scaling each stump's SAMME alpha weight.
     pub fn with_learning_rate(mut self, lr: f64) -> Self {
         self.learning_rate = lr;
         self
     }
 }
 
+/// A trained AdaBoost (SAMME) ensemble, ready to predict.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedAdaBoost {
     pub(crate) stumps: Vec<TrainedStump>,

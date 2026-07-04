@@ -42,20 +42,25 @@ impl Default for LogisticRegression {
 }
 
 impl LogisticRegression {
+    /// Creates a new logistic regression learner with default learning rate,
+    /// iteration cap, and convergence tolerance.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the gradient descent step size.
     pub fn with_learning_rate(mut self, lr: f64) -> Self {
         self.learning_rate = lr;
         self
     }
 
+    /// Sets the maximum number of gradient descent iterations.
     pub fn with_max_iter(mut self, n: usize) -> Self {
         self.max_iter = n;
         self
     }
 
+    /// Sets the convergence tolerance on the maximum gradient component.
     pub fn with_tol(mut self, tol: f64) -> Self {
         self.tol = tol;
         self
@@ -111,6 +116,8 @@ fn train_binary(
 
 use serde::{Deserialize, Serialize};
 
+/// Trained logistic regression model: one binary classifier per class
+/// (one-vs-rest for multiclass) plus the feature scaling used at train time.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedLogisticRegression {
     pub(crate) classifiers: Vec<Array1<f64>>,

@@ -97,49 +97,64 @@ impl Default for LightGBM {
 }
 
 impl LightGBM {
+    /// Creates a `LightGBM` learner with default hyperparameters.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the number of boosting rounds (trees to fit).
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the shrinkage applied to each tree's contribution.
     pub fn with_learning_rate(mut self, lr: f64) -> Self {
         self.learning_rate = lr;
         self
     }
+    /// Sets the maximum number of leaves per tree, the primary control on
+    /// leaf-wise (best-first) growth.
     pub fn with_num_leaves(mut self, n: usize) -> Self {
         self.num_leaves = n;
         self
     }
+    /// Sets an optional maximum tree depth, in addition to `num_leaves`.
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = Some(d);
         self
     }
+    /// Sets the L2 regularization strength on leaf weights.
     pub fn with_lambda(mut self, l: f64) -> Self {
         self.lambda = l;
         self
     }
+    /// Sets the minimum sum of Hessian (instance weight) required in a leaf
+    /// for a split to be considered.
     pub fn with_min_child_weight(mut self, w: f64) -> Self {
         self.min_child_weight = w;
         self
     }
+    /// Sets the GOSS fraction of top-gradient samples always kept.
     pub fn with_top_rate(mut self, r: f64) -> Self {
         self.top_rate = r;
         self
     }
+    /// Sets the GOSS fraction of the remaining (small-gradient) samples
+    /// randomly sampled.
     pub fn with_other_rate(mut self, r: f64) -> Self {
         self.other_rate = r;
         self
     }
+    /// Sets the fraction of rows randomly subsampled for each tree.
     pub fn with_subsample(mut self, s: f64) -> Self {
         self.subsample = s;
         self
     }
+    /// Sets the fraction of columns randomly sampled for each tree.
     pub fn with_colsample_bytree(mut self, c: f64) -> Self {
         self.colsample_bytree = c;
         self
     }
+    /// Sets the RNG seed controlling GOSS sampling and column/row subsampling.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self
@@ -169,26 +184,40 @@ type Bins = HistBins;
 
 // ── Tree node ───────────────────────────────────────────────────────
 
+/// Internal tree node: a leaf with a fitted value, or a split on a feature
+/// (numeric threshold or categorical membership).
 #[derive(Serialize, Deserialize)]
 pub enum LGBNode {
+    /// Terminal node holding the leaf's fitted output value.
     Leaf {
+        /// The leaf's fitted output value.
         weight: f64,
     },
+    /// Numeric split: rows with `feature < threshold` go left, others right.
     Split {
+        /// Index of the feature being split on.
         feature: usize,
+        /// Threshold value separating left and right children.
         threshold: f64,
+        /// Whether NaN values in `feature` route to the left child.
         nan_left: bool,
+        /// Left child, taken when the row's value is below `threshold`.
         left: Box<LGBNode>,
+        /// Right child, taken when the row's value is at or above `threshold`.
         right: Box<LGBNode>,
     },
     /// Categorical split: the listed category codes go left; every other
     /// code — including categories unseen during training — goes right.
     CatSplit {
+        /// Index of the feature being split on.
         feature: usize,
         /// Sorted category codes routed left.
         left_cats: Vec<u16>,
+        /// Whether NaN values in `feature` route to the left child.
         nan_left: bool,
+        /// Left child, taken when the row's category code is in `left_cats`.
         left: Box<LGBNode>,
+        /// Right child, taken for all other category codes.
         right: Box<LGBNode>,
     },
 }
@@ -670,6 +699,7 @@ pub(crate) enum LGBMode {
     MultiClassif { n_classes: usize },
 }
 
+/// A trained LightGBM model, ready to predict.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedLightGBM {
     pub(crate) trees: Vec<LGBNode>,

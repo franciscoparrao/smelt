@@ -19,8 +19,11 @@ pub struct BenchmarkDesign {
 /// Single entry in a benchmark design.
 #[derive(Debug)]
 pub struct BenchmarkEntry {
+    /// Identifier of the learner that produced these scores.
     pub learner_id: String,
+    /// Identifier of the task the learner was evaluated on.
     pub task_id: String,
+    /// Identifiers of the measures scored, in the same order as `mean_scores`/`fold_scores`.
     pub measure_ids: Vec<String>,
     /// Mean scores per measure.
     pub mean_scores: Vec<f64>,

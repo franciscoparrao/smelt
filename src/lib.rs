@@ -1,6 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::type_complexity)]
+#![warn(missing_docs)]
 
 //! # Smelt
 //!

@@ -50,6 +50,8 @@ fn is_missing(s: &str) -> bool {
 }
 
 impl CsvLoader {
+    /// Creates a loader for the CSV file at `path`, with defaults `,` delimiter,
+    /// no row limit, and no forced categorical columns.
     pub fn from_path(path: impl AsRef<Path>) -> Self {
         Self {
             path: path.as_ref().to_string_lossy().to_string(),
@@ -60,6 +62,7 @@ impl CsvLoader {
         }
     }
 
+    /// Sets the name of the column to use as the prediction target.
     pub fn target(mut self, col: &str) -> Self {
         self.target_col = Some(col.to_string());
         self
@@ -73,6 +76,7 @@ impl CsvLoader {
         self
     }
 
+    /// Sets the field delimiter byte used to parse the CSV (default `,`).
     pub fn delimiter(mut self, d: u8) -> Self {
         self.delimiter = d;
         self

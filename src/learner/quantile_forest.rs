@@ -59,21 +59,28 @@ impl Default for QuantileForest {
 }
 
 impl QuantileForest {
+    /// Creates a quantile regression forest with default hyperparameters.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the number of trees in the forest.
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the maximum depth of each tree.
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = Some(d);
         self
     }
+    /// Sets the minimum number of training targets retained per leaf; leaves
+    /// keep all targets that land in them so quantiles can be estimated
+    /// empirically from that pooled sample at prediction time.
     pub fn with_min_samples_leaf(mut self, n: usize) -> Self {
         self.min_samples_leaf = n;
         self
     }
+    /// Sets the RNG seed used for bootstrap sampling and feature subsetting.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self

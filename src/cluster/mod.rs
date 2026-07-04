@@ -113,6 +113,7 @@ pub struct KMeans {
 }
 
 impl KMeans {
+    /// Creates a K-Means clusterer for `k` clusters, with defaults `max_iter=300`, `seed=42`.
     pub fn new(k: usize) -> Self {
         Self {
             k,
@@ -120,15 +121,18 @@ impl KMeans {
             seed: 42,
         }
     }
+    /// Sets the maximum number of Lloyd's algorithm iterations before stopping.
     pub fn with_max_iter(mut self, n: usize) -> Self {
         self.max_iter = n;
         self
     }
+    /// Sets the RNG seed used to initialize centroids.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self
     }
 
+    /// Runs Lloyd's algorithm and returns the resulting cluster assignment and centroids.
     pub fn fit(&self, features: &Array2<f64>) -> Result<ClusterResult> {
         let n = features.nrows();
         let p = features.ncols();
@@ -229,10 +233,13 @@ pub struct DBSCAN {
 }
 
 impl DBSCAN {
+    /// Creates a DBSCAN clusterer with neighborhood radius `eps` and minimum points `min_pts`
+    /// required to form a dense region.
     pub fn new(eps: f64, min_pts: usize) -> Self {
         Self { eps, min_pts }
     }
 
+    /// Runs density-based clustering and returns the resulting cluster assignment.
     pub fn fit(&self, features: &Array2<f64>) -> Result<ClusterResult> {
         let n = features.nrows();
         let mut labels = vec![-1i32; n]; // -1 = unvisited/noise

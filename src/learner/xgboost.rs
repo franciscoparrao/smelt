@@ -31,7 +31,10 @@ pub enum Objective {
     SquaredError,
     /// Huber loss as gradient clipping: g = clamp(p - y, ±delta), h = 1.
     /// Robust to outliers in the target.
-    Huber { delta: f64 },
+    Huber {
+        /// Clipping threshold beyond which residuals are treated as outliers.
+        delta: f64,
+    },
     /// Poisson regression with log link: the model fits f = log(μ),
     /// g = exp(f) - y, h = exp(f); predictions are exp-transformed back to
     /// the response scale. Targets must be non-negative counts/rates.
@@ -178,49 +181,64 @@ impl Default for XGBoost {
 }
 
 impl XGBoost {
+    /// Creates an `XGBoost` learner with default hyperparameters.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the number of boosting rounds (trees to fit).
     pub fn with_n_estimators(mut self, n: usize) -> Self {
         self.n_estimators = n;
         self
     }
+    /// Sets the shrinkage applied to each tree's contribution.
     pub fn with_learning_rate(mut self, lr: f64) -> Self {
         self.learning_rate = lr;
         self
     }
+    /// Sets the maximum depth of each tree.
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = d;
         self
     }
+    /// Sets the L2 regularization strength on leaf weights.
     pub fn with_lambda(mut self, l: f64) -> Self {
         self.lambda = l;
         self
     }
+    /// Sets the L1 regularization strength on leaf weights.
     pub fn with_alpha(mut self, a: f64) -> Self {
         self.alpha = a;
         self
     }
+    /// Sets the minimum loss reduction required to make a further split
+    /// (the gamma / complexity penalty per split).
     pub fn with_gamma(mut self, g: f64) -> Self {
         self.gamma = g;
         self
     }
+    /// Sets the fraction of rows randomly subsampled for each tree.
     pub fn with_subsample(mut self, s: f64) -> Self {
         self.subsample = s;
         self
     }
+    /// Sets the fraction of columns randomly sampled for each tree.
     pub fn with_colsample_bytree(mut self, c: f64) -> Self {
         self.colsample_bytree = c;
         self
     }
+    /// Sets the minimum sum of Hessian (instance weight) required in a leaf
+    /// for a split to be considered.
     pub fn with_min_child_weight(mut self, w: f64) -> Self {
         self.min_child_weight = w;
         self
     }
+    /// Stop after `n` rounds without improvement of the monitored loss
+    /// (held-out loss when an eval set is provided, training loss otherwise).
     pub fn with_early_stopping_rounds(mut self, n: usize) -> Self {
         self.early_stopping_rounds = n;
         self
     }
+    /// Sets the RNG seed controlling row/column subsampling.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self
@@ -270,26 +288,40 @@ type FeatureBins = HistBins;
 
 // ── XGBoost tree node ───────────────────────────────────────────────
 
+/// Internal tree node: a leaf with a fitted value, or a split on a feature
+/// (numeric threshold or categorical membership).
 #[derive(Serialize, Deserialize)]
 pub enum XGBNode {
+    /// Terminal node holding the leaf's fitted output value.
     Leaf {
+        /// The leaf's fitted output value.
         weight: f64,
     },
+    /// Numeric split: rows with `feature < threshold` go left, others right.
     Split {
+        /// Index of the feature being split on.
         feature: usize,
+        /// Threshold value separating left and right children.
         threshold: f64,
+        /// Whether NaN values in `feature` route to the left child.
         nan_goes_left: bool,
+        /// Left child, taken when the row's value is below `threshold`.
         left: Box<XGBNode>,
+        /// Right child, taken when the row's value is at or above `threshold`.
         right: Box<XGBNode>,
     },
     /// Categorical split: the listed category codes go left; every other
     /// code — including categories unseen during training — goes right.
     CatSplit {
+        /// Index of the feature being split on.
         feature: usize,
         /// Sorted category codes routed left.
         left_cats: Vec<u16>,
+        /// Whether NaN values in `feature` route to the left child.
         nan_goes_left: bool,
+        /// Left child, taken when the row's category code is in `left_cats`.
         left: Box<XGBNode>,
+        /// Right child, taken for all other category codes.
         right: Box<XGBNode>,
     },
 }
@@ -941,6 +973,7 @@ pub(crate) enum XGBMode {
     MultiClassif { n_classes: usize },
 }
 
+/// A trained XGBoost model, ready to predict.
 #[derive(Serialize, Deserialize)]
 pub struct TrainedXGBoost {
     pub(crate) trees: Vec<XGBNode>,

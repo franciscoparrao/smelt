@@ -57,6 +57,8 @@ pub struct Hyperband {
 }
 
 impl Hyperband {
+    /// Create a Hyperband tuner over `param_space` using `factory` to build
+    /// a learner from a sampled parameter set.
     pub fn new(
         factory: impl Fn(&ParamSet) -> Box<dyn Learner> + Send + Sync + 'static,
         param_space: ParamSpace,
@@ -70,14 +72,18 @@ impl Hyperband {
         }
     }
 
+    /// Set the maximum CV fold budget given to surviving configurations.
     pub fn with_max_folds(mut self, n: usize) -> Self {
         self.max_folds = n;
         self
     }
+    /// Set the halving rate: eliminate all but 1/`eta` of configurations per
+    /// round.
     pub fn with_eta(mut self, e: usize) -> Self {
         self.eta = e;
         self
     }
+    /// Set the RNG seed for reproducible configuration sampling.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
         self

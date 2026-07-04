@@ -71,17 +71,21 @@ impl Default for HoeffdingTree {
 }
 
 impl HoeffdingTree {
+    /// Creates a Hoeffding tree with delta 1e-7, grace period 200, and unlimited depth.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Sets the confidence parameter delta (lower = more conservative splits).
     pub fn with_delta(mut self, d: f64) -> Self {
         self.delta = d;
         self
     }
+    /// Sets the minimum number of samples seen at a leaf before a split is considered.
     pub fn with_grace_period(mut self, g: usize) -> Self {
         self.grace_period = g;
         self
     }
+    /// Sets the maximum tree depth.
     pub fn with_max_depth(mut self, d: usize) -> Self {
         self.max_depth = Some(d);
         self
