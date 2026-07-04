@@ -2340,6 +2340,44 @@ fn task_with_categorical_features_validates_codes() {
     assert!(err.is_err());
 }
 
+/// Regression test: `benchmark::resample_classif`/`resample_regress` used to
+/// rebuild each CV fold's task via `RegressionTask::new`/`ClassificationTask::new`,
+/// which resets `feature_types` to all-Numeric — silently disabling native
+/// categorical splits inside any CV run. Same "parity" scenario as
+/// `xgboost::cat_tests`: y depends on the parity of a 7-code categorical
+/// feature, which no single numeric threshold can separate but a native
+/// categorical split can.
+#[test]
+fn benchmark_cv_preserves_categorical_feature_types_across_folds() {
+    let n = 350;
+    let mut features = ndarray::Array2::<f64>::zeros((n, 1));
+    let mut target = vec![0.0; n];
+    for i in 0..n {
+        let code = (i % 7) as f64;
+        features[[i, 0]] = code;
+        target[i] = ((i % 7) % 2) as f64 * 10.0;
+    }
+    let task = RegressionTask::new("parity", features, target)
+        .unwrap()
+        .with_categorical_features(&[0])
+        .unwrap();
+
+    let mut model = XGBoost::new()
+        .with_n_estimators(3)
+        .with_max_depth(1)
+        .with_learning_rate(1.0)
+        .with_lambda(1e-6);
+    let cv = CrossValidation::new(5).with_seed(0);
+    let result = benchmark::resample_regress(&mut model, &task, &cv, &[&Rmse]).unwrap();
+    let mean_rmse = result.mean_scores()[0];
+    assert!(
+        mean_rmse < 1.0,
+        "CV folds should retain the categorical feature type and fit parity exactly \
+         (RMSE < 1.0), got {mean_rmse} — a numeric-threshold fallback caused by lost \
+         feature_types metadata would give RMSE > 2.0"
+    );
+}
+
 // ── Serialization tests ────────────────────────────────────────────
 
 #[test]
@@ -3655,6 +3693,43 @@ fn stacking_classif() {
     assert!(
         acc >= 0.75,
         "Stacking should classify separable data, got {acc}"
+    );
+}
+
+/// Regression test: class 2 has a single sample, so any k-fold partition
+/// (k >= 2) necessarily puts it in exactly one fold's test set (every k-fold
+/// CV assigns every sample to exactly one test fold) -- that fold's training
+/// set then has only classes {0, 1}. Before the fix, the base model trained
+/// on that fold produced 2-wide probability rows, and writing them into the
+/// 3-wide (task-level `n_classes`) out-of-fold buffer panicked with an
+/// index-out-of-bounds instead of returning gracefully.
+#[test]
+fn stacking_classif_survives_fold_missing_a_class() {
+    let features = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [5.0, 5.0],
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1, 2];
+    let task = ClassificationTask::new("stack_imbalanced", features, target).unwrap();
+
+    let mut stack = Stacking::new(
+        vec![Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>)],
+        || Box::new(LogisticRegression::new().with_max_iter(500)),
+    )
+    .with_cv_folds(3);
+
+    let model = stack.train_classif(&task);
+    assert!(
+        model.is_ok(),
+        "Stacking must not panic when a fold's training data misses a class: {:?}",
+        model.err()
     );
 }
 

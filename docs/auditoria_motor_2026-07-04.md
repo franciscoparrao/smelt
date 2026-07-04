@@ -178,11 +178,90 @@ Verificado: 489 tests verdes (133 lib + 282 integración + 70 doctests + 4
 parquet, +8 sobre la línea base de 481), 0 fallos, `smelt-py` recompilado y
 probado end-to-end con cada fix.
 
-### Fase B — Honestidad de lo anunciado, 2ª ronda (1-2 semanas)
-5. CausalForest: agregación OOB in-sample (cerrar de verdad CRITICAL-3); R-learner → renombrar U-learner o implementar R-loss ponderada; docstring LOO de GeoXGB.
-6. Wilcoxon exacto n≤12 + empates; Friedman/Nemenyi; golden tests vs scipy/sklearn para stats/measures/survival/PCA (retomar el ítem que desapareció de Fase 1).
-7. Stacking → StratifiedCV interno; CV loop propagando metadatos categóricos (`from_parent`); LightGBM subsample (implementar o eliminar).
-8. GIL 2ª mitad: predict/predict_spatial/conformal/Smote/filtros.
+### Fase B — Honestidad de lo anunciado, 2ª ronda — **COMPLETADA 2026-07-04**
+5. ✅ **CausalForest OOB real** (cierra CRITICAL-3 de verdad esta vez): la
+   agregación por punto ahora excluye todo árbol donde ese punto estuviera
+   en la submuestra (train O est), no solo los que carecían de honestidad en
+   la hoja — antes, un punto en `est_idx` de un árbol veía su propio outcome
+   alimentar el τ̂ que ese mismo árbol le reportaba a él (auto-influencia).
+   Test de regresión con outlier extremo (`oob_aggregation_excludes_own_outcome_from_own_estimate`):
+   confirmado que sin el fix el efecto reportado se dispara a 47171 (arrastrado
+   por su propio 1e6), con el fix vuelve a ~1.0 (el efecto común real).
+   ✅ **R-learner real**: el "R-learner" era en realidad el U-learner de
+   Künzel et al. (regresión no ponderada). Ahora aproxima la R-loss ponderada
+   por T̃² real vía **replicación de filas** proporcional al peso normalizado
+   (capada, sin tocar el trait `Learner`) — compone con cualquier learner base
+   igual que antes. Clip por defecto subido de 1e-3 a 0.05 (rango estándar de
+   trimming de propensity). De paso, `oof_propensity` en `cross_fit.rs` ya no
+   defaultea a 0.5 en silencio cuando un fold pierde un brazo de tratamiento
+   (ahora `Err`, igual que `oof_regression_by_arm`).
+6. ✅ **Wilcoxon exacto**: reemplazado el "normal approximation siempre" por
+   un test exacto vía programación dinámica sobre las 2ⁿ asignaciones de
+   signo (ranks duplicados ×2 para enteros, DP de subset-sum en `f64` para
+   evitar overflow más allá de n=64), con fallback a normal + corrección de
+   continuidad + corrección de empates (`Σ(t³-t)/48`) para n>100. Verificado
+   contra fuerza bruta 2ⁿ en 4 casos con empates. El propio doctest del
+   módulo (5 folds, afirmaba p<0.05) se corrigió a 6 folds — con 5 folds el
+   mínimo p exacto es 2/32=0.0625, **matemáticamente no puede ser
+   significativo**, exactamente el HIGH que motivó este ítem.
+   ✅ **Golden tests vs sklearn 1.8.0 / scipy 1.17.1** (retoma el ítem
+   desaparecido de Fase 1): `measure/mod.rs` tenía **0 tests** — ahora 4
+   golden tests (accuracy/precision/recall/f1/balanced_accuracy/mcc/kappa en
+   fixture de 30 muestras 3-clases; rmse/mae/r2/mape; auc/logloss/brier en
+   fixture probabilístico). Al construirlos se confirmó el MEDIUM N10 del
+   propio audit (precision/recall/F1 macro promediaban solo sobre clases con
+   score definido, no sobre todas las clases presentes) — **corregido**:
+   ahora promedian sobre `n_classes` completo, matching sklearn
+   `zero_division=0` (verificado: clasificador binario degenerado que
+   siempre predice clase 0 daba precision=0.5 antes, 0.25 después —
+   coincide con sklearn). `PCA` (0 tests, solo shape-checks en integration.rs)
+   tenía el bug concreto que el audit predijo: con 2 features exactamente
+   anticorrelacionadas, el vector constante de arranque de la power iteration
+   ES un autovector exacto (del autovalor CERO), y `mat.dot(v)=[0,0]` exacto
+   dispara el early-return devolviendo esa dirección de varianza cero como
+   "PC1" sin iterar — confirmado con test de regresión reproduciendo
+   exactamente ese caso. Fix: arranque aleatorio (seed fija) + fallback a
+   Gram-Schmidt determinista cuando la matriz deflactada ya no tiene norma
+   significativa (autovalores restantes ~0, sin dirección dominante que
+   buscar). 2 tests nuevos en `pca.rs`, ambos confirmados como discriminantes
+   (fallan con la implementación vieja, pasan con el fix).
+7. ✅ **Stacking**: en vez de cambiar a `StratifiedCV` interno (se evaluó y
+   se descartó — el propio doctest del módulo usa 4 muestras/clase con
+   `cv_folds=5` por defecto, y `StratifiedCV` exige `n_muestras_por_clase >=
+   n_folds`, así que habría roto el doctest), se propagó `class_names` (+
+   `feature_names`/`feature_types`) del task padre al task de cada fold —
+   igual patrón que el ítem 11. Esto garantiza que el modelo base de
+   cualquier fold produzca vectores de probabilidad del ancho correcto
+   (`n_classes` global) aunque ese fold no contenga la clase máxima,
+   eliminando el panic sin necesidad de cambiar la estrategia de folds.
+   Confirmado con test de regresión (`stacking_classif_survives_fold_missing_a_class`):
+   sin el fix, panic exacto `index out of bounds: the len is 2 but the index
+   is 2`; con el fix, entrena sin error.
+   ⏸️ CV loop de `benchmark.rs` (propagar metadatos categóricos) y LightGBM
+   `subsample` se resolvieron ya en el ítem 11/Fase A — ver arriba, no
+   quedaban pendientes para Fase B.
+8. ✅ **GIL 2ª mitad**: `predict`/`predict_proba` (los 28 wrappers, vía
+   `common.rs`), `predict_spatial` (GeoXGBoost + KrigingHybrid),
+   `conformal_predict`, `Smote`/`SpatialSmote.balance`, los 10 filtros de
+   `feature_selection.rs`, y `SpatialBufferCV.splits` ahora liberan el GIL
+   con `py.allow_threads`. Verificado en dos niveles: (1) corrección
+   funcional de cada API tras el cambio; (2) **prueba de concurrencia real**
+   — un hilo Python contando en loop mientras corre `filter_relief` (O(n²),
+   ~2.2s) alcanzó 15M incrementos durante la llamada, confirmando que el GIL
+   efectivamente se liberó (con el GIL retenido el contador no avanzaría).
+
+Verificado: 490 tests verdes tras el fix de CausalForest, **145 lib + 284
+integración + 70 doctests (+ los de smelt-py)** al cierre de Fase B — 0
+fallos. `smelt-py` recompilado y probado end-to-end (incluida la prueba de
+concurrencia) después de cada fix.
+
+### Gaps de golden tests que quedan fuera de esta pasada
+`stats.rs` ganó tests exactos (ítem 6) y `measure/`/`PCA` pasaron de 0 tests
+a golden tests reales (ítem 6), pero **survival/ (0 tests unitarios), ADASYN,
+DES, EBM, KMeans, DBSCAN** siguen con solo smoke tests o ninguno — ninguno
+de estos se tocó en Fase A/B. `tests/real_benchmark.rs` (comparación vs
+sklearn real) sigue `#[ignore]` y fuera de `cargo test`/CI. Quedan para Fase
+C o una iniciativa dedicada.
 
 ### Fase C — Deudas estructurales (cuando toque)
 9. Los abiertos crónicos: ADASYN k-NN, DES DSEL, EBM Err multiclase, RSF TrainedModel, PCA init, Relief; errores tipados (51 `Other`); ParamSet tipado; paralelismo folds/grid con rayon (andamiaje listo); README/prelude/registry/versionado (M20 + bump semver 2.0).

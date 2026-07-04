@@ -137,7 +137,8 @@ pub(crate) fn predict_values<'py>(
     py: Python<'py>,
     x: PyReadonlyArray2<'_, f64>,
 ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-    let pred = model.predict(&to_array2(x)).map_err(smelt_err)?;
+    let features = to_array2(x);
+    let pred = py.allow_threads(|| model.predict(&features)).map_err(smelt_err)?;
     let values: Vec<f64> = match &pred {
         Prediction::Classification { predicted, .. } => {
             predicted.iter().map(|&p| p as f64).collect()
@@ -153,7 +154,8 @@ pub(crate) fn predict_proba_values<'py>(
     py: Python<'py>,
     x: PyReadonlyArray2<'_, f64>,
 ) -> PyResult<Bound<'py, PyArray2<f64>>> {
-    let pred = model.predict(&to_array2(x)).map_err(smelt_err)?;
+    let features = to_array2(x);
+    let pred = py.allow_threads(|| model.predict(&features)).map_err(smelt_err)?;
     match &pred {
         Prediction::Classification {
             probabilities: Some(probs),
@@ -357,12 +359,15 @@ pub(crate) fn conformal_predict_impl<'py>(
     let cal_features = to_array2(x_cal);
     let test_features = to_array2(x_test);
 
-    let cf = smelt_ml::conformal::ConformalRegressor::calibrate(
-        model, &cal_features, &y_cal, alpha,
-    )
-    .map_err(smelt_err)?;
-
-    let intervals = cf.predict(&test_features).map_err(smelt_err)?;
+    let (intervals, interval_width) = py
+        .allow_threads(|| {
+            let cf = smelt_ml::conformal::ConformalRegressor::calibrate(
+                model, &cal_features, &y_cal, alpha,
+            )?;
+            let intervals = cf.predict(&test_features)?;
+            Ok::<_, smelt_ml::SmeltError>((intervals, cf.interval_width()))
+        })
+        .map_err(smelt_err)?;
 
     let n = intervals.len();
     let mut preds = Vec::with_capacity(n);
@@ -378,7 +383,7 @@ pub(crate) fn conformal_predict_impl<'py>(
     dict.set_item("predictions", PyArray1::from_vec(py, preds))?;
     dict.set_item("lower", PyArray1::from_vec(py, lower))?;
     dict.set_item("upper", PyArray1::from_vec(py, upper))?;
-    dict.set_item("interval_width", cf.interval_width())?;
+    dict.set_item("interval_width", interval_width)?;
     dict.set_item("alpha", alpha)?;
     Ok(dict.into_pyobject(py)?.into_any().unbind())
 }

@@ -79,7 +79,7 @@ impl Smote {
         let smote = smelt_ml::prelude::Smote::new()
             .with_k_neighbors(self.k_neighbors)
             .with_seed(self.seed);
-        let balanced = smote.balance(&task).map_err(smelt_err)?;
+        let balanced = py.allow_threads(|| smote.balance(&task)).map_err(smelt_err)?;
         Ok((
             PyArray2::from_owned_array(py, balanced.features().clone()),
             balanced.target().to_vec(),
@@ -145,7 +145,9 @@ impl SpatialSmote {
         if let Some(d) = self.max_spatial_distance {
             smote = smote.with_max_spatial_distance(d);
         }
-        let (balanced, new_coords) = smote.balance(&task, &parsed_coords).map_err(smelt_err)?;
+        let (balanced, new_coords) = py
+            .allow_threads(|| smote.balance(&task, &parsed_coords))
+            .map_err(smelt_err)?;
 
         let n = new_coords.len();
         let flat: Vec<f64> = new_coords.iter().flat_map(|&(x, y)| [x, y]).collect();

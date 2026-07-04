@@ -46,7 +46,10 @@ pub fn resample_classif(
     for (train_idx, test_idx) in &splits {
         let train_features = features.select(Axis(0), train_idx);
         let train_target: Vec<usize> = train_idx.iter().map(|&i| target[i]).collect();
-        let train_task = ClassificationTask::new(task.id(), train_features, train_target)?;
+        let train_task = ClassificationTask::new(task.id(), train_features, train_target)?
+            .with_feature_names(task.feature_names().to_vec())?
+            .with_feature_types(task.feature_types().to_vec())?
+            .with_class_names(task.class_names().to_vec());
 
         let model = learner.train_classif(&train_task)?;
 
@@ -82,7 +85,9 @@ pub fn resample_regress(
     for (train_idx, test_idx) in &splits {
         let train_features = features.select(Axis(0), train_idx);
         let train_target: Vec<f64> = train_idx.iter().map(|&i| target[i]).collect();
-        let train_task = RegressionTask::new(task.id(), train_features, train_target)?;
+        let train_task = RegressionTask::new(task.id(), train_features, train_target)?
+            .with_feature_names(task.feature_names().to_vec())?
+            .with_feature_types(task.feature_types().to_vec())?;
 
         let model = learner.train_regress(&train_task)?;
 

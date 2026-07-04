@@ -78,9 +78,13 @@ impl SpatialBufferCV {
         })
     }
 
-    fn splits(&self, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {
+    /// O(n^2) in `n_samples` (every fold rechecks every point against the
+    /// buffer distance) and typically called with `n_folds = n_samples` for
+    /// spatial leave-one-out — release the GIL for the computation.
+    fn splits(&self, py: Python<'_>, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {
         use smelt_ml::prelude::Resample;
-        self.inner.splits(n_samples).map_err(smelt_err)
+        py.allow_threads(|| self.inner.splits(n_samples))
+            .map_err(smelt_err)
     }
 }
 

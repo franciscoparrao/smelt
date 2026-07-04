@@ -17,9 +17,9 @@
 //! ```
 //! use smelt_ml::stats::{wilcoxon_signed_rank, friedman_test, bootstrap_ci};
 //!
-//! // Compare XGBoost vs Random Forest across 5-fold CV
-//! let xgb_scores  = vec![0.92, 0.89, 0.91, 0.90, 0.93];
-//! let rf_scores   = vec![0.88, 0.87, 0.89, 0.86, 0.90];
+//! // Compare XGBoost vs Random Forest across 6-fold CV
+//! let xgb_scores  = vec![0.92, 0.89, 0.91, 0.90, 0.93, 0.91];
+//! let rf_scores   = vec![0.88, 0.87, 0.89, 0.86, 0.90, 0.88];
 //!
 //! let w = wilcoxon_signed_rank(&xgb_scores, &rf_scores).unwrap();
 //! assert!(w.p_value < 0.05); // XGBoost significantly better
@@ -28,6 +28,15 @@
 //! let ci = bootstrap_ci(&xgb_scores, 0.95, 10000, 42).unwrap();
 //! assert!(ci.lower > 0.85);
 //! ```
+//!
+//! Note on `wilcoxon_signed_rank`'s minimum reachable p-value: with `n` paired
+//! samples and no ties in sign, the smallest possible two-sided p-value is
+//! `2 / 2^n` (achieved only when every pair favors the same model). With 5
+//! folds that floor is `2/32 = 0.0625` -- **already above the conventional
+//! 0.05 threshold**, so 5-fold CV can never show "significance" by this test
+//! no matter how consistent the folds are. This crate computes the exact
+//! p-value (not an approximation) for realistic fold/model counts, so this
+//! floor is enforced automatically rather than silently understated.
 
 use crate::{Result, SmeltError};
 
@@ -83,12 +92,23 @@ pub struct NemenyiResult {
 
 // ── Wilcoxon signed-rank test ──────────────────────────────────────
 
+/// Above this effective sample size, `wilcoxon_signed_rank` falls back from
+/// the exact permutation distribution to a continuity- and tie-corrected
+/// normal approximation. The exact DP is `O(n * n^2)`; 100 keeps it well
+/// under a millisecond while covering every realistic CV/benchmark use case
+/// (fold counts and model-comparison sample sizes rarely exceed a few dozen).
+const WILCOXON_EXACT_MAX_N: usize = 100;
+
 /// Wilcoxon signed-rank test for paired samples.
 ///
 /// Tests H0: the median difference between pairs is zero.
 /// This is the standard test for comparing two ML models across CV folds.
 ///
-/// Uses normal approximation for n ≥ 10, exact tables for n < 10.
+/// Computes the **exact** two-sided p-value (via dynamic programming over
+/// the `2^n` sign assignments of the ranks, not `2^n` brute enumeration) for
+/// `n <= `[`WILCOXON_EXACT_MAX_N`]; beyond that, falls back to a normal
+/// approximation with a continuity correction and a tie-variance correction
+/// (`Σ(t³-t)/48` over tied-rank groups).
 ///
 /// # Arguments
 /// * `a` - Scores from model A (e.g., accuracy per fold)
@@ -100,7 +120,6 @@ pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> Result<TestResult> {
     if a.len() != b.len() {
         return Err(SmeltError::DimensionMismatch { expected: a.len(), got: b.len() });
     }
-    let n = a.len();
 
     // Compute differences, exclude zeros
     let mut diffs: Vec<(f64, f64)> = a
@@ -127,8 +146,10 @@ pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> Result<TestResult> {
     // Rank by absolute difference
     diffs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Assign ranks with tie handling (average ranks)
+    // Assign ranks with tie handling (average ranks), tracking each tie
+    // group's size for the normal-approximation tie-variance correction.
     let mut ranks = vec![0.0; nr];
+    let mut tie_group_sizes: Vec<usize> = Vec::new();
     let mut i = 0;
     while i < nr {
         let mut j = i;
@@ -139,6 +160,7 @@ pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> Result<TestResult> {
         for k in i..j {
             ranks[k] = avg_rank;
         }
+        tie_group_sizes.push(j - i);
         i = j;
     }
 
@@ -159,18 +181,27 @@ pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> Result<TestResult> {
 
     let w = w_plus.min(w_minus);
 
-    // p-value via normal approximation (valid for n ≥ 10, reasonable for n ≥ 5)
-    let n_f = nr as f64;
-    let mean_w = n_f * (n_f + 1.0) / 4.0;
-    let var_w = n_f * (n_f + 1.0) * (2.0 * n_f + 1.0) / 24.0;
-    let z = if var_w > 0.0 {
-        (w - mean_w).abs() / var_w.sqrt()
+    let p_value = if nr <= WILCOXON_EXACT_MAX_N {
+        wilcoxon_exact_two_sided_p(&ranks, w_plus)
     } else {
-        0.0
+        let n_f = nr as f64;
+        let mean_w = n_f * (n_f + 1.0) / 4.0;
+        let tie_correction: f64 = tie_group_sizes
+            .iter()
+            .map(|&t| {
+                let t = t as f64;
+                t * t * t - t
+            })
+            .sum::<f64>()
+            / 48.0;
+        let var_w = (n_f * (n_f + 1.0) * (2.0 * n_f + 1.0) / 24.0 - tie_correction).max(0.0);
+        let z = if var_w > 0.0 {
+            (((w_plus - mean_w).abs() - 0.5).max(0.0)) / var_w.sqrt()
+        } else {
+            0.0
+        };
+        2.0 * standard_normal_cdf(-z)
     };
-
-    // Two-sided p-value from standard normal
-    let p_value = 2.0 * standard_normal_cdf(-z);
 
     Ok(TestResult {
         test: "Wilcoxon signed-rank",
@@ -178,6 +209,50 @@ pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> Result<TestResult> {
         p_value,
         significant: p_value < 0.05,
     })
+}
+
+/// Exact two-sided p-value for the Wilcoxon signed-rank statistic: under H0,
+/// each of the `nr` ranks independently gets a `+` or `-` sign with
+/// probability 0.5, giving `2^nr` equally likely sign assignments. Rather
+/// than enumerating all `2^nr` assignments directly, counts how many
+/// assignments produce each achievable positive-rank sum via a subset-sum
+/// dynamic program (`O(nr * max_sum)`): ranks are doubled first so
+/// tie-averaged half-integer ranks (e.g. `1.5`) become integers, then
+/// `dp[s]` accumulates the number of subsets of the doubled ranks summing to
+/// `s`. Counts are kept as `f64` (not integer) so `nr` well beyond 64 doesn't
+/// overflow -- `2^nr` loses exact integer precision for large `nr`, but the
+/// resulting *ratio* `n_le / total` stays accurate to double-precision
+/// relative error, which is all a p-value needs.
+fn wilcoxon_exact_two_sided_p(ranks: &[f64], w_plus: f64) -> f64 {
+    let doubled: Vec<i64> = ranks.iter().map(|&r| (r * 2.0).round() as i64).collect();
+    let max_sum: i64 = doubled.iter().sum();
+    let mut dp = vec![0.0f64; (max_sum + 1) as usize];
+    dp[0] = 1.0;
+    for &r in &doubled {
+        for s in (r..=max_sum).rev() {
+            dp[s as usize] += dp[(s - r) as usize];
+        }
+    }
+
+    let total: f64 = 2f64.powi(doubled.len() as i32);
+    let target = (w_plus * 2.0).round() as i64;
+    let mut n_le = 0.0f64;
+    let mut n_ge = 0.0f64;
+    for (s, &cnt) in dp.iter().enumerate() {
+        if cnt == 0.0 {
+            continue;
+        }
+        let s = s as i64;
+        if s <= target {
+            n_le += cnt;
+        }
+        if s >= target {
+            n_ge += cnt;
+        }
+    }
+
+    let p_one_tail = n_le.min(n_ge) / total;
+    (2.0 * p_one_tail).min(1.0)
 }
 
 // ── Sign test ──────────────────────────────────────────────────────
@@ -633,6 +708,66 @@ mod tests {
         let b = vec![0.89, 0.90, 0.90, 0.91, 0.90];
         let result = wilcoxon_signed_rank(&a, &b).unwrap();
         assert!(!result.significant);
+    }
+
+    /// Regression test: the old code used a normal approximation for every
+    /// `n`, which could (incorrectly) report `p < 0.05` for as few as 5
+    /// folds even when every fold favors the same model -- the true exact
+    /// minimum p-value with n=5 and no ties is `2/2^5 = 0.0625`, which can
+    /// never clear the 5% threshold. The module's own doctest asserted this
+    /// invalid inference before this fix.
+    #[test]
+    fn five_folds_all_same_sign_cannot_reach_significance() {
+        let a = vec![0.92, 0.89, 0.91, 0.90, 0.93];
+        let b = vec![0.88, 0.87, 0.89, 0.86, 0.90];
+        let result = wilcoxon_signed_rank(&a, &b).unwrap();
+        assert!(
+            (result.p_value - 0.0625).abs() < 1e-9,
+            "exact minimum p-value for n=5, all same sign should be 2/32=0.0625, got {}",
+            result.p_value
+        );
+        assert!(!result.significant, "5 folds can never reach p<0.05 when every pair has the same sign");
+    }
+
+    /// Cross-check the DP-based exact p-value against direct 2^n brute-force
+    /// enumeration of sign assignments (an independent reimplementation) for
+    /// a handful of small, tie-containing rank vectors.
+    #[test]
+    fn exact_dp_matches_brute_force_enumeration() {
+        fn brute_force_two_sided_p(ranks: &[f64], w_plus: f64) -> f64 {
+            let n = ranks.len();
+            let total = 1u32 << n;
+            let mut n_le = 0u32;
+            let mut n_ge = 0u32;
+            for mask in 0..total {
+                let sum: f64 = (0..n)
+                    .filter(|&i| mask & (1 << i) != 0)
+                    .map(|i| ranks[i])
+                    .sum();
+                if sum <= w_plus + 1e-9 {
+                    n_le += 1;
+                }
+                if sum >= w_plus - 1e-9 {
+                    n_ge += 1;
+                }
+            }
+            (2.0 * (n_le.min(n_ge) as f64) / total as f64).min(1.0)
+        }
+
+        let cases: Vec<(Vec<f64>, f64)> = vec![
+            (vec![1.0, 2.0, 3.0, 4.0, 5.0], 15.0), // no ties, max sum
+            (vec![1.0, 2.0, 3.0, 4.0, 5.0], 9.0),  // no ties, mid sum
+            (vec![1.5, 1.5, 3.0, 4.5, 4.5], 10.5), // tie-averaged (half-integer) ranks
+            (vec![2.0, 2.0, 2.0, 2.0], 4.0),       // all tied
+        ];
+        for (ranks, w_plus) in cases {
+            let dp_p = wilcoxon_exact_two_sided_p(&ranks, w_plus);
+            let bf_p = brute_force_two_sided_p(&ranks, w_plus);
+            assert!(
+                (dp_p - bf_p).abs() < 1e-9,
+                "DP ({dp_p}) and brute-force ({bf_p}) exact p-values disagree for ranks={ranks:?}, w_plus={w_plus}"
+            );
+        }
     }
 
     #[test]

@@ -157,15 +157,19 @@ impl Measure for Precision {
             } => {
                 let nc = n_classes(predicted, truth);
                 let counts = class_counts(predicted, truth, nc);
-                let mut sum = 0.0;
-                let mut valid = 0;
-                for &(tp, fp, _) in &counts {
-                    if tp + fp > 0 {
-                        sum += tp as f64 / (tp + fp) as f64;
-                        valid += 1;
-                    }
-                }
-                Ok(if valid > 0 { sum / valid as f64 } else { 0.0 })
+                // Macro average over ALL classes present in truth ∪ predicted
+                // (not just the ones with a defined precision) -- a class the
+                // model never predicts contributes 0, matching sklearn's
+                // `zero_division=0` convention. Averaging over only the
+                // "valid" (defined) classes instead (the old behavior)
+                // silently drops the worst classes from the denominator,
+                // inflating the score of degenerate classifiers (e.g. one
+                // that always predicts the majority class).
+                let sum: f64 = counts
+                    .iter()
+                    .map(|&(tp, fp, _)| if tp + fp > 0 { tp as f64 / (tp + fp) as f64 } else { 0.0 })
+                    .sum();
+                Ok(if nc > 0 { sum / nc as f64 } else { 0.0 })
             }
             _ => Err(SmeltError::Other(
                 "Precision requires classification prediction with truth".into(),
@@ -194,15 +198,13 @@ impl Measure for Recall {
             } => {
                 let nc = n_classes(predicted, truth);
                 let counts = class_counts(predicted, truth, nc);
-                let mut sum = 0.0;
-                let mut valid = 0;
-                for &(tp, _, fn_) in &counts {
-                    if tp + fn_ > 0 {
-                        sum += tp as f64 / (tp + fn_) as f64;
-                        valid += 1;
-                    }
-                }
-                Ok(if valid > 0 { sum / valid as f64 } else { 0.0 })
+                // See Precision::score for why the average is over all `nc`
+                // classes, not just the ones with a defined recall.
+                let sum: f64 = counts
+                    .iter()
+                    .map(|&(tp, _, fn_)| if tp + fn_ > 0 { tp as f64 / (tp + fn_) as f64 } else { 0.0 })
+                    .sum();
+                Ok(if nc > 0 { sum / nc as f64 } else { 0.0 })
             }
             _ => Err(SmeltError::Other(
                 "Recall requires classification prediction with truth".into(),
@@ -231,25 +233,20 @@ impl Measure for F1Score {
             } => {
                 let nc = n_classes(predicted, truth);
                 let counts = class_counts(predicted, truth, nc);
-                let mut sum = 0.0;
-                let mut valid = 0;
-                for &(tp, fp, fn_) in &counts {
-                    let prec = if tp + fp > 0 {
-                        tp as f64 / (tp + fp) as f64
-                    } else {
-                        0.0
-                    };
-                    let rec = if tp + fn_ > 0 {
-                        tp as f64 / (tp + fn_) as f64
-                    } else {
-                        0.0
-                    };
-                    if prec + rec > 0.0 {
-                        sum += 2.0 * prec * rec / (prec + rec);
-                        valid += 1;
-                    }
-                }
-                Ok(if valid > 0 { sum / valid as f64 } else { 0.0 })
+                // See Precision::score for why the average is over all `nc`
+                // classes: a class with undefined precision AND recall (never
+                // predicted and never true -- impossible here since `nc` only
+                // spans observed labels, but a class that's never predicted
+                // contributes F1=0) still counts in the denominator.
+                let sum: f64 = counts
+                    .iter()
+                    .map(|&(tp, fp, fn_)| {
+                        let prec = if tp + fp > 0 { tp as f64 / (tp + fp) as f64 } else { 0.0 };
+                        let rec = if tp + fn_ > 0 { tp as f64 / (tp + fn_) as f64 } else { 0.0 };
+                        if prec + rec > 0.0 { 2.0 * prec * rec / (prec + rec) } else { 0.0 }
+                    })
+                    .sum();
+                Ok(if nc > 0 { sum / nc as f64 } else { 0.0 })
             }
             _ => Err(SmeltError::Other(
                 "F1 requires classification prediction with truth".into(),
@@ -734,5 +731,131 @@ impl Measure for AteBias {
                 "AteBias requires a CausalEffect prediction with known ground truth".into(),
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Golden tests against independently-computed reference values (mostly
+    //! scikit-learn 1.8.0 / `sklearn.metrics`, run in the project's
+    //! `smelt-py/.venv`; noted otherwise where conventions differ). Before
+    //! this module, `measure/mod.rs` had zero tests — the 2026-07-04 engine
+    //! audit's own principle ("every CRITICAL statistical bug would have
+    //! been caught by a golden test") applies here just as much as to the
+    //! modules that already had fixes.
+    use super::*;
+
+    /// 3-class fixture (n=30), scores from `sklearn.metrics` with default
+    /// settings (`average='macro'` for precision/recall/f1).
+    fn multiclass_fixture() -> (Vec<usize>, Vec<usize>) {
+        let truth = vec![
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 0, 1, 2, 0, 1,
+            2,
+        ];
+        let predicted = vec![
+            0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 1, 1, 1, 1, 0, 1, 1, 1, 2, 2, 1, 2, 2, 2, 0, 1, 2, 1, 1,
+            2,
+        ];
+        (predicted, truth)
+    }
+
+    #[test]
+    fn golden_classification_metrics_match_sklearn_reference() {
+        let (predicted, truth) = multiclass_fixture();
+        let pred = Prediction::classification_with_truth(predicted, truth);
+
+        let cases: &[(&dyn Measure, f64)] = &[
+            (&Accuracy, 0.8333333333333334),
+            (&Precision, 0.8416666666666667),
+            (&Recall, 0.8416666666666667),
+            (&F1Score, 0.8371212121212123),
+            (&BalancedAccuracy, 0.8416666666666667),
+            (&Mcc, 0.7533783783783784),
+            (&CohensKappa, 0.7483221476510067),
+        ];
+        for (measure, expected) in cases {
+            let got = measure.score(&pred).unwrap();
+            assert!(
+                (got - expected).abs() < 1e-9,
+                "{}: expected {expected}, got {got}",
+                measure.id()
+            );
+        }
+    }
+
+    /// Regression test for [MEDIUM finding N10 in the 2026-07-04 audit]:
+    /// macro precision/recall/F1 used to average only over classes with a
+    /// *defined* score (`tp+fp>0` etc.), silently dropping classes a
+    /// degenerate classifier never predicts from the denominator. A binary
+    /// classifier that always predicts class 0 on perfectly balanced data
+    /// used to score macro-precision 0.5 here vs sklearn's 0.25
+    /// (`zero_division=0`) -- this asserts the sklearn-matching values.
+    #[test]
+    fn macro_precision_recall_f1_use_full_class_denominator_matching_sklearn_zero_division() {
+        let truth: Vec<usize> = (0..20).map(|_| 0).chain((0..20).map(|_| 1)).collect();
+        let predicted = vec![0usize; 40]; // always predicts class 0
+        let pred = Prediction::classification_with_truth(predicted, truth);
+
+        let prec = Precision.score(&pred).unwrap();
+        let rec = Recall.score(&pred).unwrap();
+        let f1 = F1Score.score(&pred).unwrap();
+        assert!((prec - 0.25).abs() < 1e-9, "precision: expected 0.25 (sklearn zero_division=0), got {prec}");
+        assert!((rec - 0.5).abs() < 1e-9, "recall: expected 0.5, got {rec}");
+        assert!(
+            (f1 - 0.3333333333333333).abs() < 1e-9,
+            "f1: expected 0.3333... (sklearn zero_division=0), got {f1}"
+        );
+    }
+
+    #[test]
+    fn golden_regression_metrics_match_sklearn_reference() {
+        let truth = vec![3.0, 5.0, 2.5, 7.0, 4.0, 6.5];
+        let predicted = vec![2.8, 5.2, 2.0, 7.5, 4.5, 6.0];
+        let pred = Prediction::regression_with_truth(predicted, truth);
+
+        let rmse = Rmse.score(&pred).unwrap();
+        let mae = Mae.score(&pred).unwrap();
+        let r2 = RSquared.score(&pred).unwrap();
+        let mape = Mape.score(&pred).unwrap();
+        assert!((rmse - 0.42426406871192857).abs() < 1e-9, "rmse: got {rmse}");
+        assert!((mae - 0.4000000000000001).abs() < 1e-9, "mae: got {mae}");
+        assert!((r2 - 0.9358415841584158).abs() < 1e-9, "r2: got {r2}");
+        assert!((mape - 0.09666971916971918).abs() < 1e-9, "mape: got {mape}");
+    }
+
+    /// AUC-ROC and LogLoss golden values match `sklearn.metrics.roc_auc_score`
+    /// / `log_loss` exactly (both are standard, convention-free formulas).
+    /// Brier does NOT: this crate sums the squared error over *all* classes
+    /// (the historical multi-category Brier score definition), while
+    /// `sklearn.metrics.brier_score_loss` only uses the positive-class
+    /// probability for binary problems -- exactly half this crate's value
+    /// for a 2-class prediction. The reference below is computed
+    /// independently (plain numpy, not sklearn) to match this crate's own
+    /// documented convention, not sklearn's binary-specific one.
+    #[test]
+    fn golden_auc_logloss_brier_probabilistic_reference() {
+        let truth = vec![0, 0, 0, 1, 1, 1, 0, 1, 1, 0];
+        let p1 = [0.1, 0.3, 0.6, 0.8, 0.4, 0.9, 0.55, 0.7, 0.2, 0.35];
+        let predicted: Vec<usize> = p1.iter().map(|&p| if p >= 0.5 { 1 } else { 0 }).collect();
+        let probabilities: Vec<Vec<f64>> = p1.iter().map(|&p| vec![1.0 - p, p]).collect();
+        let pred = Prediction::Classification {
+            predicted,
+            truth: Some(truth),
+            probabilities: Some(probabilities),
+        };
+
+        let auc = AucRoc.score(&pred).unwrap();
+        let logloss = LogLoss.score(&pred).unwrap();
+        let brier = Brier.score(&pred).unwrap();
+        assert!((auc - 0.76).abs() < 1e-9, "auc: expected 0.76 (sklearn roc_auc_score), got {auc}");
+        assert!(
+            (logloss - 0.5818524458999963).abs() < 1e-9,
+            "logloss: expected 0.5818524458999963 (sklearn log_loss), got {logloss}"
+        );
+        assert!(
+            (brier - 0.4050000000000001).abs() < 1e-9,
+            "brier: expected 0.405 (this crate's 2-class-sum convention, i.e. \
+             2x sklearn's binary brier_score_loss of 0.2025), got {brier}"
+        );
     }
 }

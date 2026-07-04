@@ -57,8 +57,13 @@ pub(crate) fn oof_propensity(
     let splits = CrossValidation::new(folds).with_seed(seed).splits(n)?;
     let mut out = vec![0.0; n];
     for (train_idx, test_idx) in &splits {
-        let train_features = features.select(Axis(0), train_idx);
         let train_target: Vec<usize> = train_idx.iter().map(|&i| treatment[i]).collect();
+        if !train_target.contains(&0) || !train_target.contains(&1) {
+            return Err(SmeltError::InvalidParameter(
+                "a cross-fitting fold has no units in one treatment arm; use fewer folds or more data".into(),
+            ));
+        }
+        let train_features = features.select(Axis(0), train_idx);
         let train_task = ClassificationTask::new("oof_propensity", train_features, train_target)?;
         let model = factory().train_classif(&train_task)?;
 
@@ -76,7 +81,16 @@ pub(crate) fn oof_propensity(
             ));
         };
         for (j, &idx) in test_idx.iter().enumerate() {
-            out[idx] = probs[j].get(1).copied().unwrap_or(0.5);
+            // Both arms are guaranteed present in train_target above, so a
+            // well-behaved classifier's probability rows are 2 wide; error
+            // (not silently default to 0.5) if one somehow isn't.
+            out[idx] = *probs[j].get(1).ok_or_else(|| {
+                SmeltError::InvalidParameter(
+                    "propensity classifier returned fewer than 2 probability columns \
+                     despite both treatment arms being present in training data"
+                        .into(),
+                )
+            })?;
         }
     }
     Ok(out)
@@ -135,4 +149,33 @@ pub(crate) fn oof_regression_by_arm(
         }
     }
     Ok((mu0, mu1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::learner::LogisticRegression;
+
+    /// Regression test: `oof_propensity` used to silently default a fold's
+    /// out-of-fold propensity to 0.5 (`probs[j].get(1).copied().unwrap_or(0.5)`)
+    /// whenever that fold's training data had only one treatment arm (the
+    /// fitted classifier then has `n_classes == 1`, so index 1 doesn't
+    /// exist) -- `oof_regression_by_arm` already errored on the same
+    /// condition; this brings `oof_propensity` in line instead of fabricating
+    /// a "coin flip" propensity with no error or warning.
+    #[test]
+    fn errors_when_a_fold_has_only_one_treatment_arm() {
+        // 6 samples, only the last is treated; with 6 folds (leave-one-out),
+        // the fold that holds out that single treated sample has an
+        // all-control training set.
+        let features = Array2::from_shape_vec((6, 1), vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
+        let treatment = vec![0, 0, 0, 0, 0, 1];
+        let factory: LearnerFactory = Box::new(|| Box::new(LogisticRegression::new()));
+
+        let result = oof_propensity(&features, &treatment, &factory, 6, 42);
+        assert!(
+            result.is_err(),
+            "a fold with only one treatment arm must error, not silently return 0.5"
+        );
+    }
 }

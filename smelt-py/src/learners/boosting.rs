@@ -495,19 +495,22 @@ impl GeoXGBoost {
         use smelt_ml::learner::TrainedModel;
         let model = self.trained.as_ref().ok_or_else(not_fitted)?;
         let features = to_array2(x);
-        let pred = if let Some(c) = coords {
-            let new_coords = parse_coords(c)?;
-            if new_coords.len() != features.nrows() {
+        let new_coords = coords.map(parse_coords).transpose()?;
+        if let Some(c) = &new_coords {
+            if c.len() != features.nrows() {
                 return Err(PyRuntimeError::new_err(format!(
                     "coords length ({}) must match number of samples ({})",
-                    new_coords.len(),
+                    c.len(),
                     features.nrows()
                 )));
             }
-            model.predict_spatial(&features, &new_coords).map_err(smelt_err)?
-        } else {
-            model.predict(&features).map_err(smelt_err)?
-        };
+        }
+        let pred = py
+            .allow_threads(|| match &new_coords {
+                Some(c) => model.predict_spatial(&features, c),
+                None => model.predict(&features),
+            })
+            .map_err(smelt_err)?;
         let values: Vec<f64> = match &pred {
             Prediction::Regression { predicted, .. } => predicted.clone(),
             _ => return Err(PyRuntimeError::new_err("Expected regression prediction")),
@@ -706,19 +709,22 @@ impl KrigingHybrid {
         use smelt_ml::learner::TrainedModel;
         let model = self.trained.as_ref().ok_or_else(not_fitted)?;
         let features = to_array2(x);
-        let pred = if let Some(c) = coords {
-            let new_coords = parse_coords(c)?;
-            if new_coords.len() != features.nrows() {
+        let new_coords = coords.map(parse_coords).transpose()?;
+        if let Some(c) = &new_coords {
+            if c.len() != features.nrows() {
                 return Err(PyRuntimeError::new_err(format!(
                     "coords length ({}) must match number of samples ({})",
-                    new_coords.len(),
+                    c.len(),
                     features.nrows()
                 )));
             }
-            model.predict_spatial(&features, &new_coords).map_err(smelt_err)?
-        } else {
-            model.predict(&features).map_err(smelt_err)?
-        };
+        }
+        let pred = py
+            .allow_threads(|| match &new_coords {
+                Some(c) => model.predict_spatial(&features, c),
+                None => model.predict(&features),
+            })
+            .map_err(smelt_err)?;
         let values: Vec<f64> = match &pred {
             Prediction::Regression { predicted, .. } => predicted.clone(),
             _ => return Err(PyRuntimeError::new_err("Expected regression prediction")),

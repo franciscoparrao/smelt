@@ -152,7 +152,17 @@ impl Learner for Stacking {
             for (train_idx, test_idx) in &splits {
                 let train_features = features.select(Axis(0), train_idx);
                 let train_target: Vec<usize> = train_idx.iter().map(|&i| target[i]).collect();
-                let train_task = ClassificationTask::new(task.id(), train_features, train_target)?;
+                // Propagate the full task's class_names (not the fold's own,
+                // possibly-narrower, re-derived n_classes): a plain
+                // CrossValidation fold can miss the max class label
+                // entirely, and without this the base model's probability
+                // rows come back narrower than `n_classes`, so `probs[j][c]`
+                // below panics with an index-out-of-bounds for any c the
+                // fold's training data didn't see.
+                let train_task = ClassificationTask::new(task.id(), train_features, train_target)?
+                    .with_feature_names(task.feature_names().to_vec())?
+                    .with_feature_types(task.feature_types().to_vec())?
+                    .with_class_names(task.class_names().to_vec());
 
                 let mut learner = factory();
                 let model = learner.train_classif(&train_task)?;
@@ -209,7 +219,9 @@ impl Learner for Stacking {
             for (train_idx, test_idx) in &splits {
                 let train_features = features.select(Axis(0), train_idx);
                 let train_target: Vec<f64> = train_idx.iter().map(|&i| target[i]).collect();
-                let train_task = RegressionTask::new(task.id(), train_features, train_target)?;
+                let train_task = RegressionTask::new(task.id(), train_features, train_target)?
+                    .with_feature_names(task.feature_names().to_vec())?
+                    .with_feature_types(task.feature_types().to_vec())?;
 
                 let mut learner = factory();
                 let model = learner.train_regress(&train_task)?;

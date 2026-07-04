@@ -306,7 +306,7 @@ impl RLearner {
     /// `e(x)=E[T|X]`. `effect`: final model regressing the residual-ratio
     /// pseudo-target on `X`.
     #[new]
-    #[pyo3(signature = (outcome, propensity, effect, cv_folds=5, cv_seed=42, residual_clip=1e-3))]
+    #[pyo3(signature = (outcome, propensity, effect, cv_folds=5, cv_seed=42, residual_clip=0.05))]
     fn new(
         outcome: String,
         propensity: String,

@@ -127,8 +127,29 @@ impl ClassificationTask {
 
     /// Mark feature columns as categorical. Values in those columns must be
     /// non-negative integer codes (NaN allowed as missing category).
+    ///
+    /// Recomputes `n_categories` per column from the codes actually present
+    /// in `self.features` (the max code + 1). If this task is a subset of a
+    /// larger dataset (e.g. a CV fold), this can under-count categories the
+    /// subset happens not to contain — use [`Self::with_feature_types`] to
+    /// copy the exact types (and `n_categories`) from the parent task instead.
     pub fn with_categorical_features(mut self, columns: &[usize]) -> Result<Self> {
         self.feature_types = build_feature_types(&self.features, columns)?;
+        Ok(self)
+    }
+
+    /// Set feature types directly (e.g. copied from another task's
+    /// [`Task::feature_types`]), bypassing the from-data recomputation
+    /// `with_categorical_features` does. Must match the number of feature
+    /// columns.
+    pub fn with_feature_types(mut self, types: Vec<FeatureType>) -> Result<Self> {
+        if types.len() != self.features.ncols() {
+            return Err(SmeltError::DimensionMismatch {
+                expected: self.features.ncols(),
+                got: types.len(),
+            });
+        }
+        self.feature_types = types;
         Ok(self)
     }
 
@@ -219,8 +240,29 @@ impl RegressionTask {
 
     /// Mark feature columns as categorical. Values in those columns must be
     /// non-negative integer codes (NaN allowed as missing category).
+    ///
+    /// Recomputes `n_categories` per column from the codes actually present
+    /// in `self.features` (the max code + 1). If this task is a subset of a
+    /// larger dataset (e.g. a CV fold), this can under-count categories the
+    /// subset happens not to contain — use [`Self::with_feature_types`] to
+    /// copy the exact types (and `n_categories`) from the parent task instead.
     pub fn with_categorical_features(mut self, columns: &[usize]) -> Result<Self> {
         self.feature_types = build_feature_types(&self.features, columns)?;
+        Ok(self)
+    }
+
+    /// Set feature types directly (e.g. copied from another task's
+    /// [`Task::feature_types`]), bypassing the from-data recomputation
+    /// `with_categorical_features` does. Must match the number of feature
+    /// columns.
+    pub fn with_feature_types(mut self, types: Vec<FeatureType>) -> Result<Self> {
+        if types.len() != self.features.ncols() {
+            return Err(SmeltError::DimensionMismatch {
+                expected: self.features.ncols(),
+                got: types.len(),
+            });
+        }
+        self.feature_types = types;
         Ok(self)
     }
 

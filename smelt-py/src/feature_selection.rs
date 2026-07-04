@@ -79,8 +79,27 @@ fn run_filter(
 
     let target: Vec<f64> = y.extract()?;
 
-    // Get raw per-feature scores (higher = better)
-    let scores: Vec<f64> = match method {
+    let known = matches!(
+        method,
+        "variance"
+            | "correlation"
+            | "anova_f"
+            | "information_gain"
+            | "mutual_information"
+            | "mrmr"
+            | "jmi"
+            | "jmim"
+            | "cmim"
+            | "relief"
+    );
+    if !known {
+        return Err(PyRuntimeError::new_err(format!("Unknown filter: {method}")));
+    }
+
+    // Get raw per-feature scores (higher = better). Relief is O(n^2) and the
+    // rest scan every feature-target pair, so release the GIL for the
+    // computation (validated `method` above, so the wildcard is unreachable).
+    let scores: Vec<f64> = py.allow_threads(|| match method {
         "variance" => VarianceFilter.score(&features, &target),
         "correlation" => CorrelationFilter.score(&features, &target),
         "anova_f" => AnovaFFilter.score(&features, &target),
@@ -91,8 +110,8 @@ fn run_filter(
         "jmim" => JmimFilter.score(&features, &target),
         "cmim" => CmimFilter.score(&features, &target),
         "relief" => ReliefFilter.score(&features, &target),
-        _ => return Err(PyRuntimeError::new_err(format!("Unknown filter: {method}"))),
-    };
+        _ => unreachable!("validated above"),
+    });
 
     let names: Vec<String> = if feature_names.len() == n_feat {
         feature_names

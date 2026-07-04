@@ -211,8 +211,20 @@ impl CausalForest {
                 // biased training-sample tau.
                 populate_leaf_tau(&mut root, features, est_idx, treatment, outcome);
 
+                // Out-of-bag aggregation: a point that was in this tree's
+                // subsample (train_idx OR est_idx -- in_bag) must not use
+                // this tree's tau for its own query. If it's in est_idx, its
+                // own outcome directly fed the leaf tau that would be
+                // returned for it (auto-influence / in-sample optimism); if
+                // it's in train_idx, it influenced where the splits are.
+                // Only trees where the point never appeared in the subsample
+                // contribute to its aggregated estimate, matching how OOB
+                // predictions are formed for ordinary random forests.
                 let mut all_effects = vec![None; n_samples];
                 for idx in 0..n_samples {
+                    if in_bag[idx] {
+                        continue;
+                    }
                     let leaf = find_leaf(&root, features.row(idx));
                     if leaf.honest_valid {
                         all_effects[idx] = Some(leaf.tau);
@@ -708,6 +720,50 @@ mod tests {
             (result.ate - 5.0).abs() < 1.0,
             "ATE should recover the constant true effect (5.0), got {}",
             result.ate
+        );
+    }
+
+    /// Regression test for the in-sample auto-influence bug: `estimate()`
+    /// used to aggregate a tree's tau for point `i` even when tree included
+    /// `i` in its own subsample (train_idx or est_idx). If `i` was in
+    /// est_idx, `i`'s own outcome directly fed the leaf tau then reported
+    /// back to `i` itself. With single-leaf trees (`max_depth(0)`), an
+    /// extreme-outlier treated unit's own outcome would dominate its own
+    /// leaf's tau in every tree where it landed in est_idx, pulling its
+    /// reported CATE far from the common effect all other units share. The
+    /// fix restricts aggregation to out-of-bag trees only (trees where the
+    /// point never appeared in the subsample at all), so a point's own
+    /// outcome can never feed its own reported estimate.
+    #[test]
+    fn oob_aggregation_excludes_own_outcome_from_own_estimate() {
+        let n = 40;
+        let mut features = Array2::<f64>::zeros((n, 1));
+        let mut treatment = vec![0usize; n];
+        let mut outcome = vec![0.0f64; n];
+        for i in 0..n {
+            features[[i, 0]] = i as f64; // irrelevant covariate: single-leaf trees anyway
+            if i % 2 == 1 {
+                treatment[i] = 1;
+                outcome[i] = 1.0; // common effect ~= 1.0
+            }
+        }
+        let outlier_idx = 1; // a treated unit
+        outcome[outlier_idx] = 1_000_000.0; // extreme outlier, own outcome only
+
+        let cf = CausalForest::new()
+            .with_n_estimators(300)
+            .with_max_depth(0)
+            .with_seed(7);
+        let result = cf
+            .estimate(&features, &treatment, &outcome, &["x".to_string()])
+            .unwrap();
+
+        let outlier_effect = result.effects[outlier_idx].estimate;
+        assert!(
+            (outlier_effect - 1.0).abs() < 5.0,
+            "outlier's own reported CATE should reflect the common effect (~1.0) from \
+             out-of-bag trees, not be dragged toward its own 1e6 outcome via in-bag \
+             self-influence: got {outlier_effect}"
         );
     }
 
