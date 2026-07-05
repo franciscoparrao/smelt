@@ -206,6 +206,28 @@ define_learner! {
 }
 
 define_learner! {
+    name = DeepForest,
+    params = {
+        n_forests_per_type: usize = 2,
+        n_estimators_per_forest: usize = 100,
+        max_depth: usize = 10,
+        cv_folds: usize = 3,
+        max_layers: usize = 10,
+        early_stopping_rounds: usize = 2,
+        seed: u64 = 42
+    },
+    ctor = |slf| smelt_ml::prelude::DeepForest::new()
+        .with_n_forests_per_type(slf.n_forests_per_type)
+        .with_n_estimators_per_forest(slf.n_estimators_per_forest)
+        .with_max_depth(slf.max_depth)
+        .with_cv_folds(slf.cv_folds)
+        .with_max_layers(slf.max_layers)
+        .with_early_stopping_rounds(slf.early_stopping_rounds)
+        .with_seed(slf.seed),
+    proba = true,
+}
+
+define_learner! {
     name = MondrianForest,
     params = { n_trees: usize = 10, lifetime: f64 = f64::INFINITY, seed: u64 = 42 },
     ctor = |slf| smelt_ml::prelude::MondrianForest::new()
@@ -236,7 +258,7 @@ define_learner! {
     proba = true,
 }
 
-add_explain_methods!(RandomForest, ExtraTrees, DecisionTree, GradientBoosting, HoeffdingTree, AdaptiveRandomForest, MondrianForest, ObliqueTree, ObliqueForest);
+add_explain_methods!(RandomForest, ExtraTrees, DecisionTree, GradientBoosting, HoeffdingTree, AdaptiveRandomForest, DeepForest, MondrianForest, ObliqueTree, ObliqueForest);
 
 declare_support!(RandomForest,      classif = true,  regress = true);
 declare_support!(ExtraTrees,        classif = true,  regress = true);
@@ -244,6 +266,7 @@ declare_support!(DecisionTree,      classif = true,  regress = true);
 declare_support!(GradientBoosting,  classif = true,  regress = true);
 declare_support!(HoeffdingTree,     classif = true,  regress = false);
 declare_support!(AdaptiveRandomForest, classif = true, regress = false);
+declare_support!(DeepForest,        classif = true,  regress = false);
 declare_support!(MondrianForest,    classif = true,  regress = true);
 declare_support!(ObliqueTree,       classif = true,  regress = true);
 declare_support!(ObliqueForest,     classif = true,  regress = true);

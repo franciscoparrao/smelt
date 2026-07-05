@@ -37,9 +37,9 @@
 ## Prioridad 3: MEDIO (mejoras y extensiones)
 
 - [x] **ADASYN** — Oversampling adaptivo por densidad local. 4,070 citas. ✅ v0.7.0
-- [ ] **Extreme Learning Machine (ELM)** — Random weights + pseudoinverse. Ultra-rápido. 4,620 citas. ~150 líneas.
-- [ ] **Deep Forest / gcForest** — Cascada de forests emulando deep learning. ~300 líneas.
-- [ ] **Cost-Sensitive Learning** — Soporte de cost matrix en learners. Esencial para medicina/finanzas. ~150 líneas.
+- [x] **Extreme Learning Machine (ELM)** — Random weights + pseudoinverse. Ultra-rápido. ✅ `src/learner/elm.rs` (2026-07-04)
+- [x] **Deep Forest / gcForest** — Cascada de forests emulando deep learning. ✅ `src/learner/deep_forest.rs` (2026-07-04)
+- [x] **Cost-Sensitive Learning** — Soporte de cost matrix en learners. Esencial para medicina/finanzas. ✅ `src/learner/cost_sensitive.rs` (2026-07-04)
 - [x] **Conformalized Quantile Regression (CQR)** — CP + quantile regression. Intervalos adaptativos. ✅ v0.7.0
 
 ## Prioridad 4: DIFERENCIADORES (único en Rust)

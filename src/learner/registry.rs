@@ -5,18 +5,21 @@
 //! hardcoding a `match` at every call site.
 
 use super::{
-    AdaBoost, AdaptiveRandomForest, CatBoost, DecisionTree, ElasticNet, ExtraTrees, GaussianNB,
-    GradientBoosting, HoeffdingTree, KNearestNeighbors, Lasso, Learner, LightGBM, LinearRegression,
-    LinearSVM, LogisticRegression, MondrianForest, MondrianTree, ObliqueForest, ObliqueTree,
-    QuantileForest, QuantileGB, RandomForest, Ridge, XGBoost,
+    AdaBoost, AdaptiveRandomForest, CatBoost, DecisionTree, DeepForest, ElasticNet, ExtraTrees,
+    ExtremeLearningMachine, GaussianNB, GradientBoosting, HoeffdingTree, KNearestNeighbors, Lasso,
+    Learner, LightGBM, LinearRegression, LinearSVM, LogisticRegression, MondrianForest,
+    MondrianTree, ObliqueForest, ObliqueTree, QuantileForest, QuantileGB, RandomForest, Ridge,
+    XGBoost,
 };
 use crate::{Result, SmeltError};
 
 /// Construct a learner by its `id()` string, using default hyperparameters.
 ///
-/// Not every learner is registered: [`super::Bagging`], [`super::Stacking`]
-/// and [`super::DynamicEnsemble`] wrap *other* learners via a base-learner
-/// factory that has no sensible default, and [`super::GeoXGBoost`] needs
+/// Not every learner is registered: [`super::Bagging`], [`super::Stacking`],
+/// [`super::DynamicEnsemble`] and [`super::CostSensitiveClassifier`] wrap
+/// *other* learners via a base-learner factory that has no sensible
+/// default (`CostSensitiveClassifier` additionally needs an explicit cost
+/// matrix with no sensible default either), and [`super::GeoXGBoost`] needs
 /// training coordinates supplied externally. [`super::ObliqueForest`], by
 /// contrast, is a self-contained ensemble of its own oblique trees (not
 /// pluggable) and *is* registered. See [`registered_learner_ids`] for the
@@ -27,7 +30,9 @@ pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
         "adaptive_random_forest" => Box::new(AdaptiveRandomForest::default()),
         "catboost" => Box::new(CatBoost::default()),
         "decision_tree" => Box::new(DecisionTree::default()),
+        "deep_forest" => Box::new(DeepForest::default()),
         "elastic_net" => Box::new(ElasticNet::default()),
+        "elm" => Box::new(ExtremeLearningMachine::default()),
         "extra_trees" => Box::new(ExtraTrees::default()),
         "gaussian_nb" => Box::new(GaussianNB::default()),
         "gradient_boosting" => Box::new(GradientBoosting::default()),
@@ -64,7 +69,9 @@ pub fn registered_learner_ids() -> &'static [&'static str] {
         "adaptive_random_forest",
         "catboost",
         "decision_tree",
+        "deep_forest",
         "elastic_net",
+        "elm",
         "extra_trees",
         "gaussian_nb",
         "gradient_boosting",
@@ -106,7 +113,7 @@ mod tests {
 
     #[test]
     fn factory_based_ensemble_ids_are_not_registered() {
-        for id in ["bagging", "stacking", "dynamic_ensemble", "geo_xgboost"] {
+        for id in ["bagging", "stacking", "dynamic_ensemble", "cost_sensitive", "geo_xgboost"] {
             assert!(
                 learner_from_id(id).is_err(),
                 "{id} should not be registry-constructible"

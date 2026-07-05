@@ -18,12 +18,17 @@ use feature_selection::{
     filter_jmim, filter_mrmr, filter_mutual_information, filter_relief, filter_variance, rfe,
 };
 use learners::boosting::{CatBoost, GeoXGBoost, KrigingHybrid, LightGBM, XGBoost};
-use learners::ensemble::{Bagging, DynamicEnsemble, Stacking, registered_learner_ids};
+use learners::ensemble::{
+    Bagging, CostSensitiveClassifier, DynamicEnsemble, Stacking, registered_learner_ids,
+};
 use learners::linear::{ElasticNet, Lasso, LinearRegression, LinearSVM, LogisticRegression, Ridge};
-use learners::misc::{AdaBoost, EBM, GaussianNB, KNearestNeighbors, QuantileForest, QuantileGB};
+use learners::misc::{
+    AdaBoost, EBM, ExtremeLearningMachine, GaussianNB, KNearestNeighbors, QuantileForest,
+    QuantileGB,
+};
 use learners::trees::{
-    AdaptiveRandomForest, DecisionTree, ExtraTrees, GradientBoosting, HoeffdingTree, MondrianForest,
-    ObliqueForest, ObliqueTree, RandomForest,
+    AdaptiveRandomForest, DecisionTree, DeepForest, ExtraTrees, GradientBoosting, HoeffdingTree,
+    MondrianForest, ObliqueForest, ObliqueTree, RandomForest,
 };
 use measures::{
     accuracy_score, auc_roc_score, balanced_accuracy_score, brier_score, cohens_kappa_score,
@@ -58,6 +63,8 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<HoeffdingTree>()?;
     m.add_class::<AdaptiveRandomForest>()?;
     m.add_class::<MondrianForest>()?;
+    m.add_class::<DeepForest>()?;
+    m.add_class::<ExtremeLearningMachine>()?;
     m.add_class::<LinearSVM>()?;
     m.add_class::<ObliqueTree>()?;
     m.add_class::<ObliqueForest>()?;
@@ -66,6 +73,7 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Bagging>()?;
     m.add_class::<Stacking>()?;
     m.add_class::<DynamicEnsemble>()?;
+    m.add_class::<CostSensitiveClassifier>()?;
     m.add_function(wrap_pyfunction!(registered_learner_ids, m)?)?;
 
     // Causal meta-learners

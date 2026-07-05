@@ -108,6 +108,71 @@ impl Bagging {
 }
 
 #[pyclass]
+pub(crate) struct CostSensitiveClassifier {
+    trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
+    base: String,
+    cost_matrix: Vec<Vec<f64>>,
+}
+
+#[pymethods]
+impl CostSensitiveClassifier {
+    /// `base`: learner id string (see `smelt.registered_learner_ids()`);
+    /// `cost_matrix[true][predicted]`, validated against the task's actual
+    /// n_classes at `fit()` time (not eagerly here, unlike `base`).
+    #[new]
+    #[pyo3(signature = (base, cost_matrix))]
+    fn new(base: String, cost_matrix: Vec<Vec<f64>>) -> PyResult<Self> {
+        validate_learner_id(&base)?;
+        Ok(Self {
+            trained: None,
+            is_classif: false,
+            base,
+            cost_matrix,
+        })
+    }
+
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let base = self.base.clone();
+        let cost_matrix = self.cost_matrix.clone();
+        let mut learner = smelt_ml::prelude::CostSensitiveClassifier::new(
+            move || smelt_ml::prelude::learner_from_id(&base).expect("validated in CostSensitiveClassifier::new"),
+            cost_matrix,
+        );
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        self.trained = Some(model);
+        self.is_classif = is_classif;
+        Ok(())
+    }
+
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+
+    fn predict_proba<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+
+    #[getter]
+    fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
+        Ok(self.trained.as_ref().ok_or_else(not_fitted)?.feature_importance())
+    }
+}
+
+#[pyclass]
 pub(crate) struct Stacking {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -275,11 +340,12 @@ impl DynamicEnsemble {
 }
 
 
-add_explain_methods!(Bagging, Stacking, DynamicEnsemble);
+add_explain_methods!(Bagging, Stacking, DynamicEnsemble, CostSensitiveClassifier);
 
-declare_support!(Bagging,         classif = true, regress = true);
-declare_support!(Stacking,        classif = true, regress = true);
-declare_support!(DynamicEnsemble, classif = true, regress = false);
+declare_support!(Bagging,                classif = true, regress = true);
+declare_support!(Stacking,               classif = true, regress = true);
+declare_support!(DynamicEnsemble,        classif = true, regress = false);
+declare_support!(CostSensitiveClassifier, classif = true, regress = false);
 
 // get_params/set_params are hand-written here (not via `declare_params!`)
 // because `base`/`base_learners`/`meta` need the same eager id validation
@@ -310,6 +376,39 @@ impl Bagging {
                     }
                     "n_estimators" => self.n_estimators = v.extract()?,
                     "seed" => self.seed = v.extract()?,
+                    other => {
+                        return Err(PyValueError::new_err(format!(
+                            "invalid parameter '{other}' for this estimator"
+                        )))
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[pymethods]
+impl CostSensitiveClassifier {
+    fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item("base", self.base.clone())?;
+        dict.set_item("cost_matrix", self.cost_matrix.clone())?;
+        Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+
+    #[pyo3(signature = (**kwargs))]
+    fn set_params(&mut self, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                let key: String = k.extract()?;
+                match key.as_str() {
+                    "base" => {
+                        let base: String = v.extract()?;
+                        validate_learner_id(&base)?;
+                        self.base = base;
+                    }
+                    "cost_matrix" => self.cost_matrix = v.extract()?,
                     other => {
                         return Err(PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"

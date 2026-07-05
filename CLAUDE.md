@@ -35,10 +35,10 @@ src/
 ├── error.rs        # SmeltError enum (thiserror)
 ├── task/mod.rs     # Task, ClassificationTask, RegressionTask
 ├── learner/        # Learner trait, TrainedModel trait, learner_from_id registry,
-│                   # 30 learners (tree/, xgboost, lightgbm, catboost, geo_xgboost,
+│                   # 33 learners (tree/, xgboost, lightgbm, catboost, geo_xgboost,
 │                   # kriging_hybrid, hoeffding + adaptive_rf + mondrian (streaming/
 │                   # online), oblique, stacking, bagging, des, ebm, quantile*,
-│                   # regularized, ...)
+│                   # regularized, elm, deep_forest, cost_sensitive (wrapper), ...)
 ├── prediction/     # Prediction enum (Classification/Regression)
 ├── measure/        # Accuracy, F1, AUC-ROC, BalancedAccuracy, Kappa, MCC, Brier,
 │                   # RMSE, MAE, R², MAPE (+ trait Measure)
@@ -332,6 +332,86 @@ pulled from `docs/roadmap_checklist.md` (Prioridad 4).
       data (both tasks noise-free by construction, so this checks the
       binding is wired correctly rather than claiming that accuracy
       generalizes).
+
+### Prioridad 3 quick items (2026-07-04, not part of Fase 3)
+
+Separate initiative, chosen after Prioridad 4 (geospatial differentiators)
+closed out fully -- the user asked to continue with Prioridad 3's 3
+remaining items in `docs/roadmap_checklist.md` (ADASYN and CQR were already
+done). All 3 done in one session; Prioridad 3 is now fully complete too.
+
+- [x] Extreme Learning Machine (`src/learner/elm.rs`) — Huang, Zhu & Siew
+      (2006). Single hidden-layer feedforward net whose input-to-hidden
+      weights and biases are fixed random values (never trained); only the
+      output weights are learned, via a closed-form ridge-regularized
+      least-squares solve (`(HᵀH + λI)β = HᵀT`, one output column at a
+      time) -- no backpropagation at all, hence "extreme"-ly fast to fit.
+      Own hand-rolled SPD Gaussian-elimination solver (same shape as
+      `regularized.rs::solve` for Ridge, kept separate per this crate's
+      per-module numeric-routine convention). Supports both classification
+      (one-hot target, softmax-normalized output for probabilities) and
+      regression. Registered as `"elm"`.
+- [x] Cost-Sensitive Learning (`src/learner/cost_sensitive.rs`) — Elkan
+      (2001)'s Bayes-risk decision rule: given a cost matrix
+      `cost[true][predicted]` and any base classifier's predicted
+      probabilities, replaces `argmax_i P(i|x)` with the cost-minimizing
+      `argmin_j Σ_i P(i|x)·cost[i][j]`. Needs no retraining at all -- a
+      thin wrapper (`Fn() -> Box<dyn Learner>` factory, same pattern as
+      `Bagging`/`Stacking`) around whatever probabilistic classifier is
+      already trained. `CostSensitiveClassifier::binary(factory, fp_cost,
+      fn_cost)` convenience constructor for the common 2-class case (the
+      roadmap's "essential for medicine/finance" framing: e.g. a missed
+      diagnosis costing far more than an unnecessary follow-up test).
+      Deliberately NOT `MetaCost` (Domingos 1999, which retrains via
+      bagging + cost-based relabeling) -- the decision-rule approach is
+      simpler, needs no retraining, and is the more commonly used technique
+      for exactly this "medicine/finance" framing; noted as a possible
+      future addition, not attempted here. Not registered in
+      `src/learner/registry.rs` (needs a factory, like `Bagging`/`Stacking`/
+      `DynamicEnsemble` -- registry docs updated to say so).
+- [x] Deep Forest / gcForest (`src/learner/deep_forest.rs`) — Zhou & Feng
+      (2017), classification only, scoped to the "cascade forest" half of
+      the paper (not "multi-grained scanning", which targets structured
+      image/sequence inputs -- out of scope for this crate's tabular
+      focus). Each layer trains `2 * n_forests_per_type` forests
+      (alternating `RandomForest`/`ExtraTrees`, matching the paper's
+      "two completely-random + two random forests" convention) on the
+      current layer's input (original features augmented with every prior
+      layer's out-of-fold class probabilities); each forest's contribution
+      is itself produced via internal k-fold CV (`CrossValidation`,
+      reused as-is) rather than in-sample predictions, so a forest can't
+      fabricate falsely confident features for the next layer from
+      overfitting its own layer's input. That same k-fold's average
+      accuracy decides early stopping (`early_stopping_rounds` consecutive
+      layers without improvement truncates the cascade back to its
+      best-so-far depth) -- verified directly via `TrainedDeepForest::
+      n_layers()`, an inherent method beyond the `TrainedModel` trait
+      (same "concrete type carries more than the trait" shape as
+      `TrainedKrigingHybrid`/`TrainedGeoXGBoost`; `DeepForest::fit` returns
+      the concrete type, `Learner::train_classif` just boxes it). Registered
+      as `"deep_forest"` (self-contained, no factory needed, matching
+      `ObliqueForest`'s precedent).
+    - [x] Python bindings (same-day fast-follow): `ExtremeLearningMachine`
+      hand-written in `smelt-py/src/learners/misc.rs` (not via
+      `define_learner!`, so `activation` can be eagerly validated against
+      `"sigmoid"/"tanh"/"relu"` both in the constructor and in
+      `set_params`, same `resolve_*` pattern as XGBoost's `objective` in
+      `boosting.rs`) — batch-only, supports classif+regress. `DeepForest`
+      via `define_learner!` in `trees.rs` (self-contained, all params have
+      sensible defaults, same shape as `ObliqueForest`). `CostSensitiveClassifier`
+      in `smelt-py/src/learners/ensemble.rs` alongside `Bagging`/`Stacking`
+      (`base` learner selected by id string, eagerly validated; `cost_matrix`
+      passed as nested Python lists, validated lazily by the wrapped
+      Rust `train_classif` against the task's actual n_classes rather than
+      eagerly, since -- unlike a bad learner id -- a bad cost-matrix shape
+      surfaces as a clean `Result::Err`, not a `.expect()` panic). Verified
+      via `maturin develop --release` + a direct Python script: ELM fits
+      both task types well and rejects `activation="bogus"`;
+      `CostSensitiveClassifier` with a 20x false-negative cost visibly
+      flips boundary-point predictions from class 0 (plain
+      `LogisticRegression`) to class 1, and rejects an unknown `base` id;
+      `DeepForest` reaches 100% accuracy on a simple synthetic boundary and
+      exposes `predict_proba`. All 3 round-trip `get_params`/`set_params`.
 
 ## Dependencies
 

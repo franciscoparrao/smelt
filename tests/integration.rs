@@ -5250,6 +5250,83 @@ fn mondrian_tree_regress_via_learner_trait() {
     assert!(rmse < 1.0, "should fit a simple linear trend well, got RMSE={rmse}");
 }
 
+// ── Prioridad 3 quick items: ELM, Cost-Sensitive, Deep Forest ───────
+
+#[test]
+fn elm_works_through_generic_benchmark_cv() {
+    use smelt_ml::benchmark;
+
+    let mut feats = Vec::new();
+    let mut target = Vec::new();
+    for i in 0..200 {
+        let x0 = (i % 20) as f64 / 20.0;
+        let x1 = ((i / 20) % 20) as f64 / 20.0;
+        feats.push(x0);
+        feats.push(x1);
+        target.push(if x0 + x1 > 1.0 { 1usize } else { 0 });
+    }
+    let features = Array2::from_shape_vec((200, 2), feats).unwrap();
+    let task = ClassificationTask::new("elm_cv", features, target).unwrap();
+
+    let mut elm = ExtremeLearningMachine::new().with_n_hidden(50).with_seed(1);
+    let cv = CrossValidation::new(3).with_seed(0);
+    let result = benchmark::resample_classif(&mut elm, &task, &cv, &[&Accuracy]).unwrap();
+    let mean_acc = result.mean_scores()[0];
+    assert!(mean_acc > 0.8, "ELM via generic CV should fit this boundary well, got {mean_acc}");
+}
+
+#[test]
+fn cost_sensitive_classifier_works_through_generic_learner_trait() {
+    let features = array![
+        [0.0], [0.5], [1.0], [1.5], [2.0], [2.5],
+        [7.0], [7.5], [8.0], [8.5], [9.0], [9.5]
+    ];
+    let target = vec![0usize, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("cost_cv", features.clone(), target.clone()).unwrap();
+
+    let mut cs = CostSensitiveClassifier::binary(
+        || Box::new(LogisticRegression::new()),
+        1.0,
+        5.0,
+    );
+    let model = cs.train_classif(&task).unwrap();
+    let pred = model.predict(&features).unwrap();
+    let Prediction::Classification { predicted, .. } = pred else {
+        panic!("expected classification");
+    };
+    let correct = predicted.iter().zip(&target).filter(|(p, t)| *p == *t).count();
+    assert!(
+        correct as f64 / target.len() as f64 > 0.8,
+        "cost-sensitive wrapper should still separate a clearly separable dataset well"
+    );
+}
+
+#[test]
+fn deep_forest_works_through_generic_benchmark_cv() {
+    use smelt_ml::benchmark;
+
+    let mut feats = Vec::new();
+    let mut target = Vec::new();
+    for i in 0..200 {
+        let x0 = (i % 20) as f64 / 20.0;
+        let x1 = ((i / 20) % 20) as f64 / 20.0;
+        feats.push(x0);
+        feats.push(x1);
+        target.push(if x0 + x1 > 1.0 { 1usize } else { 0 });
+    }
+    let features = Array2::from_shape_vec((200, 2), feats).unwrap();
+    let task = ClassificationTask::new("deep_forest_cv", features, target).unwrap();
+
+    let mut df = DeepForest::new()
+        .with_n_estimators_per_forest(20)
+        .with_max_layers(3)
+        .with_seed(1);
+    let cv = CrossValidation::new(3).with_seed(0);
+    let result = benchmark::resample_classif(&mut df, &task, &cv, &[&Accuracy]).unwrap();
+    let mean_acc = result.mean_scores()[0];
+    assert!(mean_acc > 0.8, "DeepForest via generic CV should fit this boundary well, got {mean_acc}");
+}
+
 // ── Hyperband tests ────────────────────────────────────────────────
 
 #[test]
