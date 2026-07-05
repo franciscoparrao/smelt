@@ -19,6 +19,7 @@ pub mod lightgbm;
 pub mod linear_regression;
 pub mod logistic_regression;
 pub(crate) mod math;
+pub mod mondrian;
 pub mod naive_bayes;
 pub mod oblique;
 pub mod quantile;
@@ -48,6 +49,7 @@ pub use kriging_hybrid::{KrigingHybrid, TrainedKrigingHybrid, VariogramFit, Vari
 pub use lightgbm::LightGBM;
 pub use linear_regression::LinearRegression;
 pub use logistic_regression::LogisticRegression;
+pub use mondrian::{MondrianForest, MondrianTree};
 pub use naive_bayes::GaussianNB;
 pub use oblique::{ObliqueForest, ObliqueTree};
 pub use quantile::QuantileGB;

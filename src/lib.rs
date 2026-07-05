@@ -84,8 +84,9 @@ pub mod prelude {
         EBM, ElasticNet, ExtraTrees, BandwidthSelection, GaussianNB, GeoXGBoost, GradientBoosting,
         HoeffdingTree, KNearestNeighbors, KrigingHybrid, Lasso, Learner, TrainedGeoXGBoost,
         TrainedKrigingHybrid, LightGBM, LinearRegression, LinearSVM, LogisticRegression,
-        ObliqueForest, ObliqueTree, Objective, QuantileForest, QuantileGB, RandomForest, Ridge,
-        Stacking, VariogramFit, VariogramModel, XGBoost, learner_from_id, registered_learner_ids,
+        MondrianForest, MondrianTree, ObliqueForest, ObliqueTree, Objective, QuantileForest,
+        QuantileGB, RandomForest, Ridge, Stacking, VariogramFit, VariogramModel, XGBoost,
+        learner_from_id, registered_learner_ids,
     };
     pub use crate::measure::{
         Accuracy, AteBias, AucRoc, BalancedAccuracy, Brier, CohensKappa, F1Score, LogLoss, Mae,

@@ -206,6 +206,16 @@ define_learner! {
 }
 
 define_learner! {
+    name = MondrianForest,
+    params = { n_trees: usize = 10, lifetime: f64 = f64::INFINITY, seed: u64 = 42 },
+    ctor = |slf| smelt_ml::prelude::MondrianForest::new()
+        .with_n_trees(slf.n_trees)
+        .with_lifetime(slf.lifetime)
+        .with_seed(slf.seed),
+    proba = true,
+}
+
+define_learner! {
     name = ObliqueTree,
     params = { max_depth: usize = 10, n_projections: usize = 10, seed: u64 = 42 },
     ctor = |slf| smelt_ml::prelude::ObliqueTree::default()
@@ -226,7 +236,7 @@ define_learner! {
     proba = true,
 }
 
-add_explain_methods!(RandomForest, ExtraTrees, DecisionTree, GradientBoosting, HoeffdingTree, AdaptiveRandomForest, ObliqueTree, ObliqueForest);
+add_explain_methods!(RandomForest, ExtraTrees, DecisionTree, GradientBoosting, HoeffdingTree, AdaptiveRandomForest, MondrianForest, ObliqueTree, ObliqueForest);
 
 declare_support!(RandomForest,      classif = true,  regress = true);
 declare_support!(ExtraTrees,        classif = true,  regress = true);
@@ -234,6 +244,7 @@ declare_support!(DecisionTree,      classif = true,  regress = true);
 declare_support!(GradientBoosting,  classif = true,  regress = true);
 declare_support!(HoeffdingTree,     classif = true,  regress = false);
 declare_support!(AdaptiveRandomForest, classif = true, regress = false);
+declare_support!(MondrianForest,    classif = true,  regress = true);
 declare_support!(ObliqueTree,       classif = true,  regress = true);
 declare_support!(ObliqueForest,     classif = true,  regress = true);
 

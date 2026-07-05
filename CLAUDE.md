@@ -35,9 +35,10 @@ src/
 ├── error.rs        # SmeltError enum (thiserror)
 ├── task/mod.rs     # Task, ClassificationTask, RegressionTask
 ├── learner/        # Learner trait, TrainedModel trait, learner_from_id registry,
-│                   # 28 learners (tree/, xgboost, lightgbm, catboost, geo_xgboost,
-│                   # kriging_hybrid, hoeffding + adaptive_rf (streaming/online),
-│                   # oblique, stacking, bagging, des, ebm, quantile*, regularized, ...)
+│                   # 30 learners (tree/, xgboost, lightgbm, catboost, geo_xgboost,
+│                   # kriging_hybrid, hoeffding + adaptive_rf + mondrian (streaming/
+│                   # online), oblique, stacking, bagging, des, ebm, quantile*,
+│                   # regularized, ...)
 ├── prediction/     # Prediction enum (Classification/Regression)
 ├── measure/        # Accuracy, F1, AUC-ROC, BalancedAccuracy, Kappa, MCC, Brier,
 │                   # RMSE, MAE, R², MAPE (+ trait Measure)
@@ -275,6 +276,62 @@ pulled from `docs/roadmap_checklist.md` (Prioridad 4).
       the Rust-side test's qualitative result end-to-end through the actual
       Python API. Streaming API parity (`partial_fit`/`n_drifts`/`predict_one`
       exposed to Python for both learners) is a natural follow-up, not done here.
+- [x] Mondrian Forest (2026-07-04) — `src/learner/mondrian.rs`. The last open
+      item in Prioridad 4 (`docs/roadmap_checklist.md`), closing that
+      priority tier. Implements Lakshminarayanan, Roy & Teh (2014): splits
+      come from a Mondrian process (split *time* ~ Exponential(rate = box's
+      total side length), split *dimension* proportional to that dimension's
+      own range, split *location* uniform in the data's range on that
+      dimension) rather than greedy CART/information-gain, giving a specific
+      consistency property `HoeffdingTree`/`AdaptiveRandomForest` don't have:
+      a tree grown incrementally one point at a time is distributed
+      identically to one grown by one-shot batch construction on the same
+      points (`sample_mondrian_block`, used by `Learner::train_classif`/
+      `train_regress`), regardless of arrival order. The online side
+      (`extend_node`, Algorithm 3 in the paper) implements this for real: a
+      point falling outside a node's current bounding box can retroactively
+      introduce a new split *above* that node, reproducing exactly what
+      batch construction on the enlarged point set would sample — not a
+      simplified "just extend the box and keep the old structure" shortcut.
+      One deliberate scope cut, documented in the module: a leaf that
+      receives a point *within* its box only updates running statistics
+      (class counts / Welford mean-variance) rather than re-attempting an
+      internal split from remaining time budget as density grows, which
+      would require storing raw per-leaf data instead of O(1) stats — same
+      space/fidelity trade-off `Adwin` makes over the ADWIN paper's
+      exponential-histogram buckets. No online bagging (unlike
+      `AdaptiveRandomForest`): each tree sees every sample, and cross-tree
+      diversity comes purely from each tree's own random stream of split
+      times/dimensions/locations, matching the paper's actual ensemble
+      design rather than bolting on ARF's Poisson-weighted resampling.
+      Supports classification AND regression (both via `MondrianTree`/
+      `MondrianForest`), unlike the classification-only Hoeffding/ARF pair —
+      the first streaming *regressor* in the crate. Registered as both
+      `"mondrian_tree"` and `"mondrian_forest"` in `src/learner/registry.rs`.
+      11 unit tests colocated with the module (matching `adaptive_rf.rs`'s
+      convention) plus 2 integration tests confirming it composes with the
+      generic `Learner` trait (CV via `benchmark::resample_classif`, not
+      just its own direct API); the differentiating behavior itself is
+      covered by `online_extension_grows_tree_coverage_beyond_initial_range`
+      (trains on a narrow initial range, then streams points far outside it
+      with a different label, and confirms the tree's predictions for those
+      far-outside points flip accordingly — this would fail against a tree
+      that only ever grows structure downward from existing leaves, the
+      Hoeffding-style behavior Mondrian Forests are meant to improve on).
+    - [x] Python bindings (2026-07-04, same-day fast-follow): `MondrianForest`
+      in `smelt-py/src/learners/trees.rs`, bound via `define_learner!`
+      alongside `ObliqueForest` (batch-only, both classif and regress
+      supported, `proba=true`) rather than exposing the streaming
+      `partial_fit_classif`/`partial_fit_regress`/`predict_one_*` surface —
+      same precedent as `AdaptiveRandomForest`'s Python binding. `lifetime`
+      defaults to `f64::INFINITY`, which PyO3 round-trips to Python's
+      `float('inf')` correctly (verified via `get_params()`). Verified via
+      `maturin develop --release` + a direct Python script covering both
+      task types plus a `get_params`/`set_params` round-trip: 100%
+      classification accuracy and ~3e-15 regression RMSE on simple synthetic
+      data (both tasks noise-free by construction, so this checks the
+      binding is wired correctly rather than claiming that accuracy
+      generalizes).
 
 ## Dependencies
 

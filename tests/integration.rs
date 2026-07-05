@@ -5201,6 +5201,55 @@ fn benchmark_design_multi_learner() {
     assert!(summary.contains("decision_tree"));
 }
 
+// ── Mondrian Forest tests ───────────────────────────────────────────
+
+/// Confirms `MondrianForest` composes with the rest of the framework
+/// through the generic `Learner` trait -- cross-validation via
+/// `benchmark::resample_classif`, not just its own direct batch/streaming
+/// API (already covered by the module's own unit tests).
+#[test]
+fn mondrian_forest_works_through_generic_benchmark_cv() {
+    use smelt_ml::benchmark;
+
+    let mut rng_feats = Vec::new();
+    let mut target = Vec::new();
+    for i in 0..200 {
+        let x = (i % 40) as f64 / 40.0;
+        rng_feats.push(x);
+        target.push(if x > 0.5 { 1usize } else { 0 });
+    }
+    let features = Array2::from_shape_vec((200, 1), rng_feats).unwrap();
+    let task = ClassificationTask::new("mondrian_cv", features, target).unwrap();
+
+    let mut forest = MondrianForest::new().with_n_trees(10).with_seed(1);
+    let cv = CrossValidation::new(3).with_seed(0);
+    let result = benchmark::resample_classif(&mut forest, &task, &cv, &[&Accuracy]).unwrap();
+    let mean_acc = result.mean_scores()[0];
+    assert!(mean_acc > 0.8, "MondrianForest via generic CV should fit this threshold rule well, got {mean_acc}");
+}
+
+#[test]
+fn mondrian_tree_regress_via_learner_trait() {
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+    let task = RegressionTask::new("mondrian_lin", features.clone(), target.clone()).unwrap();
+
+    let mut tree = MondrianTree::new().with_seed(1);
+    let model = tree.train_regress(&task).unwrap();
+    let pred = model.predict(&features).unwrap();
+    let Prediction::Regression { predicted, .. } = pred else {
+        panic!("expected regression");
+    };
+    let rmse = (predicted
+        .iter()
+        .zip(&target)
+        .map(|(p, t)| (p - t).powi(2))
+        .sum::<f64>()
+        / target.len() as f64)
+        .sqrt();
+    assert!(rmse < 1.0, "should fit a simple linear trend well, got RMSE={rmse}");
+}
+
 // ── Hyperband tests ────────────────────────────────────────────────
 
 #[test]

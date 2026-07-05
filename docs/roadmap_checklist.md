@@ -46,9 +46,9 @@
 
 - [x] **Kriging-ML Hybrid** — Regression-kriging con XGBoost/RF para residuos espaciales. 15+ papers en Q5_3. ✅ `src/learner/kriging_hybrid.rs` (2026-07-04)
 - [x] **Spatial-SMOTE** — SMOTE geoespacialmente informado. ✅ `src/preprocess/spatial_smote.rs` (2026-07-04)
-- [ ] **Uplift Modeling (X/R/DR-Learners)** — Meta-learners para efectos causales. Extiende CausalForest. ~250 líneas.
+- [x] **Uplift Modeling (X/R/DR-Learners)** — Meta-learners para efectos causales. ✅ `src/causal/meta_learners/` (2026-07-03, ver también T/S-learner)
 - [x] **Online Adaptive Random Forest** — RF incremental con detección de concept drift (ADWIN). ✅ `src/learner/adaptive_rf.rs` (2026-07-04)
-- [ ] **Mondrian Forest** — Árboles con proceso de Mondrian para partición incremental consistente. ~300 líneas.
+- [x] **Mondrian Forest** — Árboles con proceso de Mondrian para partición incremental consistente (batch y online consistentes: construcción por lotes vía `sample_mondrian_block`, extensión online vía `extend_node`). ✅ `src/learner/mondrian.rs` + bindings Python (2026-07-04)
 
 ## Prioridad 5: NICE-TO-HAVE
 

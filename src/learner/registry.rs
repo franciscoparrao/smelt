@@ -7,8 +7,8 @@
 use super::{
     AdaBoost, AdaptiveRandomForest, CatBoost, DecisionTree, ElasticNet, ExtraTrees, GaussianNB,
     GradientBoosting, HoeffdingTree, KNearestNeighbors, Lasso, Learner, LightGBM, LinearRegression,
-    LinearSVM, LogisticRegression, ObliqueForest, ObliqueTree, QuantileForest, QuantileGB,
-    RandomForest, Ridge, XGBoost,
+    LinearSVM, LogisticRegression, MondrianForest, MondrianTree, ObliqueForest, ObliqueTree,
+    QuantileForest, QuantileGB, RandomForest, Ridge, XGBoost,
 };
 use crate::{Result, SmeltError};
 
@@ -38,6 +38,8 @@ pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
         "linear_regression" => Box::new(LinearRegression::default()),
         "linear_svm" => Box::new(LinearSVM::default()),
         "logistic_regression" => Box::new(LogisticRegression::default()),
+        "mondrian_forest" => Box::new(MondrianForest::default()),
+        "mondrian_tree" => Box::new(MondrianTree::default()),
         "oblique_forest" => Box::new(ObliqueForest::default()),
         "oblique_tree" => Box::new(ObliqueTree::default()),
         "quantile_forest" => Box::new(QuantileForest::default()),
@@ -73,6 +75,8 @@ pub fn registered_learner_ids() -> &'static [&'static str] {
         "linear_regression",
         "linear_svm",
         "logistic_regression",
+        "mondrian_forest",
+        "mondrian_tree",
         "oblique_forest",
         "oblique_tree",
         "quantile_forest",
