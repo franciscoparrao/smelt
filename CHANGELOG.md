@@ -6,7 +6,28 @@ Versions are tracked independently per this workspace's existing
 convention: the Rust crate follows its own semver, the Python bindings
 follow their own (currently a minor/patch cadence).
 
-## [smelt-ml 2.0.0] / [smelt-py 0.5.0] - unreleased
+## [smelt-ml 2.0.1] / [smelt-py 0.5.1] - 2026-07-05
+
+### Fixed
+
+- `RandomForest` and `ExtraTrees` applied the classification-style
+  `sqrt(n_features)` candidate-feature heuristic to regression too,
+  unlike scikit-learn (`RandomForestRegressor`/`ExtraTreesRegressor`
+  default to all features; only the `*Classifier` variants default to
+  `sqrt`). Found by the empirical benchmark added in 2.0.0/0.5.0: on
+  OpenML `pol` (48 features, few actually informative), this made
+  `RandomForest` RMSE 111.8% worse than scikit-learn's, since many splits
+  never saw an informative feature at all. Regression now uses all
+  features by default, matching scikit-learn; classification is
+  unchanged. RMSE on `pol` closes from +111.8% to -3.8% (now slightly
+  *better* than scikit-learn). Fit time trades the other way (every split
+  now searches all 48 features instead of 7) -- the same trade-off
+  scikit-learn's own all-features default pays, not a regression.
+  `with_max_features_sqrt()`/`with_max_features_fraction()` still
+  override explicitly for both task types, unchanged for existing callers
+  who already set them.
+
+## [smelt-ml 2.0.0] / [smelt-py 0.5.0] - 2026-07-04
 
 92 commits since the last published versions (`smelt-ml` 1.3.0, `smelt-py`
 0.4.6). Driven mostly by a full engine audit
