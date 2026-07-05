@@ -1,6 +1,6 @@
 //! Extra Trees (Extremely Randomized Trees): ensemble with random thresholds and no bootstrap.
 
-use super::{LeafValue, Node, TreeBuilder};
+use super::{LeafValue, MaxFeatures, Node, TreeBuilder};
 use crate::Result;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
@@ -37,7 +37,7 @@ pub struct ExtraTrees {
     max_depth: Option<usize>,
     min_samples_split: usize,
     min_samples_leaf: usize,
-    max_features_fraction: f64,
+    max_features: MaxFeatures,
     seed: u64,
 }
 
@@ -48,14 +48,16 @@ impl Default for ExtraTrees {
             max_depth: None,
             min_samples_split: 2,
             min_samples_leaf: 1,
-            max_features_fraction: 0.0, // sqrt heuristic
+            max_features: MaxFeatures::Auto,
             seed: 42,
         }
     }
 }
 
 impl ExtraTrees {
-    /// Creates an Extra Trees ensemble with default hyperparameters (100 trees, sqrt feature heuristic).
+    /// Creates an Extra Trees ensemble with default hyperparameters (100
+    /// trees; `sqrt(n_features)` per split for classification, all features
+    /// for regression -- see [`MaxFeatures`]).
     pub fn new() -> Self {
         Self::default()
     }
@@ -79,25 +81,17 @@ impl ExtraTrees {
         self.min_samples_leaf = n;
         self
     }
-    /// Sets the fraction of features considered at each split; `0.0` uses the sqrt(n_features) heuristic.
+    /// Sets an explicit fraction of features considered at each split
+    /// (applies to both classification and regression, overriding the
+    /// task-appropriate default -- see [`MaxFeatures`]).
     pub fn with_max_features_fraction(mut self, f: f64) -> Self {
-        self.max_features_fraction = f;
+        self.max_features = MaxFeatures::Fraction(f);
         self
     }
     /// Sets the RNG seed used for bootstrap-free tree construction and random thresholds.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
-    }
-
-    fn max_features_count(&self, n_features: usize) -> usize {
-        if self.max_features_fraction <= 0.0 {
-            (n_features as f64).sqrt().ceil() as usize
-        } else {
-            (n_features as f64 * self.max_features_fraction)
-                .ceil()
-                .max(1.0) as usize
-        }
     }
 }
 
@@ -194,7 +188,7 @@ impl Learner for ExtraTrees {
         let n_samples = task.n_samples();
         let n_features = task.n_features();
         let n_classes = task.n_classes();
-        let max_feat = self.max_features_count(n_features);
+        let max_feat = self.max_features.resolve(n_features, true);
         // No bootstrap — use all samples
         let indices: Vec<usize> = (0..n_samples).collect();
 
@@ -206,7 +200,7 @@ impl Learner for ExtraTrees {
                     self.max_depth,
                     self.min_samples_split,
                     self.min_samples_leaf,
-                    Some(max_feat),
+                    max_feat,
                     n_features,
                 )
                 .with_random_splits(true);
@@ -246,7 +240,7 @@ impl Learner for ExtraTrees {
         let target = task.target();
         let n_samples = task.n_samples();
         let n_features = task.n_features();
-        let max_feat = self.max_features_count(n_features);
+        let max_feat = self.max_features.resolve(n_features, false);
         let indices: Vec<usize> = (0..n_samples).collect();
 
         let results: Vec<(Node, Vec<f64>)> = (0..self.n_estimators)
@@ -257,7 +251,7 @@ impl Learner for ExtraTrees {
                     self.max_depth,
                     self.min_samples_split,
                     self.min_samples_leaf,
-                    Some(max_feat),
+                    max_feat,
                     n_features,
                 )
                 .with_random_splits(true);

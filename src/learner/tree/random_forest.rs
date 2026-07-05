@@ -1,6 +1,6 @@
 //! Random Forest: ensemble of decision trees with bootstrap sampling and feature subsampling.
 
-use super::{LeafValue, Node, TreeBuilder};
+use super::{LeafValue, MaxFeatures, Node, TreeBuilder};
 use crate::Result;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
@@ -35,8 +35,7 @@ pub struct RandomForest {
     max_depth: Option<usize>,
     min_samples_split: usize,
     min_samples_leaf: usize,
-    /// Fraction of features to consider at each split. 0.0 = sqrt(n_features) heuristic.
-    max_features_fraction: f64,
+    max_features: MaxFeatures,
     seed: u64,
 }
 
@@ -47,14 +46,16 @@ impl Default for RandomForest {
             max_depth: None,
             min_samples_split: 2,
             min_samples_leaf: 1,
-            max_features_fraction: 0.0, // sqrt heuristic
+            max_features: MaxFeatures::Auto,
             seed: 42,
         }
     }
 }
 
 impl RandomForest {
-    /// Creates a Random Forest learner with default hyperparameters (100 trees, sqrt feature heuristic).
+    /// Creates a Random Forest learner with default hyperparameters (100
+    /// trees; `sqrt(n_features)` per split for classification, all features
+    /// for regression -- see [`MaxFeatures`]).
     pub fn new() -> Self {
         Self::default()
     }
@@ -83,15 +84,20 @@ impl RandomForest {
         self
     }
 
-    /// Uses the classic RF default: `sqrt(n_features)` candidate features per split.
+    /// Forces the classic `sqrt(n_features)` candidate-feature heuristic for
+    /// both classification and regression (the default already uses this for
+    /// classification; use this to also apply it to regression, overriding
+    /// the task-appropriate default of considering all features).
     pub fn with_max_features_sqrt(mut self) -> Self {
-        self.max_features_fraction = 0.0;
+        self.max_features = MaxFeatures::Sqrt;
         self
     }
 
-    /// Sets the fraction of features considered at each split; `0.0` uses the sqrt(n_features) heuristic.
+    /// Sets an explicit fraction of features considered at each split
+    /// (applies to both classification and regression, overriding the
+    /// task-appropriate default).
     pub fn with_max_features_fraction(mut self, f: f64) -> Self {
-        self.max_features_fraction = f;
+        self.max_features = MaxFeatures::Fraction(f);
         self
     }
 
@@ -99,17 +105,6 @@ impl RandomForest {
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
-    }
-
-    fn max_features_count(&self, n_features: usize) -> usize {
-        if self.max_features_fraction <= 0.0 {
-            // sqrt heuristic
-            (n_features as f64).sqrt().ceil() as usize
-        } else {
-            (n_features as f64 * self.max_features_fraction)
-                .ceil()
-                .max(1.0) as usize
-        }
     }
 }
 
@@ -221,7 +216,7 @@ impl Learner for RandomForest {
         let n_samples = task.n_samples();
         let n_features = task.n_features();
         let n_classes = task.n_classes();
-        let max_feat = self.max_features_count(n_features);
+        let max_feat = self.max_features.resolve(n_features, true);
 
         let results: Vec<(Node, Vec<f64>)> = (0..self.n_estimators)
             .into_par_iter()
@@ -236,7 +231,7 @@ impl Learner for RandomForest {
                     self.max_depth,
                     self.min_samples_split,
                     self.min_samples_leaf,
-                    Some(max_feat),
+                    max_feat,
                     n_features,
                 );
                 let root = builder.build_classifier(
@@ -275,7 +270,7 @@ impl Learner for RandomForest {
         let target = task.target();
         let n_samples = task.n_samples();
         let n_features = task.n_features();
-        let max_feat = self.max_features_count(n_features);
+        let max_feat = self.max_features.resolve(n_features, false);
 
         let results: Vec<(Node, Vec<f64>)> = (0..self.n_estimators)
             .into_par_iter()
@@ -289,7 +284,7 @@ impl Learner for RandomForest {
                     self.max_depth,
                     self.min_samples_split,
                     self.min_samples_leaf,
-                    Some(max_feat),
+                    max_feat,
                     n_features,
                 );
                 let root = builder.build_regressor(&features.view(), target, &indices, 0, &mut rng);
@@ -313,5 +308,93 @@ impl Learner for RandomForest {
             n_classes: None,
             is_classifier: false,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prediction::Prediction;
+    use rand::Rng;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    /// Regression test for a real gap found by an empirical benchmark
+    /// against scikit-learn (docs/... benchmark, 2026-07-05): with 48
+    /// features where only 3 actually carry signal (like the OpenML `pol`
+    /// dataset), forcing the classification-style `sqrt(p)` candidate-
+    /// feature heuristic onto regression means many splits never see an
+    /// informative feature at all, degrading every tree in the ensemble.
+    /// `RandomForest`'s regression default must use all features instead
+    /// (matching scikit-learn's `RandomForestRegressor`), confirmed here by
+    /// checking it clearly beats the old sqrt(p)-forced behavior on
+    /// exactly this failure mode.
+    #[test]
+    fn regression_default_beats_sqrt_heuristic_when_few_features_are_informative() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let n = 400;
+        let p = 48;
+        let mut feats = Vec::with_capacity(n * p);
+        let mut target = Vec::with_capacity(n);
+        for _ in 0..n {
+            let mut row = Vec::with_capacity(p);
+            for _ in 0..p {
+                row.push(rng.random::<f64>());
+            }
+            // Only features 0, 1, 2 carry signal; the other 45 are pure noise.
+            let y = 5.0 * row[0] - 3.0 * row[1] + 2.0 * row[2] + rng.random::<f64>() * 0.1;
+            feats.extend_from_slice(&row);
+            target.push(y);
+        }
+        let features = Array2::from_shape_vec((n, p), feats).unwrap();
+        let task = RegressionTask::new("sparse_signal", features.clone(), target.clone()).unwrap();
+
+        let rmse = |predicted: &[f64]| -> f64 {
+            (predicted
+                .iter()
+                .zip(&target)
+                .map(|(p, t)| (p - t).powi(2))
+                .sum::<f64>()
+                / n as f64)
+                .sqrt()
+        };
+
+        let mut default_rf = RandomForest::new().with_n_estimators(50).with_seed(1);
+        let default_model = default_rf.train_regress(&task).unwrap();
+        let Prediction::Regression { predicted: default_pred, .. } =
+            default_model.predict(&features).unwrap()
+        else {
+            panic!("expected regression");
+        };
+        let default_rmse = rmse(&default_pred);
+
+        let mut sqrt_rf = RandomForest::new()
+            .with_n_estimators(50)
+            .with_seed(1)
+            .with_max_features_sqrt();
+        let sqrt_model = sqrt_rf.train_regress(&task).unwrap();
+        let Prediction::Regression { predicted: sqrt_pred, .. } = sqrt_model.predict(&features).unwrap()
+        else {
+            panic!("expected regression");
+        };
+        let sqrt_rmse = rmse(&sqrt_pred);
+
+        assert!(
+            default_rmse < sqrt_rmse * 0.8,
+            "default (all-features) RMSE {default_rmse} should be clearly better than \
+             sqrt(p)-forced RMSE {sqrt_rmse} when only 3 of {p} features are informative"
+        );
+    }
+
+    #[test]
+    fn classification_default_still_uses_sqrt_heuristic() {
+        // Sanity check the Auto/is_classif=true branch didn't regress:
+        // resolve() should still shrink the candidate set for classification.
+        let rf = RandomForest::new();
+        let resolved = rf.max_features.resolve(48, true);
+        assert_eq!(resolved, Some(7)); // ceil(sqrt(48)) = 7
+
+        let resolved_regress = rf.max_features.resolve(48, false);
+        assert_eq!(resolved_regress, None); // all features
     }
 }

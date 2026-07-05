@@ -60,6 +60,54 @@ impl Node {
     }
 }
 
+/// How many candidate features [`RandomForest`](super::RandomForest)/
+/// [`ExtraTrees`](super::ExtraTrees) consider at each split.
+///
+/// `Auto` resolves differently by task: `sqrt(n_features)` for
+/// classification (Breiman's original RF guidance, and scikit-learn's
+/// `RandomForestClassifier`/`ExtraTreesClassifier` default), but *all*
+/// features for regression (scikit-learn's `RandomForestRegressor`/
+/// `ExtraTreesRegressor` default). Regression tasks are hurt more by
+/// aggressive feature subsampling than classification: when a small number
+/// of features carries most of the signal (common in wide regression
+/// tables), restricting every split to a random `sqrt(p)`-sized subset can
+/// mean many splits never see the informative features at all, degrading
+/// every tree in the ensemble rather than just adding beneficial diversity.
+/// Confirmed empirically: applying the classification-style `sqrt(p)`
+/// default to a 48-feature regression benchmark (OpenML `pol`) more than
+/// doubled RMSE versus scikit-learn's all-features default.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum MaxFeatures {
+    /// Task-appropriate default -- see the type's own docs.
+    Auto,
+    /// Force the `sqrt(n_features)` heuristic regardless of task.
+    Sqrt,
+    /// Explicit fraction of `n_features` in `(0.0, 1.0]`.
+    Fraction(f64),
+}
+
+impl MaxFeatures {
+    /// Resolves to the number of candidate features per split, or `None`
+    /// for "consider all features" (no subsampling).
+    pub(crate) fn resolve(&self, n_features: usize, is_classif: bool) -> Option<usize> {
+        match self {
+            MaxFeatures::Auto => {
+                if is_classif {
+                    Some(sqrt_heuristic(n_features))
+                } else {
+                    None
+                }
+            }
+            MaxFeatures::Sqrt => Some(sqrt_heuristic(n_features)),
+            MaxFeatures::Fraction(f) => Some((n_features as f64 * f).ceil().max(1.0) as usize),
+        }
+    }
+}
+
+fn sqrt_heuristic(n_features: usize) -> usize {
+    (n_features as f64).sqrt().ceil() as usize
+}
+
 // --- Tree builder ---
 
 pub(crate) struct TreeBuilder {
