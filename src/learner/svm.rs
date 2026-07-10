@@ -87,6 +87,16 @@ fn train_binary_svm(
     let mut rng = StdRng::seed_from_u64(seed);
     let mut indices: Vec<usize> = (0..n).collect();
 
+    // Per-sample regularization strength. The SVM objective is
+    // ½‖w‖² + C·Σᵢ hinge(i); with per-sample SGD steps the weight decay
+    // must be λ = 1/(n·C) per step (Pegasos / sklearn's LinearSVC-through-
+    // SGDClassifier convention, alpha = 1/(n·C)). Using 1/C per step — the
+    // pre-4th-audit behaviour — applied n times more regularization than
+    // the objective asks for: with the defaults, ‖w‖ stayed pinned near
+    // zero and training accuracy sat at chance level even on trivially
+    // separable data.
+    let lambda = 1.0 / (c * n as f64);
+
     for epoch in 0..max_iter {
         indices.shuffle(&mut rng);
         let eta = lr / (1.0 + epoch as f64 * 0.01); // learning rate decay
@@ -100,13 +110,13 @@ fn train_binary_svm(
             if y[i] * score < 1.0 {
                 // Misclassified or within margin: hinge loss gradient
                 for j in 0..p {
-                    w[j] = w[j] * (1.0 - eta / c) + eta * y[i] * x[[i, j]];
+                    w[j] = w[j] * (1.0 - eta * lambda) + eta * y[i] * x[[i, j]];
                 }
                 w[p] += eta * y[i]; // bias update (no regularization)
             } else {
                 // Correctly classified: only regularization
                 for j in 0..p {
-                    w[j] *= 1.0 - eta / c;
+                    w[j] *= 1.0 - eta * lambda;
                 }
             }
         }
@@ -121,6 +131,29 @@ pub struct TrainedLinearSVM {
     pub(crate) classifiers: Vec<Array1<f64>>, // one per class (OVR)
     pub(crate) n_classes: usize,
     pub(crate) feature_names: Vec<String>,
+    /// Internal scaling parameters (mean, std per feature), applied
+    /// automatically — same standardization LogisticRegression and ELM
+    /// do, without which hinge-SGD stalls on real-scale features (UTM
+    /// coordinates, raw counts). `serde(default)`: models saved before
+    /// these fields existed load with empty vecs, which `scale_value`
+    /// treats as identity (those models were trained unscaled).
+    #[serde(default)]
+    pub(crate) scale_means: Vec<f64>,
+    #[serde(default)]
+    pub(crate) scale_stds: Vec<f64>,
+}
+
+impl TrainedLinearSVM {
+    /// Apply internal scaling to one value (identity for legacy models
+    /// deserialized without scaling parameters).
+    #[inline]
+    fn scale_value(&self, j: usize, val: f64) -> f64 {
+        if self.scale_stds.is_empty() {
+            val
+        } else {
+            (val - self.scale_means[j]) / self.scale_stds[j]
+        }
+    }
 }
 
 impl TrainedModel for TrainedLinearSVM {
@@ -135,7 +168,7 @@ impl TrainedModel for TrainedLinearSVM {
                 let w = &self.classifiers[0];
                 let mut score = w[p];
                 for j in 0..p {
-                    score += row[j] * w[j];
+                    score += self.scale_value(j, row[j]) * w[j];
                 }
                 let pred = if score >= 0.0 { 1 } else { 0 };
                 // Approximate probability via sigmoid of score
@@ -149,7 +182,7 @@ impl TrainedModel for TrainedLinearSVM {
                     .map(|w| {
                         let mut s = w[p];
                         for j in 0..p {
-                            s += row[j] * w[j];
+                            s += self.scale_value(j, row[j]) * w[j];
                         }
                         s
                     })
@@ -219,6 +252,27 @@ impl Learner for LinearSVM {
         let x = task.features();
         let target = task.target();
         let n_classes = task.n_classes();
+        let n_features = task.n_features();
+        let n_samples = task.n_samples() as f64;
+
+        // Auto-scale features (standardization) — same as LogisticRegression
+        // and ELM: hinge-SGD with a fixed learning rate stalls (or diverges)
+        // on unnormalized magnitudes like UTM coordinates.
+        let mut means = vec![0.0; n_features];
+        let mut stds = vec![0.0; n_features];
+        for j in 0..n_features {
+            let col = x.column(j);
+            let mean = col.sum() / n_samples;
+            let var = col.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n_samples;
+            means[j] = mean;
+            stds[j] = if var > 0.0 { var.sqrt() } else { 1.0 };
+        }
+        let mut x_scaled = x.clone();
+        for i in 0..x.nrows() {
+            for j in 0..n_features {
+                x_scaled[[i, j]] = (x[[i, j]] - means[j]) / stds[j];
+            }
+        }
 
         let classifiers = if n_classes == 2 {
             let y: Vec<f64> = target
@@ -226,7 +280,7 @@ impl Learner for LinearSVM {
                 .map(|&t| if t == 1 { 1.0 } else { -1.0 })
                 .collect();
             vec![train_binary_svm(
-                x,
+                &x_scaled,
                 &y,
                 self.c,
                 self.learning_rate,
@@ -241,7 +295,7 @@ impl Learner for LinearSVM {
                         .map(|&t| if t == c { 1.0 } else { -1.0 })
                         .collect();
                     train_binary_svm(
-                        x,
+                        &x_scaled,
                         &y,
                         self.c,
                         self.learning_rate,
@@ -256,6 +310,8 @@ impl Learner for LinearSVM {
             classifiers,
             n_classes,
             feature_names: task.feature_names().to_vec(),
+            scale_means: means,
+            scale_stds: stds,
         }))
     }
 }

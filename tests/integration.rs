@@ -3179,6 +3179,49 @@ fn adaboost_rejects_regression() {
 
 // ── Linear SVM tests ──────────────────────────────────────────────
 
+/// Regression test (4th audit, HIGH-5): the per-sample weight decay was
+/// lambda = 1/C instead of 1/(n*C) -- n times more regularization than the
+/// SVM objective asks for. With defaults, ||w|| stayed pinned near zero and
+/// TRAINING accuracy sat at chance level (~0.51-0.54) on trivially
+/// separable data at any realistic n; the only pre-existing test used
+/// n=10 with C=10, the corner where the factor-n error doesn't hurt.
+/// Also covers internal standardization: UTM-scale features must work
+/// with defaults, like LogisticRegression/ELM.
+#[test]
+fn linear_svm_defaults_learn_separable_data_at_realistic_n() {
+    for (scale_x, scale_y, offset) in [(1.0, 1.0, 0.0), (1e5, 1e6, 7.2e6)] {
+        let n = 400;
+        let features = Array2::from_shape_fn((n, 2), |(i, j)| {
+            let raw = ((i * 7 + j * 3) % 100) as f64 / 100.0;
+            if j == 0 { raw * scale_x } else { raw * scale_y + offset }
+        });
+        let target: Vec<usize> = (0..n)
+            .map(|i| {
+                let x0 = features[[i, 0]] / scale_x;
+                let x1 = (features[[i, 1]] - offset) / scale_y;
+                usize::from(x0 + x1 > 1.0)
+            })
+            .collect();
+        let task =
+            ClassificationTask::new("svm_defaults", features.clone(), target.clone()).unwrap();
+
+        let mut svm = LinearSVM::new(); // defaults on purpose
+        let model = svm.train_classif(&task).unwrap();
+        let pred = model.predict(&features).unwrap();
+        let acc = match pred {
+            Prediction::Classification { predicted, .. } => {
+                predicted.iter().zip(&target).filter(|(a, b)| a == b).count() as f64 / n as f64
+            }
+            _ => panic!("expected classification"),
+        };
+        assert!(
+            acc > 0.9,
+            "scale ({scale_x:e},{scale_y:e})+{offset:e}: default LinearSVM must learn a \
+             separable boundary, got training accuracy {acc}"
+        );
+    }
+}
+
 #[test]
 fn linear_svm_separable() {
     let features = array![
