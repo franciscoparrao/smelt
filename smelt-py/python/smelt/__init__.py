@@ -69,6 +69,7 @@ from smelt._smelt import (
     SpatialBufferCV,
     StratifiedCV,
     GroupCV,
+    TimeSeriesCV,
     # Measures
     accuracy_score,
     rmse_score,
@@ -128,7 +129,7 @@ __all__ = [
     "KMeans", "DBSCAN", "IsolationForest",
     "CsvLoader",
     "StandardScaler", "Smote", "SpatialSmote",
-    "CrossValidation", "SpatialBlockCV", "SpatialBufferCV", "StratifiedCV", "GroupCV",
+    "CrossValidation", "SpatialBlockCV", "SpatialBufferCV", "StratifiedCV", "GroupCV", "TimeSeriesCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",
     "f1_score", "precision_score", "recall_score", "auc_roc_score",
     "balanced_accuracy_score", "cohens_kappa_score", "mcc_score", "brier_score",

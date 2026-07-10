@@ -3,6 +3,7 @@
 
 pub mod spatial;
 pub mod stratified;
+pub mod time_series;
 
 use crate::{Result, SmeltError};
 use rand::SeedableRng;
@@ -11,6 +12,7 @@ use rand::seq::SliceRandom;
 
 pub use spatial::{SpatialBlockCV, SpatialBufferCV};
 pub use stratified::{GroupCV, StratifiedCV};
+pub use time_series::TimeSeriesCV;
 
 /// Trait for resampling strategies.
 ///

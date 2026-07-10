@@ -1,4 +1,4 @@
-use ndarray::{Array2, array};
+use ndarray::{Array2, Axis, array};
 use smelt_ml::prelude::*;
 
 // ── Task tests ──────────────────────────────────────────────────────
@@ -3714,6 +3714,124 @@ fn xgboost_early_stopping_classif() {
 }
 
 // ── Conformal Prediction tests ─────────────────────────────────────
+
+/// SplitConformal (prediction-based calibration, PM2.5 handoff gap #1) must
+/// be exactly the same calibration ConformalRegressor computes when both
+/// see the same predictions — one takes a model, the other its outputs.
+#[test]
+fn split_conformal_matches_model_driven_calibration() {
+    use smelt_ml::conformal::{ConformalRegressor, SplitConformal};
+
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+    let target = vec![2.0, 4.1, 5.8, 8.3, 9.9, 12.2, 13.7, 16.1];
+    let task = RegressionTask::new("sc", features, target).unwrap();
+    let mut dt = DecisionTree::default();
+    let model = dt.train_regress(&task).unwrap();
+
+    let cal_features = array![[2.5], [4.5], [6.5], [7.5]];
+    let cal_targets = vec![5.0, 9.0, 13.0, 15.0];
+
+    let via_model =
+        ConformalRegressor::calibrate(&*model, &cal_features, &cal_targets, 0.2).unwrap();
+
+    let cal_pred = match model.predict(&cal_features).unwrap() {
+        Prediction::Regression { predicted, .. } => predicted,
+        _ => panic!("expected regression"),
+    };
+    let via_preds =
+        SplitConformal::calibrate_from_predictions(&cal_pred, &cal_targets, 0.2).unwrap();
+
+    assert_eq!(via_model.interval_width(), via_preds.interval_width());
+
+    let test_pred = vec![3.0, 7.0];
+    let intervals = via_preds.intervals_for(&test_pred);
+    assert_eq!(intervals.len(), 2);
+    assert_eq!(intervals[0].prediction, 3.0);
+    assert!((intervals[0].upper - intervals[0].lower - 2.0 * via_preds.interval_width()).abs() < 1e-12);
+}
+
+/// Mismatched calibration lengths must be a clean error, not a silent
+/// zip-truncation (4th audit LOW).
+#[test]
+fn split_conformal_rejects_mismatched_lengths() {
+    use smelt_ml::conformal::SplitConformal;
+    let err = SplitConformal::calibrate_from_predictions(&[1.0, 2.0, 3.0], &[1.0, 2.0], 0.1);
+    assert!(err.is_err());
+}
+
+/// End-to-end spatial conformalization — the exact composition the PM2.5
+/// handoff asked for: KrigingHybrid's real predictor is predict_spatial
+/// (needs coords, so ConformalRegressor can't drive it); SplitConformal
+/// calibrates from its outputs and the intervals achieve near-nominal
+/// coverage on spatially structured data.
+#[test]
+fn split_conformal_calibrates_kriging_predict_spatial() {
+    use smelt_ml::conformal::SplitConformal;
+
+    // Deterministic spatially-structured field: y = x0 + smooth(coords) + noise
+    let n = 300;
+    let mk = |i: usize| {
+        let x = (i % 20) as f64;
+        let y = (i / 20) as f64;
+        (x, y)
+    };
+    let coords_all: Vec<(f64, f64)> = (0..n).map(mk).collect();
+    let features_all = Array2::from_shape_fn((n, 1), |(i, _)| (i as f64 * 0.13).sin() * 2.0);
+    let target_all: Vec<f64> = (0..n)
+        .map(|i| {
+            let (cx, cy) = coords_all[i];
+            features_all[[i, 0]] * 3.0
+                + (cx * 0.3).sin() + (cy * 0.4).cos()          // spatial signal
+                + ((i as f64 * 12.9898).sin() * 0.2)           // pseudo-noise
+        })
+        .collect();
+
+    // 150 train / 75 calibration / 75 test
+    let (tr, rest) = (0..150usize, 150..n);
+    let cal: Vec<usize> = rest.clone().step_by(2).collect();
+    let te: Vec<usize> = rest.skip(1).step_by(2).collect();
+
+    let tr_idx: Vec<usize> = tr.collect();
+    let sel = |idx: &[usize]| {
+        (
+            features_all.select(Axis(0), idx).to_owned(),
+            idx.iter().map(|&i| target_all[i]).collect::<Vec<f64>>(),
+            idx.iter().map(|&i| coords_all[i]).collect::<Vec<(f64, f64)>>(),
+        )
+    };
+    let (tr_f, tr_t, tr_c) = sel(&tr_idx);
+    let (cal_f, cal_t, cal_c) = sel(&cal);
+    let (te_f, te_t, te_c) = sel(&te);
+
+    let task = RegressionTask::new("spatial_cf", tr_f, tr_t).unwrap();
+    let mut kh = KrigingHybrid::new(|| Box::new(LinearRegression::new()), tr_c);
+    let model = kh.train_regress_geo(&task).unwrap();
+
+    let cal_pred = match model.predict_spatial(&cal_f, &cal_c).unwrap() {
+        Prediction::Regression { predicted, .. } => predicted,
+        _ => panic!("expected regression"),
+    };
+    let sc = SplitConformal::calibrate_from_predictions(&cal_pred, &cal_t, 0.1).unwrap();
+
+    let te_pred = match model.predict_spatial(&te_f, &te_c).unwrap() {
+        Prediction::Regression { predicted, .. } => predicted,
+        _ => panic!("expected regression"),
+    };
+    let intervals = sc.intervals_for(&te_pred);
+    let covered = intervals
+        .iter()
+        .zip(&te_t)
+        .filter(|(iv, t)| **t >= iv.lower && **t <= iv.upper)
+        .count();
+    let coverage = covered as f64 / te_t.len() as f64;
+    assert!(
+        coverage >= 0.80,
+        "90%-nominal spatial conformal intervals should cover >=80% empirically \
+         on {} test points, got {coverage:.2}",
+        te_t.len()
+    );
+    assert!(sc.interval_width().is_finite());
+}
 
 #[test]
 fn conformal_regression_coverage() {

@@ -60,16 +60,40 @@ pub struct ConformalSet {
 /// ```
 pub struct ConformalRegressor<'a> {
     model: &'a dyn TrainedModel,
+    calibration: SplitConformal,
+}
+
+/// Model-free split-conformal calibration, computed from predictions the
+/// caller already made.
+///
+/// This is the calibration path for learners whose prediction needs more
+/// than a feature matrix — [`ConformalRegressor::calibrate`] drives a
+/// `&dyn TrainedModel`, but the trait carries no coordinates, so the
+/// spatial learners' real predictors (`TrainedKrigingHybrid::predict_spatial`,
+/// `TrainedGeoXGBoost::predict_spatial`) can't be conformalized through it.
+/// With `SplitConformal` the caller computes the calibration predictions
+/// however it likes and wraps any future predictions in calibrated
+/// intervals:
+///
+/// ```no_run
+/// use smelt_ml::conformal::SplitConformal;
+///
+/// # fn demo(cal_pred: Vec<f64>, cal_tgt: Vec<f64>, test_pred: Vec<f64>) -> smelt_ml::Result<()> {
+/// // cal_pred came from e.g. predict_spatial(cal_features, cal_coords)
+/// let sc = SplitConformal::calibrate_from_predictions(&cal_pred, &cal_tgt, 0.1)?;
+/// let intervals = sc.intervals_for(&test_pred);
+/// # Ok(())
+/// # }
+/// ```
+pub struct SplitConformal {
     quantile_residual: f64, // calibration quantile of |y - ŷ|
 }
 
-impl<'a> ConformalRegressor<'a> {
-    /// Calibrate the conformal predictor on a held-out calibration set.
-    ///
-    /// `alpha` is the miscoverage level (e.g., 0.1 for 90% coverage).
-    pub fn calibrate(
-        model: &'a dyn TrainedModel,
-        cal_features: &Array2<f64>,
+impl SplitConformal {
+    /// Calibrate from precomputed calibration-set predictions and their
+    /// true targets. `alpha` is the miscoverage level (0.1 → 90% coverage).
+    pub fn calibrate_from_predictions(
+        cal_predictions: &[f64],
         cal_targets: &[f64],
         alpha: f64,
     ) -> Result<Self> {
@@ -81,19 +105,15 @@ impl<'a> ConformalRegressor<'a> {
         if cal_targets.is_empty() {
             return Err(crate::SmeltError::EmptyDataset);
         }
-
-        let pred = model.predict(cal_features)?;
-        let predicted = match &pred {
-            Prediction::Regression { predicted, .. } => predicted,
-            _ => {
-                return Err(crate::SmeltError::IncompatiblePrediction(
-                    "Expected regression prediction".into(),
-                ));
-            }
-        };
+        if cal_predictions.len() != cal_targets.len() {
+            return Err(crate::SmeltError::DimensionMismatch {
+                expected: cal_targets.len(),
+                got: cal_predictions.len(),
+            });
+        }
 
         // Compute absolute residuals
-        let mut residuals: Vec<f64> = predicted
+        let mut residuals: Vec<f64> = cal_predictions
             .iter()
             .zip(cal_targets)
             .map(|(p, t)| (p - t).abs())
@@ -113,10 +133,49 @@ impl<'a> ConformalRegressor<'a> {
             residuals[q_rank - 1]
         };
 
-        Ok(Self {
-            model,
-            quantile_residual,
-        })
+        Ok(Self { quantile_residual })
+    }
+
+    /// Wrap point predictions in the calibrated ± interval.
+    pub fn intervals_for(&self, predictions: &[f64]) -> Vec<ConformalInterval> {
+        predictions
+            .iter()
+            .map(|&p| ConformalInterval {
+                prediction: p,
+                lower: p - self.quantile_residual,
+                upper: p + self.quantile_residual,
+            })
+            .collect()
+    }
+
+    /// The calibrated interval width (±).
+    pub fn interval_width(&self) -> f64 {
+        self.quantile_residual
+    }
+}
+
+impl<'a> ConformalRegressor<'a> {
+    /// Calibrate the conformal predictor on a held-out calibration set.
+    ///
+    /// `alpha` is the miscoverage level (e.g., 0.1 for 90% coverage).
+    pub fn calibrate(
+        model: &'a dyn TrainedModel,
+        cal_features: &Array2<f64>,
+        cal_targets: &[f64],
+        alpha: f64,
+    ) -> Result<Self> {
+        let pred = model.predict(cal_features)?;
+        let predicted = match &pred {
+            Prediction::Regression { predicted, .. } => predicted,
+            _ => {
+                return Err(crate::SmeltError::IncompatiblePrediction(
+                    "Expected regression prediction".into(),
+                ));
+            }
+        };
+        let calibration =
+            SplitConformal::calibrate_from_predictions(predicted, cal_targets, alpha)?;
+        Ok(Self { model, calibration })
     }
 
     /// Predict with conformal intervals.
@@ -130,20 +189,12 @@ impl<'a> ConformalRegressor<'a> {
                 ));
             }
         };
-
-        Ok(predicted
-            .iter()
-            .map(|&p| ConformalInterval {
-                prediction: p,
-                lower: p - self.quantile_residual,
-                upper: p + self.quantile_residual,
-            })
-            .collect())
+        Ok(self.calibration.intervals_for(predicted))
     }
 
     /// The calibrated interval width (±).
     pub fn interval_width(&self) -> f64 {
-        self.quantile_residual
+        self.calibration.interval_width()
     }
 }
 

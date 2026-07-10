@@ -76,7 +76,7 @@ pub mod prelude {
     };
     pub use crate::cluster::{ClusterResult, DBSCAN, IsolationForest, KMeans};
     pub use crate::conformal::{
-        ConformalClassifier, ConformalInterval, ConformalRegressor, ConformalSet,
+        ConformalClassifier, ConformalInterval, ConformalRegressor, ConformalSet, SplitConformal,
         cqr::{CQR, CQRInterval},
     };
     pub use crate::data::CsvLoader;
@@ -109,6 +109,7 @@ pub mod prelude {
     };
     pub use crate::resample::{
         CrossValidation, GroupCV, Holdout, Resample, SpatialBlockCV, SpatialBufferCV, StratifiedCV,
+        TimeSeriesCV,
     };
     pub use crate::serialize::{SerializableModel, load_json, save_json};
     pub use crate::sparse::CsrMatrix;

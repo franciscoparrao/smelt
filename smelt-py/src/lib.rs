@@ -42,7 +42,7 @@ use measures::{
 };
 use preprocess::{Smote, SpatialSmote, StandardScaler};
 use py_stats::{bootstrap_ci, sign_test, wilcoxon_signed_rank};
-use resample::{CrossValidation, GroupCV, SpatialBlockCV, SpatialBufferCV, StratifiedCV};
+use resample::{CrossValidation, GroupCV, SpatialBlockCV, SpatialBufferCV, StratifiedCV, TimeSeriesCV};
 use tuning::PyBayesianOptimizer;
 
 #[pymodule]
@@ -110,6 +110,7 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SpatialBufferCV>()?;
     m.add_class::<StratifiedCV>()?;
     m.add_class::<GroupCV>()?;
+    m.add_class::<TimeSeriesCV>()?;
 
     // Measures
     m.add_function(wrap_pyfunction!(accuracy_score, m)?)?;

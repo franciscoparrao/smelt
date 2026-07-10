@@ -46,6 +46,22 @@ the 4th audit (`docs/auditoria_motor_2026-07-10.md`).
 
 ### Added
 
+- `TimeSeriesCV` — rolling-origin / walk-forward cross-validation for
+  time-ordered data (expanding or sliding training window, forecast
+  `horizon`, `step`, optional `gap` embargo). In the prelude and bound in
+  smelt-py. Covers walk-forward validation (e.g. the PM2.5 case study's
+  temporal track) the way SpatialBlockCV/SpatialBufferCV cover spatial
+  leakage.
+- `SplitConformal` — split-conformal calibration from precomputed
+  predictions (`calibrate_from_predictions` + `intervals_for`), so models
+  whose predictor needs more than features (KrigingHybrid/GeoXGBoost
+  `predict_spatial`) get calibrated intervals end-to-end.
+  `ConformalRegressor` now delegates to it and both reject
+  mismatched calibration lengths instead of silently zip-truncating.
+- `examples/pm25_spatial_loso.rs` + `data/pm25_santiago_spatial.csv` —
+  PM2.5 Santiago case study: Regression Kriging under Leave-One-Station-Out
+  CV with conformal intervals calibrated against the kriging model (see
+  `docs/pm25_spatial_handoff.md`).
 - `Pipeline::with_resampler(...)`: SMOTE/ADASYN as a pipeline stage,
   applied only during `train_classif` (never at predict; regression
   pipelines with a resampler are rejected).

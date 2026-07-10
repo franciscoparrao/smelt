@@ -146,3 +146,47 @@ impl GroupCV {
     }
 }
 
+
+// ── TimeSeriesCV ───────────────────────────────────────────────────────
+
+#[pyclass]
+pub(crate) struct TimeSeriesCV {
+    inner: smelt_ml::prelude::TimeSeriesCV,
+}
+
+#[pymethods]
+impl TimeSeriesCV {
+    /// Rolling-origin (walk-forward) CV for time-ordered data: every split
+    /// trains strictly on the past and tests on the next `horizon` samples.
+    /// Rows are assumed sorted by time (index 0 = oldest).
+    ///
+    /// `min_train_size`/`step` default to `horizon` (contiguous test
+    /// windows); `max_window` switches to a sliding training window of that
+    /// size; `gap` leaves an embargo between train end and test start.
+    #[new]
+    #[pyo3(signature = (horizon, min_train_size=None, step=None, max_window=None, gap=0))]
+    fn new(
+        horizon: usize,
+        min_train_size: Option<usize>,
+        step: Option<usize>,
+        max_window: Option<usize>,
+        gap: usize,
+    ) -> Self {
+        let mut inner = smelt_ml::prelude::TimeSeriesCV::new(horizon).with_gap(gap);
+        if let Some(m) = min_train_size {
+            inner = inner.with_min_train_size(m);
+        }
+        if let Some(s) = step {
+            inner = inner.with_step(s);
+        }
+        if let Some(w) = max_window {
+            inner = inner.with_sliding_window(w);
+        }
+        Self { inner }
+    }
+
+    fn splits(&self, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {
+        use smelt_ml::prelude::Resample;
+        self.inner.splits(n_samples).map_err(smelt_err)
+    }
+}
