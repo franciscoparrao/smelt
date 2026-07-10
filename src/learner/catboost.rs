@@ -541,6 +541,7 @@ pub struct TrainedCatBoost {
     /// single encoding computed from the raw class *index* as if it were a
     /// continuous/ordinal target conflated unrelated nominal classes into
     /// one meaningless "average class index" statistic).
+    #[serde(with = "cat_encodings_serde", default)]
     pub(crate) cat_encodings: Vec<HashMap<usize, HashMap<i64, f64>>>,
     /// Target prior used as the fallback encoding for categories never seen
     /// during training (audit issue M3: they used to pass through as raw codes
@@ -550,6 +551,54 @@ pub struct TrainedCatBoost {
     /// 0.0 for every class; retrain to get the real priors).
     #[serde(default)]
     pub(crate) prior: Vec<f64>,
+}
+
+/// serde adapter: (de)serializes `cat_encodings` as sorted vecs of pairs
+/// instead of nested JSON objects. Both map levels have integer keys
+/// (`usize` column index, `i64` category code), which JSON stores as
+/// strings; `SerializableModel`'s internally-tagged enum buffers the
+/// payload through serde's `Content` representation, which cannot turn a
+/// string key back into an integer on any deserialization path — so a
+/// CatBoost model trained with `cat_features` saved fine but could never
+/// be loaded (same bug class as HoeffdingTree's `feature_stats`). Models
+/// without categorical features serialize an empty vec and are unaffected.
+mod cat_encodings_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+
+    type Encodings = Vec<HashMap<usize, HashMap<i64, f64>>>;
+
+    pub fn serialize<S: Serializer>(v: &Encodings, s: S) -> Result<S::Ok, S::Error> {
+        let as_pairs: Vec<Vec<(usize, Vec<(i64, f64)>)>> = v
+            .iter()
+            .map(|by_col| {
+                let mut cols: Vec<(usize, Vec<(i64, f64)>)> = by_col
+                    .iter()
+                    .map(|(&col, by_cat)| {
+                        let mut cats: Vec<(i64, f64)> =
+                            by_cat.iter().map(|(&c, &enc)| (c, enc)).collect();
+                        cats.sort_by_key(|(c, _)| *c);
+                        (col, cats)
+                    })
+                    .collect();
+                cols.sort_by_key(|(col, _)| *col);
+                cols
+            })
+            .collect();
+        as_pairs.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Encodings, D::Error> {
+        let as_pairs = Vec::<Vec<(usize, Vec<(i64, f64)>)>>::deserialize(d)?;
+        Ok(as_pairs
+            .into_iter()
+            .map(|cols| {
+                cols.into_iter()
+                    .map(|(col, cats)| (col, cats.into_iter().collect()))
+                    .collect()
+            })
+            .collect())
+    }
 }
 
 impl TrainedCatBoost {

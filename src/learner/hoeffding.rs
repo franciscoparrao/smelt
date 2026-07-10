@@ -276,6 +276,7 @@ enum HNode {
         counts: Vec<usize>, // class counts
         n_seen: usize,
         depth: usize,
+        #[serde(with = "stats_map_serde")]
         feature_stats: HashMap<usize, FeatureStats>,
     },
     Split {
@@ -284,6 +285,37 @@ enum HNode {
         left: Box<HNode>,
         right: Box<HNode>,
     },
+}
+
+/// serde adapter: (de)serializes `feature_stats` as a sorted vec of pairs
+/// instead of a JSON object. JSON object keys are strings, and
+/// `SerializableModel`'s internally-tagged enum makes serde buffer the
+/// payload through its `Content` representation, which cannot convert a
+/// string key back into a `usize` on ANY deserialization path — so every
+/// saved HoeffdingTree/AdaptiveRandomForest file was unloadable
+/// (`invalid type: string "0", expected usize`). Pairs sidestep string
+/// keys entirely; sorting keeps the on-disk output deterministic.
+mod stats_map_serde {
+    use super::FeatureStats;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+
+    pub fn serialize<S: Serializer>(
+        m: &HashMap<usize, FeatureStats>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut pairs: Vec<(&usize, &FeatureStats)> = m.iter().collect();
+        pairs.sort_by_key(|(k, _)| **k);
+        pairs.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<HashMap<usize, FeatureStats>, D::Error> {
+        Ok(Vec::<(usize, FeatureStats)>::deserialize(d)?
+            .into_iter()
+            .collect())
+    }
 }
 
 impl HNode {

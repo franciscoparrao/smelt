@@ -19,7 +19,10 @@ ndarray = { version = "0.16", features = ["serde"] }
 rand = "0.9"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# float_roundtrip: without it serde_json's float PARSING can be off by a few
+# ulps, so a saved model's weights (and therefore its predictions) silently
+# drift across a save/load roundtrip — caught by tests/serialize_all_variants.rs.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 csv = "1"
 rayon = "1.10"
 polars = { version = "0.54.4", default-features = false, features = ["parquet"], optional = true }

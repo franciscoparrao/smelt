@@ -252,8 +252,9 @@ struct ModelFileRef<'a> {
 
 #[derive(Deserialize)]
 struct ModelFile {
-    format_version: u32,
-    smelt_version: String,
+    // format_version / smelt_version are validated on the raw Value in
+    // `load_json` before this typed decode runs, so only the payload is
+    // declared here.
     model: SerializableModel,
 }
 
@@ -294,17 +295,32 @@ pub fn load_json(path: impl AsRef<Path>) -> Result<SerializableModel> {
                 .into(),
         ));
     }
-    let file: ModelFile =
-        serde_json::from_value(raw).map_err(|e| SmeltError::Json(e.to_string()))?;
-    if file.format_version != SERIALIZATION_FORMAT_VERSION {
+    // Check the format version on the raw Value BEFORE the typed decode, so
+    // a file from a different format fails with the version message rather
+    // than whatever opaque serde error its unknown layout happens to hit.
+    let file_version = raw.get("format_version").and_then(|v| v.as_u64());
+    if file_version != Some(SERIALIZATION_FORMAT_VERSION as u64) {
+        let written_by = raw
+            .get("smelt_version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         return Err(SmeltError::Json(format!(
             "model file has serialization format version {}, this build of smelt-ml ({}) expects version {} (file was written by smelt-ml {})",
-            file.format_version,
+            file_version.map_or_else(|| "non-integer".to_string(), |v| v.to_string()),
             env!("CARGO_PKG_VERSION"),
             SERIALIZATION_FORMAT_VERSION,
-            file.smelt_version,
+            written_by,
         )));
     }
+    // Decode from the original text rather than re-using the `raw` Value
+    // (one less lossy indirection). Note this alone does NOT make integer
+    // map keys work: `SerializableModel` is internally tagged, so serde
+    // buffers the payload through its `Content` representation on any path
+    // — structs with integer-keyed maps must serialize them as vecs of
+    // pairs instead (see HoeffdingTree's `stats_map_serde` and CatBoost's
+    // `cat_encodings_serde`).
+    let file: ModelFile =
+        serde_json::from_str(&json).map_err(|e| SmeltError::Json(e.to_string()))?;
     Ok(file.model)
 }
 

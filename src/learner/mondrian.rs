@@ -185,8 +185,29 @@ enum MondrianNodeKind {
 struct MondrianNode {
     min_d: Vec<f64>,
     max_d: Vec<f64>,
+    #[serde(with = "tau_serde")]
     tau: f64,
     kind: MondrianNodeKind,
+}
+
+/// serde adapter for `tau`, which is `f64::INFINITY` at every leaf when the
+/// tree uses the default unlimited `lifetime`. JSON has no infinity:
+/// serde_json silently writes non-finite floats as `null`, which the plain
+/// `f64` deserializer then rejects — so without this adapter every model
+/// saved with the default lifetime produced a file `load_json` could never
+/// read back. Encodes non-finite as an explicit `null` and decodes `null`
+/// back to `INFINITY`, which also recovers files written before the adapter
+/// existed.
+mod tau_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
+        if v.is_finite() { s.serialize_f64(*v) } else { s.serialize_none() }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+        Ok(Option::<f64>::deserialize(d)?.unwrap_or(f64::INFINITY))
+    }
 }
 
 impl MondrianNode {
