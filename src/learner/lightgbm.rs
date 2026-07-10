@@ -26,7 +26,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::eval::{EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress};
-use super::histogram::{HistBins, NAN_BIN, best_categorical_split};
+use super::histogram::{HistBins, NAN_BIN, accumulate_histogram, best_categorical_split, best_numeric_split};
 
 /// LightGBM-inspired leaf-wise GBM with GOSS sampling.
 ///
@@ -374,25 +374,7 @@ fn build_leaf_hist(
 ) -> LeafHist {
     col_indices
         .par_iter()
-        .map(|&feat| {
-            let nb = bins.boundaries[feat].len();
-            let mut bg = vec![0.0; nb];
-            let mut bh = vec![0.0; nb];
-            let mut ng = 0.0;
-            let mut nh = 0.0;
-            for &idx in indices {
-                let b = bins.get_bin(feat, idx);
-                let w = weights[idx];
-                if b == NAN_BIN {
-                    ng += grads[idx] * w;
-                    nh += hess[idx] * w;
-                } else {
-                    bg[b as usize] += grads[idx] * w;
-                    bh[b as usize] += hess[idx] * w;
-                }
-            }
-            (bg, bh, ng, nh)
-        })
+        .map(|&feat| accumulate_histogram(bins, feat, grads, hess, Some(weights), indices))
         .collect()
 }
 
@@ -426,7 +408,6 @@ fn find_best_from_cache(
         .enumerate()
         .map(|(fi, &feat)| {
             let (bin_g, bin_h, nan_g, nan_h) = &cached[fi];
-            let nb = bin_g.len();
 
             if bins.cat[feat].is_some() {
                 return best_categorical_split(
@@ -447,41 +428,14 @@ fn find_best_from_cache(
                 });
             }
 
-            let total_g: f64 = bin_g.iter().sum::<f64>() + nan_g;
-            let total_h: f64 = bin_h.iter().sum::<f64>() + nan_h;
-            let mut best_gain = 0.0;
-            let mut best: Option<(usize, f64, bool)> = None;
-
-            let (mut gl, mut hl) = (0.0, 0.0);
-            for bin in 0..nb.saturating_sub(1) {
-                gl += bin_g[bin];
-                hl += bin_h[bin];
-                let (gr, hr) = (total_g - gl, total_h - hl);
-                if hl < min_child_weight || hr < min_child_weight {
-                    continue;
-                }
-                let gain = split_gain(gl, hl, gr, hr, lambda);
-                if gain > best_gain {
-                    best_gain = gain;
-                    best = Some((bin, gain, false));
-                }
-            }
-            if *nan_h > 0.0 {
-                let (mut gl, mut hl) = (*nan_g, *nan_h);
-                for bin in 0..nb.saturating_sub(1) {
-                    gl += bin_g[bin];
-                    hl += bin_h[bin];
-                    let (gr, hr) = (total_g - gl, total_h - hl);
-                    if hl < min_child_weight || hr < min_child_weight {
-                        continue;
-                    }
-                    let gain = split_gain(gl, hl, gr, hr, lambda);
-                    if gain > best_gain {
-                        best_gain = gain;
-                        best = Some((bin, gain, true));
-                    }
-                }
-            }
+            let best = best_numeric_split(
+                bin_g,
+                bin_h,
+                *nan_g,
+                *nan_h,
+                min_child_weight,
+                |gl, hl, gr, hr| Some(split_gain(gl, hl, gr, hr, lambda)),
+            );
             best.map(|(bin, gain, nan_left)| LeafCandidate {
                 gain,
                 feature: feat,

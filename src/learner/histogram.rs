@@ -201,6 +201,105 @@ pub(crate) fn best_categorical_split(
     })
 }
 
+/// Accumulate one feature's per-bin gradient/hessian histogram from a set of
+/// node indices — shared by XGBoost's histogram mode
+/// (`xgboost.rs::find_best_histogram_saving`) and LightGBM's
+/// `build_leaf_hist`; previously duplicated inline in both (and again, with
+/// `f32` bins for memory bandwidth, in CatBoost's `scan_partition_hists` —
+/// deliberately left as its own copy, not merged here, since that `f32`
+/// choice was a measured performance trade-off, see
+/// `docs/fase3_progreso.md`). NaN-valued samples accumulate into a separate
+/// `(nan_g, nan_h)` pair rather than a bin, since which side NaN routes to
+/// is decided at split time, not baked into the bin layout. `weights`, when
+/// set, multiplies each sample's gradient/hessian contribution (LightGBM's
+/// GOSS resampling weight; XGBoost has no such per-sample multiplier here).
+pub(crate) fn accumulate_histogram(
+    bins: &HistBins,
+    feat: usize,
+    grads: &[f64],
+    hess: &[f64],
+    weights: Option<&[f64]>,
+    indices: &[usize],
+) -> (Vec<f64>, Vec<f64>, f64, f64) {
+    let nb = bins.n_bins(feat);
+    let mut bin_g = vec![0.0; nb];
+    let mut bin_h = vec![0.0; nb];
+    let mut nan_g = 0.0;
+    let mut nan_h = 0.0;
+    for &idx in indices {
+        let b = bins.get_bin(feat, idx);
+        let w = weights.map_or(1.0, |w| w[idx]);
+        if b == NAN_BIN {
+            nan_g += grads[idx] * w;
+            nan_h += hess[idx] * w;
+        } else {
+            bin_g[b as usize] += grads[idx] * w;
+            bin_h[b as usize] += hess[idx] * w;
+        }
+    }
+    (bin_g, bin_h, nan_g, nan_h)
+}
+
+/// Optimal numeric split via a left-to-right scan of bin boundaries, trying
+/// NaN mass as the default direction on both sides — shared by XGBoost's
+/// histogram mode (`xgboost.rs::find_best_histogram_saving`) and LightGBM's
+/// cached-histogram search (`lightgbm.rs::find_best_from_cache`); previously
+/// duplicated inline in both with only the gain computation differing.
+///
+/// `gain_fn` scores a candidate split's `(gl, hl, gr, hr)` gradient/hessian
+/// sums, or returns `None` to reject it outright (XGBoost's monotone-
+/// constraint check; LightGBM has no such rejection and always returns
+/// `Some`). Returns `(bin_index, gain, nan_goes_left)` for the best
+/// strictly-positive-gain split, or `None`.
+pub(crate) fn best_numeric_split(
+    bin_g: &[f64],
+    bin_h: &[f64],
+    nan_g: f64,
+    nan_h: f64,
+    min_child_weight: f64,
+    gain_fn: impl Fn(f64, f64, f64, f64) -> Option<f64>,
+) -> Option<(usize, f64, bool)> {
+    let nb = bin_g.len();
+    let total_g: f64 = bin_g.iter().sum::<f64>() + nan_g;
+    let total_h: f64 = bin_h.iter().sum::<f64>() + nan_h;
+    let mut best_gain = 0.0;
+    let mut best: Option<(usize, f64, bool)> = None;
+
+    let (mut gl, mut hl) = (0.0, 0.0);
+    for bin in 0..nb.saturating_sub(1) {
+        gl += bin_g[bin];
+        hl += bin_h[bin];
+        let (gr, hr) = (total_g - gl, total_h - hl);
+        if hl < min_child_weight || hr < min_child_weight {
+            continue;
+        }
+        if let Some(gain) = gain_fn(gl, hl, gr, hr)
+            && gain > best_gain
+        {
+            best_gain = gain;
+            best = Some((bin, gain, false));
+        }
+    }
+    if nan_h > 0.0 {
+        let (mut gl, mut hl) = (nan_g, nan_h);
+        for bin in 0..nb.saturating_sub(1) {
+            gl += bin_g[bin];
+            hl += bin_h[bin];
+            let (gr, hr) = (total_g - gl, total_h - hl);
+            if hl < min_child_weight || hr < min_child_weight {
+                continue;
+            }
+            if let Some(gain) = gain_fn(gl, hl, gr, hr)
+                && gain > best_gain
+            {
+                best_gain = gain;
+                best = Some((bin, gain, true));
+            }
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

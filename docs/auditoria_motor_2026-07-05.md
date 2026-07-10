@@ -506,4 +506,53 @@ Python), M19 restante (dtype/heurística int→classif).
       EarlyStopper en XGBoost), TreeBuilder O(n²), single-source de versión
       smelt-py.
 
+    **✅ Duplicación (scanner, EarlyStopper) RESUELTA 2026-07-09 — train_binary/multiclass evaluada y descartada deliberadamente**:
+    - **EarlyStopper en XGBoost**: sus 3 métodos (`train_regress`,
+      `train_binary`, `train_multiclass`) reimplementaban inline la misma
+      bitácora `(best_loss, no_improve, best_n)` + comparación + truncate-y-
+      break que `EarlyStopper` (`src/learner/eval.rs`) ya encapsula y que
+      LightGBM/CatBoost ya usaban — la única razón documentada para no
+      usarlo era que XGBoost también pesa la loss por `sample_weight`, pero
+      eso vive en el cómputo de `loss` (sin tocar), no en `EarlyStopper`
+      mismo. Reemplazadas las 3 copias por `EarlyStopper::new(...)` +
+      `.update(loss, n_trees)`, sin cambiar ningún cómputo de loss.
+    - **"scanner ×5"**: los 3 loops de acumulación de histograma
+      (`find_best_histogram_saving` en XGBoost, `build_leaf_hist` en
+      LightGBM) y las 2 funciones de escaneo-de-histograma-con-gain-
+      cerrado (mismo `find_best_histogram_saving`, `find_best_from_cache`
+      en LightGBM) eran estructuralmente idénticas salvo por el cierre de
+      gain (XGBoost aplica `violates_monotone` antes de puntuar; LightGBM
+      no tiene esa restricción) — extraídas a `accumulate_histogram`/
+      `best_numeric_split` en `src/learner/histogram.rs`, junto a
+      `best_categorical_split` (mismo patrón de cierre `gain_fn` ya
+      establecido ahí). CatBoost's `scan_partition_hists` (bins `f32`,
+      no `f64`) se dejó como copia propia deliberadamente: el `f32` fue
+      una decisión de performance medida (item 16d, `docs/fase3_progreso.md`,
+      45.5% del tiempo de CatBoost en acumulación de histograma), no un
+      descuido — forzar un helper compartido habría revertido esa
+      optimización sin motivo.
+    - **"train_binary/multiclass ×4" — evaluado, NO unificado**: al
+      revisar el código real (no solo el resumen de la auditoría), la
+      duplicación restante entre `train_binary`/`train_multiclass` dentro
+      de cada motor (LightGBM, CatBoost) resultó ser más delgada de lo que
+      sugería el shorthand original — la parte genuinamente repetida (la
+      bitácora de early-stopping) ya quedó resuelta arriba. Lo que queda
+      no es boilerplate copy-paste: `fv` es escalar-por-muestra en binario
+      vs. vector-por-muestra en multiclase (softmax uno-contra-todos, un
+      árbol por clase por ronda), y CatBoost además computa una
+      codificación de target-statistics y bins de histograma DISTINTOS
+      por clase en multiclase (ver M4, ya resuelto) vs. una sola en
+      binario. Unificar esto en una abstracción compartida exigiría
+      generalizar sigmoid+logloss y softmax+cross-entropy bajo el mismo
+      código, o forzar el caso escalar como "multiclase con nc=1" — el
+      tipo de reescritura matemática que arriesga alterar sutilmente las
+      predicciones de los 3 motores insignia sin un bug activo que lo
+      motive. Mismo criterio que TreeBuilder O(n²): documentado y
+      diferido, no ejecutado a la fuerza.
+    - Verificado: suite completa verde (213 lib + 286 integración + 74
+      doctests) tras cada sub-paso (EarlyStopper, luego scanner), 0 fallos,
+      0 warnings nuevos de clippy (verificado explícitamente — la
+      extracción de `accumulate_histogram` generó 3 warnings
+      `needless_borrow` transitorios, corregidos antes de este commit).
+
 **Reglas de proceso que esta auditoría reafirma**: (1) ningún ítem se declara cerrado en un doc de progreso sin commit verificable que lo toque — el falso cierre de `subsample` sobrevivió una auditoría entera; (2) todo módulo numérico nuevo entra con al menos un golden test contra scipy/sklearn o una reimplementación independiente — los 2 HIGH estadísticos de esta ronda vivían en los únicos rincones sin referencia; (3) los tests de comportamiento deben ser discriminantes (fallar contra la implementación rota) — el test de cost_sensitive pasa con un no-op.

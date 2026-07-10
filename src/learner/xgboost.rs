@@ -16,9 +16,9 @@ use rand::seq::SliceRandom;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::eval::{EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress};
+use super::eval::{EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress};
 use super::hist_pool::HistPool;
-use super::histogram::{HistBins, NAN_BIN, best_categorical_split};
+use super::histogram::{HistBins, NAN_BIN, accumulate_histogram, best_categorical_split, best_numeric_split};
 
 /// Regression objective: defines the per-sample gradient/hessian the trees
 /// fit, the initial prediction, and the output transform.
@@ -747,22 +747,8 @@ impl<'a> XGBTreeBuilder<'a> {
             .col_indices
             .par_iter()
             .map(|&feat| {
-                let nb = self.bins.n_bins(feat);
-                let mut bin_g = vec![0.0; nb];
-                let mut bin_h = vec![0.0; nb];
-                let mut nan_g = 0.0;
-                let mut nan_h = 0.0;
-
-                for &idx in node_indices {
-                    let b = self.bins.get_bin(feat, idx);
-                    if b == NAN_BIN {
-                        nan_g += self.grads[idx];
-                        nan_h += self.hess[idx];
-                    } else {
-                        bin_g[b as usize] += self.grads[idx];
-                        bin_h[b as usize] += self.hess[idx];
-                    }
-                }
+                let (bin_g, bin_h, nan_g, nan_h) =
+                    accumulate_histogram(self.bins, feat, self.grads, self.hess, None, node_indices);
 
                 if self.bins.cat[feat].is_some() {
                     let split = best_categorical_split(
@@ -784,47 +770,20 @@ impl<'a> XGBTreeBuilder<'a> {
                     return (split, (bin_g, bin_h, nan_g, nan_h));
                 }
 
-                let total_g: f64 = bin_g.iter().sum::<f64>() + nan_g;
-                let total_h: f64 = bin_h.iter().sum::<f64>() + nan_h;
-                let mut best_gain = 0.0;
-                let mut best: Option<(usize, f64, bool)> = None;
-
-                let (mut gl, mut hl) = (0.0, 0.0);
-                for bin in 0..nb.saturating_sub(1) {
-                    gl += bin_g[bin];
-                    hl += bin_h[bin];
-                    let (gr, hr) = (total_g - gl, total_h - hl);
-                    if hl < self.min_child_weight || hr < self.min_child_weight {
-                        continue;
-                    }
-                    if self.violates_monotone(feat, gl, hl, gr, hr) {
-                        continue;
-                    }
-                    let gain = self.split_gain(gl, hl, gr, hr);
-                    if gain > best_gain {
-                        best_gain = gain;
-                        best = Some((bin, gain, false));
-                    }
-                }
-                if nan_h > 0.0 {
-                    let (mut gl, mut hl) = (nan_g, nan_h);
-                    for bin in 0..nb.saturating_sub(1) {
-                        gl += bin_g[bin];
-                        hl += bin_h[bin];
-                        let (gr, hr) = (total_g - gl, total_h - hl);
-                        if hl < self.min_child_weight || hr < self.min_child_weight {
-                            continue;
-                        }
+                let best = best_numeric_split(
+                    &bin_g,
+                    &bin_h,
+                    nan_g,
+                    nan_h,
+                    self.min_child_weight,
+                    |gl, hl, gr, hr| {
                         if self.violates_monotone(feat, gl, hl, gr, hr) {
-                            continue;
+                            None
+                        } else {
+                            Some(self.split_gain(gl, hl, gr, hr))
                         }
-                        let gain = self.split_gain(gl, hl, gr, hr);
-                        if gain > best_gain {
-                            best_gain = gain;
-                            best = Some((bin, gain, true));
-                        }
-                    }
-                }
+                    },
+                );
 
                 let split = best.map(|(bin, gain, nan_left)| BestSplit {
                     feature: feat,
@@ -1241,7 +1200,7 @@ impl Learner for XGBoost {
         let mut trees = Vec::with_capacity(self.n_estimators);
         let mut imp = vec![0.0; nf];
         let mut rng = StdRng::seed_from_u64(self.seed);
-        let (mut best_loss, mut no_improve, mut best_n) = (f64::INFINITY, 0usize, 0usize);
+        let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for round in 0..self.n_estimators {
             let (mut grads, mut hess): (Vec<f64>, Vec<f64>) = preds
@@ -1273,7 +1232,7 @@ impl Learner for XGBoost {
             }
             trees.push(tree);
 
-            if self.early_stopping_rounds > 0 {
+            if stopper.is_active() {
                 // Evaluate on the held-out set when one was provided —
                 // training loss is (near-)monotonically decreasing under
                 // boosting and rarely plateaus, so it's a poor early-stopping
@@ -1306,16 +1265,9 @@ impl Learner for XGBoost {
                         }
                     }
                 };
-                if loss < best_loss - 1e-10 {
-                    best_loss = loss;
-                    best_n = round + 1;
-                    no_improve = 0;
-                } else {
-                    no_improve += 1;
-                    if no_improve >= self.early_stopping_rounds {
-                        trees.truncate(best_n);
-                        break;
-                    }
+                if let Some(best_n) = stopper.update(loss, round + 1) {
+                    trees.truncate(best_n);
+                    break;
                 }
             }
         }
@@ -1379,7 +1331,7 @@ impl XGBoost {
         let mut trees = Vec::with_capacity(self.n_estimators);
         let mut imp = vec![0.0; nf];
         let mut rng = StdRng::seed_from_u64(self.seed);
-        let (mut best_loss, mut no_improve, mut best_n) = (f64::INFINITY, 0usize, 0usize);
+        let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for round in 0..self.n_estimators {
             let mut grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
@@ -1413,7 +1365,7 @@ impl XGBoost {
             }
             trees.push(tree);
 
-            if self.early_stopping_rounds > 0 {
+            if stopper.is_active() {
                 let eps = 1e-15;
                 // Evaluate on the held-out set when one was provided —
                 // training loss rarely plateaus under boosting.
@@ -1441,16 +1393,9 @@ impl XGBoost {
                         None => (0..ns).map(per_point).sum::<f64>() / ns as f64,
                     }
                 };
-                if loss < best_loss - 1e-10 {
-                    best_loss = loss;
-                    best_n = round + 1;
-                    no_improve = 0;
-                } else {
-                    no_improve += 1;
-                    if no_improve >= self.early_stopping_rounds {
-                        trees.truncate(best_n);
-                        break;
-                    }
+                if let Some(best_n) = stopper.update(loss, round + 1) {
+                    trees.truncate(best_n);
+                    break;
                 }
             }
         }
@@ -1507,7 +1452,7 @@ impl XGBoost {
         let mut trees = Vec::with_capacity(self.n_estimators * nc);
         let mut imp = vec![0.0; nf];
         let mut rng = StdRng::seed_from_u64(self.seed);
-        let (mut best_loss, mut no_improve, mut best_n) = (f64::INFINITY, 0usize, 0usize);
+        let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for round in 0..self.n_estimators {
             let probs: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
@@ -1541,7 +1486,7 @@ impl XGBoost {
                 }
                 trees.push(tree);
             }
-            if self.early_stopping_rounds > 0 {
+            if stopper.is_active() {
                 let eps = 1e-15;
                 // Evaluate on the held-out set when one was provided —
                 // training loss rarely plateaus under boosting.
@@ -1562,16 +1507,9 @@ impl XGBoost {
                         None => (0..ns).map(per_point).sum::<f64>() / ns as f64,
                     }
                 };
-                if loss < best_loss - 1e-10 {
-                    best_loss = loss;
-                    best_n = (round + 1) * nc;
-                    no_improve = 0;
-                } else {
-                    no_improve += 1;
-                    if no_improve >= self.early_stopping_rounds {
-                        trees.truncate(best_n);
-                        break;
-                    }
+                if let Some(best_n) = stopper.update(loss, (round + 1) * nc) {
+                    trees.truncate(best_n);
+                    break;
                 }
             }
         }
