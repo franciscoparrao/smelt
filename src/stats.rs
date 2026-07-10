@@ -336,6 +336,9 @@ pub fn friedman_test(scores: &[&[f64]]) -> Result<FriedmanResult> {
     // Rank within each fold (1 = best, k = worst)
     // For "higher is better" metrics, invert: rank 1 = highest score
     let mut rank_sums = vec![0.0; k];
+    // Sum of (t^3 - t) over every tie group of size t, across folds -- the
+    // input to the tie-correction factor below.
+    let mut tie_sum = 0.0;
 
     for j in 0..n {
         let mut indexed: Vec<(usize, f64)> = (0..k).map(|i| (i, scores[i][j])).collect();
@@ -352,6 +355,8 @@ pub fn friedman_test(scores: &[&[f64]]) -> Result<FriedmanResult> {
             for idx in i..end {
                 rank_sums[indexed[idx].0] += avg_rank;
             }
+            let t = (end - i) as f64;
+            tie_sum += t * t * t - t;
             i = end;
         }
     }
@@ -363,7 +368,23 @@ pub fn friedman_test(scores: &[&[f64]]) -> Result<FriedmanResult> {
     let n_f = n as f64;
     let sum_r2: f64 = rank_sums.iter().map(|r| r * r).sum();
 
-    let chi2 = 12.0 / (n_f * k_f * (k_f + 1.0)) * sum_r2 - 3.0 * n_f * (k_f + 1.0);
+    let mut chi2 = 12.0 / (n_f * k_f * (k_f + 1.0)) * sum_r2 - 3.0 * n_f * (k_f + 1.0);
+
+    // Tie correction (Iman & Davenport / scipy's friedmanchisquare):
+    // dividing by c = 1 - sum(t^3 - t) / (n * k * (k^2 - 1)) restores the
+    // statistic's scale when average ranks are used for ties. Without it
+    // the statistic is systematically too small whenever folds contain
+    // tied scores -- the common case for discrete metrics like accuracy --
+    // making the test conservative exactly in this crate's headline use
+    // (audit M-9: 3 models x 6 folds with ties gave p=0.0155 vs scipy's
+    // 0.0083). c = 0 only when every fold is one full tie group, i.e. no
+    // evidence of any difference: report chi2 = 0 rather than 0/0.
+    let c = 1.0 - tie_sum / (n_f * k_f * (k_f * k_f - 1.0));
+    if c > f64::EPSILON {
+        chi2 /= c;
+    } else {
+        chi2 = 0.0;
+    }
 
     // p-value from chi-squared distribution with k-1 degrees of freedom
     let df = k_f - 1.0;
@@ -876,6 +897,37 @@ mod tests {
         );
         // XGBoost should have the best (lowest) average rank
         assert!(result.avg_ranks[2] < result.avg_ranks[0]);
+    }
+
+    /// Golden vs scipy 1.16 `friedmanchisquare` (4th audit, M-9): tied
+    /// scores within folds -- the norm for discrete metrics like accuracy --
+    /// require the tie-correction factor `1 - sum(t^3-t)/(n*k*(k^2-1))`.
+    /// Without it the statistic was systematically too small (conservative
+    /// p exactly in this crate's model-comparison use case).
+    #[test]
+    fn friedman_tie_correction_matches_scipy() {
+        // With ties: scipy gives stat=9.578947368421048, p=0.00831683351100447
+        let a = vec![0.90, 0.85, 0.90, 0.80, 0.85, 0.90];
+        let b = vec![0.90, 0.80, 0.85, 0.80, 0.80, 0.85];
+        let c = vec![0.85, 0.80, 0.80, 0.75, 0.80, 0.85];
+        let r = friedman_test(&[&a, &b, &c]).unwrap();
+        assert!((r.statistic - 9.578947368421048).abs() < 1e-9, "stat {}", r.statistic);
+        assert!((r.p_value - 0.00831683351100447).abs() < 1e-9, "p {}", r.p_value);
+
+        // Without ties the correction is a no-op: scipy stat=12.0,
+        // p=0.002478752176666357
+        let a = vec![0.91, 0.85, 0.92, 0.81, 0.86, 0.93];
+        let b = vec![0.90, 0.80, 0.85, 0.80, 0.80, 0.85];
+        let c = vec![0.85, 0.79, 0.80, 0.75, 0.78, 0.84];
+        let r = friedman_test(&[&a, &b, &c]).unwrap();
+        assert!((r.statistic - 12.0).abs() < 1e-9, "stat {}", r.statistic);
+        assert!((r.p_value - 0.002478752176666357).abs() < 1e-9, "p {}", r.p_value);
+
+        // Fully tied everywhere: c = 0; report no evidence instead of 0/0.
+        let flat = vec![0.5, 0.5, 0.5];
+        let r = friedman_test(&[&flat, &flat, &flat]).unwrap();
+        assert_eq!(r.statistic, 0.0);
+        assert!(!r.significant);
     }
 
     #[test]
