@@ -135,6 +135,21 @@ fn class_counts(
     counts
 }
 
+/// Number of classes actually observed in truth or predictions -- the
+/// denominator for macro averages. Dividing by `n_classes()` (max+1)
+/// instead would count phantom classes for any gap in the label ids
+/// (labels {0, 2} -> 3 "classes", one all-zero), deflating macro
+/// Precision/Recall/F1 relative to sklearn, which averages over the union
+/// of observed labels only (audit M-10; realistic in CV folds that lose an
+/// intermediate class). A `(0,0,0)` row occurs exactly iff the label never
+/// appears in either vector, so filtering them recovers sklearn's set.
+fn n_observed(counts: &[(usize, usize, usize)]) -> usize {
+    counts
+        .iter()
+        .filter(|&&(tp, fp, fn_)| tp + fp + fn_ > 0)
+        .count()
+}
+
 // ── Classification metrics ──────────────────────────────────────────
 
 /// Macro-averaged precision.
@@ -161,15 +176,16 @@ impl Measure for Precision {
                 // (not just the ones with a defined precision) -- a class the
                 // model never predicts contributes 0, matching sklearn's
                 // `zero_division=0` convention. Averaging over only the
-                // "valid" (defined) classes instead (the old behavior)
-                // silently drops the worst classes from the denominator,
-                // inflating the score of degenerate classifiers (e.g. one
-                // that always predicts the majority class).
+                // "valid" (defined) classes instead silently drops the worst
+                // classes from the denominator, inflating degenerate
+                // classifiers; averaging over max(label)+1 instead counts
+                // phantom gap classes, deflating the score (see n_observed).
                 let sum: f64 = counts
                     .iter()
                     .map(|&(tp, fp, _)| if tp + fp > 0 { tp as f64 / (tp + fp) as f64 } else { 0.0 })
                     .sum();
-                Ok(if nc > 0 { sum / nc as f64 } else { 0.0 })
+                let denom = n_observed(&counts);
+                Ok(if denom > 0 { sum / denom as f64 } else { 0.0 })
             }
             _ => Err(SmeltError::IncompatiblePrediction(
                 "Precision requires classification prediction with truth".into(),
@@ -198,13 +214,14 @@ impl Measure for Recall {
             } => {
                 let nc = n_classes(predicted, truth);
                 let counts = class_counts(predicted, truth, nc);
-                // See Precision::score for why the average is over all `nc`
-                // classes, not just the ones with a defined recall.
+                // See Precision::score: average over observed classes, not
+                // just defined-recall ones and not phantom gap classes.
                 let sum: f64 = counts
                     .iter()
                     .map(|&(tp, _, fn_)| if tp + fn_ > 0 { tp as f64 / (tp + fn_) as f64 } else { 0.0 })
                     .sum();
-                Ok(if nc > 0 { sum / nc as f64 } else { 0.0 })
+                let denom = n_observed(&counts);
+                Ok(if denom > 0 { sum / denom as f64 } else { 0.0 })
             }
             _ => Err(SmeltError::IncompatiblePrediction(
                 "Recall requires classification prediction with truth".into(),
@@ -233,11 +250,12 @@ impl Measure for F1Score {
             } => {
                 let nc = n_classes(predicted, truth);
                 let counts = class_counts(predicted, truth, nc);
-                // See Precision::score for why the average is over all `nc`
-                // classes: a class with undefined precision AND recall (never
-                // predicted and never true -- impossible here since `nc` only
-                // spans observed labels, but a class that's never predicted
-                // contributes F1=0) still counts in the denominator.
+                // See Precision::score: average over observed classes. A
+                // class that's never predicted but appears in truth still
+                // contributes F1=0 to the average; a label id that appears
+                // in NEITHER vector (a gap) is excluded from the denominator
+                // -- the old comment claimed gaps were impossible here, but
+                // n_classes() spans 0..=max, so they weren't (audit M-10).
                 let sum: f64 = counts
                     .iter()
                     .map(|&(tp, fp, fn_)| {
@@ -246,7 +264,8 @@ impl Measure for F1Score {
                         if prec + rec > 0.0 { 2.0 * prec * rec / (prec + rec) } else { 0.0 }
                     })
                     .sum();
-                Ok(if nc > 0 { sum / nc as f64 } else { 0.0 })
+                let denom = n_observed(&counts);
+                Ok(if denom > 0 { sum / denom as f64 } else { 0.0 })
             }
             _ => Err(SmeltError::IncompatiblePrediction(
                 "F1 requires classification prediction with truth".into(),

@@ -2652,6 +2652,24 @@ fn save_load_json_file() {
 
 // ── Precision / Recall / F1 tests ──────────────────────────────────
 
+/// Regression test (4th audit, M-10): with gapped label ids the macro
+/// averages used to divide by max(label)+1 — labels {0, 2} created a
+/// phantom class 1 with all-zero counts, deflating Precision/Recall/F1 by
+/// ~33% here (sklearn averages over the union of observed labels only).
+/// Realistic whenever a CV fold loses an intermediate class. Goldens
+/// verified against sklearn 1.8 (`average='macro'`).
+#[test]
+fn macro_measures_ignore_phantom_gap_classes() {
+    let truth = vec![0, 2, 0, 2];
+    let predicted = vec![0, 2, 2, 2];
+    let pred = Prediction::classification_with_truth(predicted, truth);
+
+    // class 0: prec 1/1, rec 1/2; class 2: prec 2/3, rec 2/2
+    assert!((Precision.score(&pred).unwrap() - 0.8333333333333333).abs() < 1e-12);
+    assert!((Recall.score(&pred).unwrap() - 0.75).abs() < 1e-12);
+    assert!((F1Score.score(&pred).unwrap() - 0.7333333333333334).abs() < 1e-12);
+}
+
 #[test]
 fn precision_perfect() {
     let pred = Prediction::classification_with_truth(vec![0, 1, 1, 0], vec![0, 1, 1, 0]);
