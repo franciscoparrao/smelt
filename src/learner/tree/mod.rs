@@ -364,6 +364,12 @@ impl TreeBuilder {
     ) -> Option<(usize, f64, Vec<usize>, Vec<usize>, f64)> {
         let parent_mse = mse(target, indices);
         let n = indices.len() as f64;
+        // Center the running sums on the node mean: variance is
+        // shift-invariant, but accumulating E[y²]−E[y]² on raw targets with
+        // a large additive offset (UTM coordinates ~1e6-1e7, timestamps)
+        // cancels catastrophically — eps·offset² reaches the magnitude of
+        // the true variance and split gains become rounding noise.
+        let shift = indices.iter().map(|&i| target[i]).sum::<f64>() / n;
         let mut best_gain = 0.0;
         let mut best = None;
 
@@ -415,13 +421,13 @@ impl TreeBuilder {
             let mut right_sum = 0.0;
             let mut right_sq = 0.0;
             for &idx in &sorted {
-                let y = target[idx];
+                let y = target[idx] - shift;
                 right_sum += y;
                 right_sq += y * y;
             }
 
             for i in 1..sorted.len() {
-                let y = target[sorted[i - 1]];
+                let y = target[sorted[i - 1]] - shift;
                 left_sum += y;
                 left_sq += y * y;
                 right_sum -= y;
@@ -504,7 +510,10 @@ fn gini_from_counts(counts: &[usize], n: f64) -> f64 {
 /// [`TreeBuilder::best_split_regress`]'s incremental sweep. The standard
 /// CART/scikit-learn formula (`E[y²] - E[y]²`); `.max(0.0)` guards against a
 /// tiny negative value from floating-point cancellation when the true
-/// variance is at or near zero.
+/// variance is at or near zero. The caller must accumulate `sum`/`sum_sq`
+/// over targets centered on the node mean: on raw values this formula
+/// cancels catastrophically once `mean² · f64::EPSILON` approaches the true
+/// variance (offsets ≳1e6 for unit-scale spread).
 fn mse_from_sums(sum: f64, sum_sq: f64, n: f64) -> f64 {
     if n <= 0.0 {
         return 0.0;
@@ -665,5 +674,45 @@ mod tests {
         // Parent MSE is variance of {0,0,0,10,10,10} = 25; a perfect split
         // (both children constant) should recover essentially all of it.
         assert!(gain > 24.9, "a perfect split should recover ~all of the parent's mse: {gain}");
+    }
+
+    /// Regression test for the catastrophic-cancellation follow-up to the
+    /// O(n²) fix: the incremental sweep accumulates E[y²]−E[y]² and, on raw
+    /// targets carrying a large additive offset (UTM northing ~7e6,
+    /// timestamps ~1e9), eps·offset² swamps the true variance and split
+    /// gains become rounding noise. The sums must therefore be centered on
+    /// the node mean, making the found split independent of the offset.
+    #[test]
+    fn best_split_regress_is_invariant_to_large_target_offsets() {
+        use ndarray::Array2;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+
+        let n = 400;
+        let features =
+            Array2::from_shape_fn((n, 1), |(i, _)| i as f64 / n as f64 * 10.0);
+        let base: Vec<f64> = (0..n)
+            .map(|i| {
+                let x = features[[i, 0]];
+                // Step signal + deterministic pseudo-noise, unit scale.
+                let step = if x < 5.0 { 0.0 } else { 4.0 };
+                step + 0.3 * ((i as f64 * 12.9898).sin())
+            })
+            .collect();
+        let indices: Vec<usize> = (0..n).collect();
+        let builder = TreeBuilder::new(None, 2, 1, None, 1);
+
+        for offset in [0.0, 1e6, 1e8] {
+            let target: Vec<f64> = base.iter().map(|y| y + offset).collect();
+            let mut rng = StdRng::seed_from_u64(0);
+            let (feat, threshold, ..) = builder
+                .best_split_regress(&features.view(), &target, &indices, &[0], &mut rng)
+                .expect("a clear step function must find a split");
+            assert_eq!(feat, 0);
+            assert!(
+                (threshold - 5.0).abs() < 0.1,
+                "offset {offset:e}: the split must stay at the step (x≈5), got {threshold}"
+            );
+        }
     }
 }
