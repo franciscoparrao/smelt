@@ -156,10 +156,17 @@ pub type ParamSpace = HashMap<String, ParamDistribution>;
 /// Sample one `ParamSet` from `space` — shared by `RandomSearch`,
 /// `BayesianOptimizer` (initial/random rounds), and `Hyperband`, which
 /// previously each duplicated this same match-on-`ParamDistribution` logic.
+///
+/// Keys are sorted before drawing (same convention as `cartesian_product`):
+/// iterating the `HashMap` directly would assign the RNG's draws to
+/// parameters in `RandomState` order, which differs per process -- so the
+/// same seed produced different configurations across runs, breaking the
+/// reproducibility `with_seed` promises.
 pub(crate) fn sample_param_space(space: &ParamSpace, rng: &mut impl Rng) -> ParamSet {
-    space
-        .iter()
-        .map(|(name, dist)| (name.clone(), sample_one(dist, rng)))
+    let mut keys: Vec<&String> = space.keys().collect();
+    keys.sort();
+    keys.into_iter()
+        .map(|name| (name.clone(), sample_one(&space[name], rng)))
         .collect()
 }
 
@@ -273,4 +280,39 @@ pub(crate) fn cartesian_product(grid: &ParamGrid) -> Vec<ParamSet> {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    /// Regression test (4th audit, HIGH-6): the draw→parameter assignment
+    /// must not depend on `HashMap` iteration order (per-process
+    /// `RandomState`), or the same seed samples different configurations
+    /// across runs. Two spaces with identical distributions but different
+    /// insertion orders and capacities must sample identically.
+    #[test]
+    fn sample_param_space_is_independent_of_hashmap_iteration_order() {
+        let names: Vec<String> = (0..10).map(|i| format!("param_{i}")).collect();
+
+        let mut space_a = ParamSpace::new();
+        for (i, n) in names.iter().enumerate() {
+            space_a.insert(n.clone(), ParamDistribution::Uniform(0.0, (i + 1) as f64));
+        }
+        let mut space_b = ParamSpace::with_capacity(512);
+        for (i, n) in names.iter().enumerate().rev() {
+            space_b.insert(n.clone(), ParamDistribution::Uniform(0.0, (i + 1) as f64));
+        }
+
+        let sampled_a = sample_param_space(&space_a, &mut StdRng::seed_from_u64(42));
+        let sampled_b = sample_param_space(&space_b, &mut StdRng::seed_from_u64(42));
+        for n in &names {
+            assert_eq!(
+                sampled_a[n], sampled_b[n],
+                "{n}: same seed must assign the same draw regardless of map layout"
+            );
+        }
+    }
 }

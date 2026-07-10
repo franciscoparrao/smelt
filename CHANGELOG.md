@@ -6,6 +6,86 @@ Versions are tracked independently per this workspace's existing
 convention: the Rust crate follows its own semver, the Python bindings
 follow their own (currently a minor/patch cadence).
 
+## [Unreleased]
+
+Accumulates everything on master since 2.0.1/0.5.1: the Fase F closures
+of the 3rd audit (2026-07-05 → 2026-07-09) and the Fase G remediation of
+the 4th audit (`docs/auditoria_motor_2026-07-10.md`).
+
+### Breaking changes (Rust crate — next release must be smelt-ml 3.0)
+
+- `ParamSet` is now `HashMap<String, ParamValue>` instead of
+  `HashMap<String, f64>`, and `ParamGrid`/`ParamDistribution::Choice`
+  carry `ParamValue` (typed `Float`/`Int`/`Str`/`Bool`) instead of `f64`.
+  User code doing `params["k"] as usize` must switch to
+  `params["k"].as_usize()` (or match on the variant). This is the driver
+  for the next major bump.
+
+### Changed — numerical results
+
+- `RandomSearch`/`Hyperband`/`BayesianOptimizer` with a fixed seed now
+  assign RNG draws to parameters in sorted-key order instead of `HashMap`
+  iteration order. Previously the same seed sampled **different
+  configurations in different processes** (the reproducibility
+  `with_seed` documents was never actually delivered); sampled
+  configurations change once relative to any earlier run.
+- `stats::mcnemar_test`/`friedman_test`: the chi-squared upper tail is
+  now computed with the standard series/continued-fraction split in
+  log-space (goldens vs scipy). Previously p collapsed to ≈1 for
+  chi² ≳ 300 — "not significant" exactly when evidence was overwhelming —
+  and could go slightly negative.
+- `stats::sign_test`: binomial CDF in log-space; previously overflowed to
+  a silent p=1.0 for n ≳ 1030.
+- `survival::concordance_index`: unordered pairs counted once; tied event
+  times with both events contribute 0.5. Previously ties were counted in
+  both directions, dragging the C-index toward 0.5.
+- `DecisionTree`/`RandomForest` regression: split search now centers its
+  running sums on the node mean. Targets carrying a large additive offset
+  (UTM northing ~7e6, timestamps) degraded up to ~40× in RMSE under the
+  incremental sweep introduced post-2.0.1.
+
+### Added
+
+- `Pipeline::with_resampler(...)`: SMOTE/ADASYN as a pipeline stage,
+  applied only during `train_classif` (never at predict; regression
+  pipelines with a resampler are rejected).
+- Model persistence for the streaming learners actually works now (see
+  Fixed) and is covered by an executed save/load roundtrip test for every
+  `SerializableModel` variant.
+- `validate::check_coords_finite`, used by `KrigingHybrid`/`GeoXGBoost`
+  train/predict entry points.
+- smelt-py: model save/load (`save`/`load` methods), KMeans/DBSCAN/
+  IsolationForest bindings, `CsvLoader`.
+
+### Fixed
+
+- Model files written by `MondrianTree`/`MondrianForest` (default
+  lifetime), `HoeffdingTree`, `AdaptiveRandomForest`, and CatBoost with
+  `cat_features` were **unloadable** (save succeeded, load always
+  failed). Infinite `tau` now roundtrips as an explicit null (old broken
+  Mondrian files become readable); integer-keyed maps serialize as pairs.
+  serde_json's `float_roundtrip` feature is now enabled: without it,
+  reloaded weights drifted by ulps and predictions were not bit-identical
+  across a save/load cycle.
+- A single non-finite coordinate made `KrigingHybrid` return all-NaN
+  predictions silently and `GeoXGBoost` panic the process; both now
+  return a clean error naming the offending index.
+- `Pipeline::train_classif` and `Smote`/`Adasyn`/`SpatialSmote::balance`
+  dropped `class_names`/`feature_names`/`feature_types`: probability rows
+  narrowed when a split lost the highest class (panicking under
+  `Stacking`/`DynamicEnsemble` with a `Pipeline` base), and resampled
+  pipelines renamed features to `x0/x1/...` in selector output and
+  importances.
+- `TreeBuilder` split search is incremental (single sweep) instead of
+  rescanning per threshold — ~29× faster RandomForest regression fits at
+  n=5000 (superlinear before), with bit-identical classification splits.
+- LightGBM `subsample` was accepted and ignored; real row bagging now
+  composes with GOSS (note: the official implementation makes them
+  mutually exclusive instead).
+- CatBoost multiclass target statistics are computed per class
+  (one-vs-rest) instead of from the raw class index; zero-gain splits
+  stop tree growth; GBM classification leaves get a Newton step.
+
 ## [smelt-ml 2.0.1] / [smelt-py 0.5.1] - 2026-07-05
 
 ### Fixed

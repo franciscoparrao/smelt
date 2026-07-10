@@ -199,8 +199,11 @@ impl BayesianOptimizer {
         let good_indices: Vec<usize> = sorted[..n_good].iter().map(|(i, _)| *i).collect();
         let bad_indices: Vec<usize> = sorted[n_good..].iter().map(|(i, _)| *i).collect();
 
-        // For each parameter, collect good and bad values
-        let param_names: Vec<String> = self.param_space.keys().cloned().collect();
+        // For each parameter, collect good and bad values. Sorted so the
+        // KDE candidate draws consume the RNG in a process-independent
+        // order (same reproducibility fix as sample_param_space).
+        let mut param_names: Vec<String> = self.param_space.keys().cloned().collect();
+        param_names.sort();
 
         // Sample n_candidates from l(x), pick the one with best l(x)/g(x)
         let mut best_params = self.sample_random(rng);
