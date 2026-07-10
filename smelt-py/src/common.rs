@@ -573,18 +573,21 @@ macro_rules! define_learner {
 
             /// Load a previously saved model from a JSON file. `is_classif` must
             /// match how the model was originally trained -- the saved file
-            /// carries no such flag of its own. Hyperparameters revert to
-            /// placeholder defaults; only the fitted state (predictions, feature
-            /// importances) is restored -- refit to recover the original
-            /// `get_params()` values.
+            /// carries no such flag of its own. Hyperparameters reset to the
+            /// CONSTRUCTOR defaults (the file doesn't store them): a refit
+            /// behaves like a fresh default-constructed learner, not like the
+            /// (unknown) original configuration -- call `set_params` first to
+            /// restore yours.
             #[staticmethod]
             #[pyo3(signature = (path, is_classif=false))]
             fn load(path: &str, is_classif: bool) -> pyo3::PyResult<Self> {
-                Ok(Self {
-                    trained: Some(crate::common::load_model_checked(path, $serial_as)?),
-                    is_classif,
-                    ..Default::default()
-                })
+                // Constructor defaults, NOT Default::default(): the derived
+                // Default zeroes every field, so a refit after load trained
+                // silently with e.g. n_estimators=0 (audit M-16).
+                let mut inst = Self::new( $( $default ),* );
+                inst.trained = Some(crate::common::load_model_checked(path, $serial_as)?);
+                inst.is_classif = is_classif;
+                Ok(inst)
             }
         }
 
@@ -757,18 +760,39 @@ macro_rules! add_persistence_methods {
 
                 /// Load a previously saved model from a JSON file. `is_classif`
                 /// must match how the model was originally trained -- the saved
-                /// file carries no such flag of its own. Hyperparameters revert
-                /// to placeholder defaults; only the fitted state (predictions,
-                /// feature importances) is restored -- refit to recover the
-                /// original `get_params()` values.
+                /// file carries no such flag of its own. Hyperparameters reset
+                /// to the CONSTRUCTOR defaults (the file doesn't store them): a
+                /// refit behaves like a fresh default-constructed learner, not
+                /// like the (unknown) original configuration -- call
+                /// `set_params` first to restore yours.
                 #[staticmethod]
                 #[pyo3(signature = (path, is_classif=false))]
-                fn load(path: &str, is_classif: bool) -> pyo3::PyResult<Self> {
-                    Ok(Self {
-                        trained: Some(crate::common::load_model_checked(path, $serial_as)?),
-                        is_classif,
-                        ..Default::default()
-                    })
+                fn load(
+                    py: pyo3::Python<'_>,
+                    path: &str,
+                    is_classif: bool,
+                ) -> pyo3::PyResult<pyo3::Py<Self>> {
+                    // Validate the file first so a type mismatch keeps its
+                    // clear error, then build the instance through the
+                    // PYTHON constructor: `Default::default()` zeroes every
+                    // field, so a refit after load trained silently with
+                    // e.g. n_estimators=0 or failed on objective ""
+                    // (audit M-16). call0() applies the real signature
+                    // defaults instead.
+                    let model = crate::common::load_model_checked(path, $serial_as)?;
+                    let obj = py.get_type::<Self>().call0()?;
+                    {
+                        let bound = obj.downcast::<Self>().map_err(|e| {
+                            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+                        })?;
+                        let mut slf = bound.borrow_mut();
+                        slf.trained = Some(model);
+                        slf.is_classif = is_classif;
+                    }
+                    Ok(obj
+                        .downcast_into::<Self>()
+                        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+                        .unbind())
                 }
             }
         )+
