@@ -270,44 +270,83 @@ impl TreeBuilder {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
-            let split_points: Vec<usize> = if self.random_splits {
-                // Extra Trees: one random threshold per feature
+            if self.random_splits {
+                // Extra Trees: one random threshold per feature -- already a
+                // single candidate, so the O(n) gini(left)/gini(right) scan
+                // below isn't the O(n²) hot path (that's the "all valid split
+                // points" branch, rewritten below to sweep incrementally).
                 let min_val = features[[sorted[0], feat]];
                 let max_val = features[[sorted[sorted.len() - 1], feat]];
                 if (max_val - min_val).abs() < f64::EPSILON {
                     continue;
                 }
                 let threshold = rng.random_range(min_val..max_val);
-                match sorted
+                let Some(pos @ 1..) = sorted
                     .iter()
                     .position(|&idx| features[[idx, feat]] > threshold)
-                {
-                    Some(pos) if pos > 0 => vec![pos],
-                    _ => continue,
-                }
-            } else {
-                // Standard: all valid split points
-                (1..sorted.len())
-                    .filter(|&i| {
-                        (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs()
-                            >= f64::EPSILON
-                    })
-                    .collect()
-            };
+                else {
+                    continue;
+                };
 
-            for i in split_points {
-                let left_idx = &sorted[..i];
-                let right_idx = &sorted[i..];
-
+                let left_idx = &sorted[..pos];
+                let right_idx = &sorted[pos..];
                 let gain = parent_gini
                     - (left_idx.len() as f64 / n) * gini(target, left_idx, n_classes)
                     - (right_idx.len() as f64 / n) * gini(target, right_idx, n_classes);
 
                 if gain > best_gain {
                     best_gain = gain;
+                    let threshold_mid =
+                        (features[[sorted[pos - 1], feat]] + features[[sorted[pos], feat]]) / 2.0;
+                    best = Some((feat, threshold_mid, left_idx.to_vec(), right_idx.to_vec(), gain));
+                }
+                continue;
+            }
+
+            // Standard: sweep left-to-right maintaining running per-class
+            // counts, so gini(left)/gini(right) at each candidate threshold
+            // is O(n_classes) instead of a full O(n) rescan of left_idx/
+            // right_idx -- the previous code recomputed both from scratch at
+            // every one of up to n-1 thresholds, making this loop O(n²) per
+            // feature/node (audit: "TreeBuilder O(n²)"). Moving one sample
+            // from right to left per step and updating counts incrementally
+            // gives the exact same counts (and hence the exact same gini
+            // values) as the old from-scratch computation, just without
+            // rescanning.
+            let mut left_counts = vec![0usize; n_classes];
+            let mut right_counts = vec![0usize; n_classes];
+            for &idx in &sorted {
+                right_counts[target[idx]] += 1;
+            }
+
+            for i in 1..sorted.len() {
+                let moved_class = target[sorted[i - 1]];
+                left_counts[moved_class] += 1;
+                right_counts[moved_class] -= 1;
+
+                if (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs()
+                    < f64::EPSILON
+                {
+                    continue;
+                }
+
+                let n_left = i as f64;
+                let n_right = n - n_left;
+                let gain = parent_gini
+                    - (n_left / n) * gini_from_counts(&left_counts, n_left)
+                    - (n_right / n) * gini_from_counts(&right_counts, n_right);
+
+                if gain > best_gain {
+                    best_gain = gain;
                     let threshold =
                         (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
-                    best = Some((feat, threshold, left_idx.to_vec(), right_idx.to_vec(), gain));
+                    best = Some((
+                        feat,
+                        threshold,
+                        sorted[..i].to_vec(),
+                        sorted[i..].to_vec(),
+                        gain,
+                    ));
                 }
             }
         }
@@ -336,42 +375,81 @@ impl TreeBuilder {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
-            let split_points: Vec<usize> = if self.random_splits {
+            if self.random_splits {
                 let min_val = features[[sorted[0], feat]];
                 let max_val = features[[sorted[sorted.len() - 1], feat]];
                 if (max_val - min_val).abs() < f64::EPSILON {
                     continue;
                 }
                 let threshold = rng.random_range(min_val..max_val);
-                match sorted
+                let Some(pos @ 1..) = sorted
                     .iter()
                     .position(|&idx| features[[idx, feat]] > threshold)
-                {
-                    Some(pos) if pos > 0 => vec![pos],
-                    _ => continue,
-                }
-            } else {
-                (1..sorted.len())
-                    .filter(|&i| {
-                        (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs()
-                            >= f64::EPSILON
-                    })
-                    .collect()
-            };
+                else {
+                    continue;
+                };
 
-            for i in split_points {
-                let left_idx = &sorted[..i];
-                let right_idx = &sorted[i..];
-
+                let left_idx = &sorted[..pos];
+                let right_idx = &sorted[pos..];
                 let gain = parent_mse
                     - (left_idx.len() as f64 / n) * mse(target, left_idx)
                     - (right_idx.len() as f64 / n) * mse(target, right_idx);
 
                 if gain > best_gain {
                     best_gain = gain;
+                    let threshold_mid =
+                        (features[[sorted[pos - 1], feat]] + features[[sorted[pos], feat]]) / 2.0;
+                    best = Some((feat, threshold_mid, left_idx.to_vec(), right_idx.to_vec(), gain));
+                }
+                continue;
+            }
+
+            // Standard: sweep left-to-right maintaining running sum/sum-of-
+            // squares, so mse(left)/mse(right) at each threshold is O(1)
+            // instead of an O(n) rescan -- same fix as best_split_classif's
+            // running counts, adapted to a continuous target (sum/sum_sq ->
+            // variance is the standard CART/scikit-learn incremental MSE
+            // formula, not specific to this crate).
+            let mut left_sum = 0.0;
+            let mut left_sq = 0.0;
+            let mut right_sum = 0.0;
+            let mut right_sq = 0.0;
+            for &idx in &sorted {
+                let y = target[idx];
+                right_sum += y;
+                right_sq += y * y;
+            }
+
+            for i in 1..sorted.len() {
+                let y = target[sorted[i - 1]];
+                left_sum += y;
+                left_sq += y * y;
+                right_sum -= y;
+                right_sq -= y * y;
+
+                if (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs()
+                    < f64::EPSILON
+                {
+                    continue;
+                }
+
+                let n_left = i as f64;
+                let n_right = n - n_left;
+                let gain = parent_mse
+                    - (n_left / n) * mse_from_sums(left_sum, left_sq, n_left)
+                    - (n_right / n) * mse_from_sums(right_sum, right_sq, n_right);
+
+                if gain > best_gain {
+                    best_gain = gain;
                     let threshold =
                         (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
-                    best = Some((feat, threshold, left_idx.to_vec(), right_idx.to_vec(), gain));
+                    best = Some((
+                        feat,
+                        threshold,
+                        sorted[..i].to_vec(),
+                        sorted[i..].to_vec(),
+                        gain,
+                    ));
                 }
             }
         }
@@ -406,6 +484,33 @@ pub(crate) fn mse(target: &[f64], indices: &[usize]) -> f64 {
         .map(|&i| (target[i] - mean).powi(2))
         .sum::<f64>()
         / indices.len() as f64
+}
+
+/// Gini impurity from pre-aggregated per-class counts, for `n` samples --
+/// equivalent to `gini(target, indices, n_classes)` but O(n_classes) instead
+/// of O(n), used by [`TreeBuilder::best_split_classif`]'s incremental sweep.
+fn gini_from_counts(counts: &[usize], n: f64) -> f64 {
+    if n <= 0.0 {
+        return 0.0;
+    }
+    1.0 - counts
+        .iter()
+        .map(|&c| (c as f64 / n).powi(2))
+        .sum::<f64>()
+}
+
+/// MSE (variance) from a running sum and sum-of-squares over `n` samples --
+/// equivalent to `mse(target, indices)` but O(1) instead of O(n), used by
+/// [`TreeBuilder::best_split_regress`]'s incremental sweep. The standard
+/// CART/scikit-learn formula (`E[y²] - E[y]²`); `.max(0.0)` guards against a
+/// tiny negative value from floating-point cancellation when the true
+/// variance is at or near zero.
+fn mse_from_sums(sum: f64, sum_sq: f64, n: f64) -> f64 {
+    if n <= 0.0 {
+        return 0.0;
+    }
+    let mean = sum / n;
+    (sum_sq / n - mean * mean).max(0.0)
 }
 
 pub(crate) fn classification_leaf(
@@ -459,5 +564,106 @@ mod tests {
         assert_eq!(MaxFeatures::Fraction(1.0).resolve(10, false), Some(10));
         // Values above 1.0 are clamped, not extrapolated past n_features.
         assert_eq!(MaxFeatures::Fraction(2.0).resolve(10, false), Some(10));
+    }
+
+    /// Regression test for the TreeBuilder O(n²) fix (audit
+    /// "TreeBuilder O(n²)"): `gini_from_counts` (used by the incremental
+    /// sweep) must equal the brute-force `gini()` for any partition, since
+    /// they're both computing the exact same quantity from the same
+    /// underlying per-class counts -- one incrementally, one by rescanning.
+    #[test]
+    fn gini_from_counts_matches_full_scan_gini() {
+        let target = vec![0usize, 1, 2, 0, 1, 1, 2, 0, 0, 2];
+        let n_classes = 3;
+        // Every possible split point of the sorted-by-index sample, i.e.
+        // every prefix/suffix pair -- exercises small and uneven counts.
+        for split in 1..target.len() {
+            let left: Vec<usize> = (0..split).collect();
+            let mut counts = vec![0usize; n_classes];
+            for &i in &left {
+                counts[target[i]] += 1;
+            }
+            let expected = gini(&target, &left, n_classes);
+            let actual = gini_from_counts(&counts, left.len() as f64);
+            assert!(
+                (expected - actual).abs() < 1e-12,
+                "split={split}: full-scan gini={expected}, from-counts gini={actual}"
+            );
+        }
+    }
+
+    /// Same equivalence check as above, for the regression (MSE) path.
+    #[test]
+    fn mse_from_sums_matches_full_scan_mse() {
+        let target = vec![1.0, 5.0, 3.0, 8.0, 2.0, 9.0, 4.0, 7.0, 6.0, 0.0];
+        for split in 1..target.len() {
+            let left: Vec<usize> = (0..split).collect();
+            let (sum, sq) = left.iter().fold((0.0, 0.0), |(s, sq), &i| {
+                (s + target[i], sq + target[i] * target[i])
+            });
+            let expected = mse(&target, &left);
+            let actual = mse_from_sums(sum, sq, left.len() as f64);
+            assert!(
+                (expected - actual).abs() < 1e-9,
+                "split={split}: full-scan mse={expected}, from-sums mse={actual}"
+            );
+        }
+    }
+
+    /// Golden test: a single feature with an obvious optimal split
+    /// (threshold between x=2 and x=3 perfectly separates the two classes)
+    /// must be found by the incrementally-swept `best_split_classif`, with
+    /// perfect (gini=0) children.
+    #[test]
+    fn best_split_classif_finds_the_hand_computed_optimal_split() {
+        use ndarray::array;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+
+        let features = array![[1.0], [2.0], [2.0], [3.0], [4.0], [4.0]];
+        let target = vec![0, 0, 0, 1, 1, 1];
+        let indices: Vec<usize> = (0..6).collect();
+        let builder = TreeBuilder::new(None, 2, 1, None, 1);
+        let mut rng = StdRng::seed_from_u64(0);
+
+        let (feat, threshold, left, right, gain) = builder
+            .best_split_classif(&features.view(), &target, &indices, 2, &[0], &mut rng)
+            .expect("an obviously separable dataset must find a split");
+
+        assert_eq!(feat, 0);
+        assert!(
+            (threshold - 2.5).abs() < 1e-9,
+            "expected the midpoint between x=2 and x=3, got {threshold}"
+        );
+        assert_eq!(left.len(), 3);
+        assert_eq!(right.len(), 3);
+        assert!(gain > 0.49, "a perfect split should recover ~all of the parent's gini: {gain}");
+    }
+
+    /// Same golden check for the regression (MSE) path: an obvious step
+    /// function must be split exactly at the step.
+    #[test]
+    fn best_split_regress_finds_the_hand_computed_optimal_split() {
+        use ndarray::array;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+
+        let features = array![[1.0], [2.0], [2.0], [3.0], [4.0], [4.0]];
+        let target = vec![0.0, 0.0, 0.0, 10.0, 10.0, 10.0];
+        let indices: Vec<usize> = (0..6).collect();
+        let builder = TreeBuilder::new(None, 2, 1, None, 1);
+        let mut rng = StdRng::seed_from_u64(0);
+
+        let (feat, threshold, left, right, gain) = builder
+            .best_split_regress(&features.view(), &target, &indices, &[0], &mut rng)
+            .expect("an obvious step function must find a split");
+
+        assert_eq!(feat, 0);
+        assert!((threshold - 2.5).abs() < 1e-9, "got {threshold}");
+        assert_eq!(left.len(), 3);
+        assert_eq!(right.len(), 3);
+        // Parent MSE is variance of {0,0,0,10,10,10} = 25; a perfect split
+        // (both children constant) should recover essentially all of it.
+        assert!(gain > 24.9, "a perfect split should recover ~all of the parent's mse: {gain}");
     }
 }

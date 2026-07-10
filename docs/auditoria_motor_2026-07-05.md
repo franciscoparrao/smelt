@@ -501,9 +501,9 @@ Python), M19 restante (dtype/heurística int→classif).
       `--features parquet` (build debug con fixture generada vía Rust/
       polars directo, sin depender de pyarrow/pandas en el venv). Suite
       completa verde (213 lib + 74 doctests) durante todo el trabajo.
-    - Quedan del punto 9 original: TreeBuilder O(n²), single-source de
-      versión smelt-py. (M10 ParamSet tipado, duplicación scanner/
-      EarlyStopper, y M18 resampler stage resueltos más abajo.)
+    - Queda del punto 9 original: single-source de versión smelt-py. (M10
+      ParamSet tipado, duplicación scanner/EarlyStopper, M18 resampler
+      stage, y TreeBuilder O(n²) resueltos más abajo.)
 
     **✅ Duplicación (scanner, EarlyStopper) RESUELTA 2026-07-09 — train_binary/multiclass evaluada y descartada deliberadamente**:
     - **EarlyStopper en XGBoost**: sus 3 métodos (`train_regress`,
@@ -633,5 +633,48 @@ bug real, no solo una limitación de expresividad.
   (conteos idénticos salvo los 3 tests nuevos), 0 warnings nuevos de
   clippy. Sin bindings de Python que tocar -- `Pipeline` no estaba
   expuesto en `smelt-py` en absoluto.
+
+**✅ TreeBuilder O(n²) RESUELTO 2026-07-10**: `TreeBuilder::best_split_classif`/
+`best_split_regress` (`src/learner/tree/mod.rs`, compartido por DecisionTree/
+RandomForest/ExtraTrees/GradientBoosting, y usado también desde
+`quantile.rs`/`ebm.rs`) ordenaba correctamente las muestras del nodo por
+feature una vez (`O(n log n)`, esa parte nunca fue el problema), pero para
+CADA uno de hasta `n-1` puntos de corte candidatos recomputaba `gini`/`mse`
+de `left_idx`/`right_idx` desde cero -- un escaneo `O(n)` × hasta `n`
+candidatos = **O(n²) por feature/nodo**, dominando el `O(n log n)` del
+sort. Confirmado que "subió de prioridad" tras el cambio que puso
+RandomForest/ExtraTrees de regresión a usar todas las features en vez de
+`sqrt(p)` por default (commit previo): 4× más features candidatas por
+split multiplica directamente ese `O(n²)` ya dominante.
+- Fix: barrido incremental de izquierda a derecha manteniendo agregados
+  corrientes en vez de recomputar desde cero en cada candidato --
+  exactamente el patrón "ordenar una vez, barrer una vez" que
+  `histogram.rs::best_numeric_split` ya usa en los motores de boosting
+  (mismo principio, aplicado por primera vez a la familia DT/RF/ET/GBM,
+  que nunca pasaba por `histogram.rs`). Clasificación: conteos por clase
+  corrientes (`gini_from_counts`, exacto -- son enteros, no hay deriva de
+  punto flotante). Regresión: suma y suma-de-cuadrados corrientes
+  (`mse_from_sums`, fórmula estándar CART/scikit-learn `E[y²] - E[y]²`,
+  no una invención de esta implementación). La rama `random_splits`
+  (Extra Trees, un único umbral aleatorio por feature) no se tocó --
+  nunca fue `O(n²)` al evaluar un solo candidato.
+- 4 tests nuevos: 2 confirman equivalencia numérica exacta entre
+  `gini_from_counts`/`mse_from_sums` y las funciones de escaneo completo
+  `gini`/`mse` originales (mismos conteos/sumas, deben dar el mismo
+  resultado bit a bit para clasificación, y dentro de 1e-9 para
+  regresión); 2 son golden tests con un split obviamente óptimo a mano
+  (un escalón perfecto en los datos), verificando que el barrido
+  incremental encuentra el mismo feature/threshold/ganancia que se
+  calcularía a mano.
+- **Medido, no solo razonado en Big-O**: benchmark descartable
+  (RandomForest, 10 árboles, 20 features todas candidatas, regresión) via
+  `git stash` del fix para medir antes/después con el mismo código
+  circundante. n=2,000: 1.32s → 0.14s (~9.6×). n=5,000: 6.47s → 0.43s
+  (~15×). n=10,000: 24.86s → 0.66s (~37.6×) -- el crecimiento
+  super-lineal del speedup con `n` es exactamente la firma de una
+  corrección `O(n²)`→`O(n log n)`, no una optimización de constante.
+- Verificado: 220 lib (216+4 nuevos) + 286 integración + 74 doctests
+  (conteos idénticos salvo los 4 tests nuevos), 0 warnings nuevos de
+  clippy.
 
 **Reglas de proceso que esta auditoría reafirma**: (1) ningún ítem se declara cerrado en un doc de progreso sin commit verificable que lo toque — el falso cierre de `subsample` sobrevivió una auditoría entera; (2) todo módulo numérico nuevo entra con al menos un golden test contra scipy/sklearn o una reimplementación independiente — los 2 HIGH estadísticos de esta ronda vivían en los únicos rincones sin referencia; (3) los tests de comportamiento deben ser discriminantes (fallar contra la implementación rota) — el test de cost_sensitive pasa con un no-op.
