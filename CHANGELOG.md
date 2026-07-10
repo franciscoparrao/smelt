@@ -75,6 +75,22 @@ the 4th audit (`docs/auditoria_motor_2026-07-10.md`).
 
 ### Fixed
 
+- CSV loaders reject missing ("NaN"/"NA"/empty) and non-finite target
+  values with an error naming the row, instead of silently training on
+  f64::NAN (regression) or label-encoding "NA" as a class
+  (classification). Missing values in features stay allowed.
+- Macro Precision/Recall/F1 average over the union of observed labels
+  (sklearn's convention) instead of 0..=max(label): gapped label ids no
+  longer deflate the scores via phantom all-zero classes.
+- `friedman_test` applies the tie-correction factor; tied scores within
+  folds no longer make the test conservative (goldens vs scipy).
+- smelt-py `benchmark()`: a misconfigured learner no longer aborts the
+  whole run (per-fold `_error` instead); regression targets get an rmse
+  default metric instead of crashing on accuracy; the classification
+  heuristic matches `fit()`'s dtype dispatch; `y` may be a plain list.
+- smelt-py `load()` resets hyperparameters to the constructor defaults
+  instead of zeroed placeholders — refit after load no longer trains
+  silently with `n_estimators=0` or fails on `objective ""`.
 - Model files written by `MondrianTree`/`MondrianForest` (default
   lifetime), `HoeffdingTree`, `AdaptiveRandomForest`, and CatBoost with
   `cat_features` were **unloadable** (save succeeded, load always
