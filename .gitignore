@@ -1,3 +1,7 @@
 /target
 docs/WOS/*.bib
 catboost_info/
+# PM2.5 Santiago case-study data: real paper data, lives in its own project
+# (~/proyectos/Contaminacion/PM25_Santiago) and stays out of this repo by
+# the author's decision. examples/pm25_spatial_loso.rs reads it from here.
+data/pm25_santiago_spatial.csv
