@@ -14,6 +14,7 @@ pub mod smote;
 pub mod spatial_smote;
 
 use crate::Result;
+use crate::task::ClassificationTask;
 use ndarray::Array2;
 
 pub use adasyn::Adasyn;
@@ -72,4 +73,24 @@ pub trait Transformer: Send + Sync {
 
     /// Clone this transformer into a boxed trait object.
     fn clone_box(&self) -> Box<dyn Transformer>;
+}
+
+/// Trait for training-only resamplers (`Smote`, `Adasyn`) that rebalance a
+/// classification task by adding synthetic samples.
+///
+/// Unlike [`Transformer`], a resampler changes the sample count (and the
+/// target, not just the features), so it can't fit that trait's
+/// `transform(&Array2<f64>) -> Array2<f64>` signature (audit issue M18) --
+/// and critically, it must run only once, on the training set, never at
+/// predict time (synthesizing samples for held-out data would be
+/// meaningless). [`Pipeline`] keeps a resampler structurally separate from
+/// its `transformers` for exactly that reason: applied once at the start
+/// of `train_classif`, and never stored in the trained model.
+pub trait Resampler: Send + Sync {
+    /// Resampler identifier.
+    fn id(&self) -> &str;
+
+    /// Rebalance a classification task, returning a new task with a
+    /// (typically larger) balanced sample set.
+    fn resample(&self, task: &ClassificationTask) -> Result<ClassificationTask>;
 }

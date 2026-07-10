@@ -2,6 +2,7 @@
 //!
 //! Generates synthetic samples for minority classes to address class imbalance.
 
+use super::Resampler;
 use crate::Result;
 use crate::task::{ClassificationTask, Task};
 use ndarray::Array2;
@@ -159,5 +160,15 @@ impl Smote {
         }
 
         ClassificationTask::new(task.id(), result, new_target)
+    }
+}
+
+impl Resampler for Smote {
+    fn id(&self) -> &str {
+        "smote"
+    }
+
+    fn resample(&self, task: &ClassificationTask) -> Result<ClassificationTask> {
+        self.balance(task)
     }
 }

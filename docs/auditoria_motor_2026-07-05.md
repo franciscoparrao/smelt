@@ -501,9 +501,9 @@ Python), M19 restante (dtype/heurística int→classif).
       `--features parquet` (build debug con fixture generada vía Rust/
       polars directo, sin depender de pyarrow/pandas en el venv). Suite
       completa verde (213 lib + 74 doctests) durante todo el trabajo.
-    - Quedan del punto 9 original: M18 resampler stage en Pipeline,
-      TreeBuilder O(n²), single-source de versión smelt-py. (M10 ParamSet
-      tipado y duplicación scanner/EarlyStopper resueltos más abajo.)
+    - Quedan del punto 9 original: TreeBuilder O(n²), single-source de
+      versión smelt-py. (M10 ParamSet tipado, duplicación scanner/
+      EarlyStopper, y M18 resampler stage resueltos más abajo.)
 
     **✅ Duplicación (scanner, EarlyStopper) RESUELTA 2026-07-09 — train_binary/multiclass evaluada y descartada deliberadamente**:
     - **EarlyStopper en XGBoost**: sus 3 métodos (`train_regress`,
@@ -595,5 +595,43 @@ byte a byte los resultados de tuning con seed fija ya existentes.
   Python), y (b) la capacidad nueva: un `choice` de valores string/bool
   ahora sobrevive el roundtrip completo (Python → Rust → tuning → Python)
   como `str`/`bool` reales, algo que antes fallaba en la extracción misma.
+
+**✅ M18 (resampler stage en Pipeline) RESUELTO 2026-07-10**: `Smote`/
+`Adasyn` no podían componerse dentro de `Pipeline` porque su forma
+(`balance(&ClassificationTask) -> ClassificationTask`, cambia sample count
+y target) no encaja en `Transformer::transform(&Array2<f64>) ->
+Array2<f64>` (solo features, mismo n de filas) — y un resampler además NO
+debe correr en predict (no tiene sentido sintetizar muestras sobre datos
+held-out), mientras que todo `Transformer` en un `Pipeline` sí se guarda y
+re-aplica en `TrainedPipeline::predict`. Confundir ambos habría sido el
+bug real, no solo una limitación de expresividad.
+- Nuevo trait `Resampler` (`src/preprocess/mod.rs`, junto a `Transformer`):
+  `id(&self) -> &str` + `resample(&ClassificationTask) ->
+  Result<ClassificationTask>`. Implementado para `Smote`/`Adasyn`
+  (delegando a su `balance()` ya existente, sin cambios ahí).
+  `SpatialSmote` deliberadamente NO implementa `Resampler` -- necesita
+  coordenadas externas que ni `Task` ni `Pipeline` cargan (mismo patrón ya
+  establecido para `SpatialBlockCV`/`GeoXGBoost`: coords pasadas aparte,
+  nunca dentro de `Task`).
+- `Pipeline` gana un campo `resampler: Option<Box<dyn Resampler>>` +
+  `.with_resampler(...)`, estructuralmente separado de `transformers`:
+  `train_classif` lo aplica una vez al inicio (antes que cualquier
+  transformer) y el resultado nunca se guarda en `TrainedPipeline` (que
+  solo clona `transformers`) -- así que `predict` es imposible que lo
+  vuelva a invocar. `train_regress` retorna `InvalidParameter` claro si
+  hay un resampler configurado (SMOTE/ADASYN rebalancean clases discretas;
+  no hay equivalente de regresión) en vez de ignorarlo silenciosamente.
+  `id()` incluye la etapa del resampler (ej. `pipeline(smote+knn)`).
+- 3 tests nuevos discriminantes en `preprocess/pipeline.rs` (0 tests
+  previos en ese archivo): confirma que `resample()` de hecho crece el
+  conteo de la clase minoritaria (no solo que compila), que `predict`
+  sobre las features ORIGINALES (pre-resample) devuelve exactamente una
+  predicción por fila de entrada (el resampler no debe filtrarse a
+  predict), y que `train_regress` rechaza un resampler configurado con un
+  mensaje que explica por qué.
+- Verificado: 216 lib (213+3 nuevos) + 286 integración + 74 doctests
+  (conteos idénticos salvo los 3 tests nuevos), 0 warnings nuevos de
+  clippy. Sin bindings de Python que tocar -- `Pipeline` no estaba
+  expuesto en `smelt-py` en absoluto.
 
 **Reglas de proceso que esta auditoría reafirma**: (1) ningún ítem se declara cerrado en un doc de progreso sin commit verificable que lo toque — el falso cierre de `subsample` sobrevivió una auditoría entera; (2) todo módulo numérico nuevo entra con al menos un golden test contra scipy/sklearn o una reimplementación independiente — los 2 HIGH estadísticos de esta ronda vivían en los únicos rincones sin referencia; (3) los tests de comportamiento deben ser discriminantes (fallar contra la implementación rota) — el test de cost_sensitive pasa con un no-op.

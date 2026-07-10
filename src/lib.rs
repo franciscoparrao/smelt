@@ -105,7 +105,7 @@ pub mod prelude {
     pub use crate::prediction::Prediction;
     pub use crate::preprocess::{
         Adasyn, FilterSelector, ImputeStrategy, Imputer, LabelEncoder, MinMaxScaler, OneHotEncoder,
-        PCA, Pipeline, RFE, Smote, SpatialSmote, StandardScaler, Transformer,
+        PCA, Pipeline, RFE, Resampler, Smote, SpatialSmote, StandardScaler, Transformer,
     };
     pub use crate::resample::{
         CrossValidation, GroupCV, Holdout, Resample, SpatialBlockCV, SpatialBufferCV, StratifiedCV,

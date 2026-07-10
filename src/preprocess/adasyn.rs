@@ -5,6 +5,7 @@
 //!
 //! Reference: He, H. et al. (2008). ADASYN. IJCNN, 1322-1328. (4,070 citations)
 
+use super::Resampler;
 use crate::Result;
 use crate::task::{ClassificationTask, Task};
 use ndarray::Array2;
@@ -211,6 +212,16 @@ impl Adasyn {
         }
 
         ClassificationTask::new(task.id(), result, new_target)
+    }
+}
+
+impl Resampler for Adasyn {
+    fn id(&self) -> &str {
+        "adasyn"
+    }
+
+    fn resample(&self, task: &ClassificationTask) -> Result<ClassificationTask> {
+        self.balance(task)
     }
 }
 
