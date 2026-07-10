@@ -1,7 +1,7 @@
 """Benchmark utilities for comparing multiple learners with cross-validation."""
 
 import numpy as np
-from smelt._smelt import accuracy_score, CrossValidation, SpatialBlockCV
+from smelt._smelt import accuracy_score, rmse_score, CrossValidation, SpatialBlockCV
 
 
 _NEEDS_COORDS = {"GeoXGBoost", "KrigingHybrid"}
@@ -26,7 +26,9 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
         (``GeoXGBoost``, ``KrigingHybrid``), which require it.
         Accepts numpy array (Nx2), list of (x, y) tuples, or list of [x, y] lists.
     metrics : dict, optional
-        Mapping of name → metric function. Default: {"accuracy": accuracy_score}.
+        Mapping of name → metric function. Default: {"accuracy":
+        accuracy_score} for classification targets (integer/bool dtype),
+        {"rmse": rmse_score} for regression targets.
 
     Returns
     -------
@@ -44,8 +46,17 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
     >>> results["XGB"]["accuracy"]["mean"]
     0.87
     """
+    y = np.asarray(y)
+    # Same dispatch rule as fit(): integer/bool dtype => classification.
+    # The old heuristic (`or len(unique) < 20`) could declare a float
+    # target "classification" that fit() then trained as regression,
+    # crashing mid-loop with a TypeError the per-fold handler didn't catch.
+    is_classif = y.dtype.kind in "iub"
+
     if metrics is None:
-        metrics = {"accuracy": accuracy_score}
+        metrics = (
+            {"accuracy": accuracy_score} if is_classif else {"rmse": rmse_score}
+        )
 
     if cv is None:
         cv = 5
@@ -62,7 +73,6 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
 
     n = len(y)
     splits = splitter.splits(n)
-    is_classif = np.issubdtype(y.dtype, np.integer) or len(np.unique(y)) < 20
 
     results = {}
     for name, learner_template in learners.items():
@@ -109,19 +119,21 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
                 else:
                     learner.fit(X_tr, y_tr)
                     preds = learner.predict(X_te)
-            except RuntimeError as exc:
-                # Incompatible learner (e.g. GaussianNB on regression target)
+            except (RuntimeError, ValueError, TypeError) as exc:
+                # Incompatible or misconfigured learner (e.g. GaussianNB on a
+                # regression target, a bad cost matrix). ValueError joined the
+                # possible raises when typed errors landed (InvalidParameter
+                # -> ValueError); catching only RuntimeError aborted the whole
+                # run, losing every other learner's results.
                 for m in metrics:
                     fold_scores[m].append(float("nan"))
                 fold_scores.setdefault("_error", str(exc))
                 continue
 
             for metric_name, metric_fn in metrics.items():
-                if is_classif:
-                    score = metric_fn(y_te.tolist(), preds.tolist())
-                else:
-                    score = metric_fn(y_te.tolist(), preds.tolist())
-                fold_scores[metric_name].append(score)
+                fold_scores[metric_name].append(
+                    metric_fn(y_te.tolist(), preds.tolist())
+                )
 
         # Aggregate per-metric stats
         results[name] = {}
