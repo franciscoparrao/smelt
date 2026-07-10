@@ -1170,14 +1170,13 @@ impl Learner for XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
-        if let Some(w) = &self.sample_weight {
-            if w.len() != ns {
+        if let Some(w) = &self.sample_weight
+            && w.len() != ns {
                 return Err(SmeltError::DimensionMismatch {
                     expected: ns,
                     got: w.len(),
                 });
             }
-        }
         let eval = validate_eval_regress(&self.eval_set, nf)?;
         self.validate_constraints(nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
@@ -1296,14 +1295,13 @@ impl XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
-        if let Some(w) = &self.sample_weight {
-            if w.len() != ns {
+        if let Some(w) = &self.sample_weight
+            && w.len() != ns {
                 return Err(SmeltError::DimensionMismatch {
                     expected: ns,
                     got: w.len(),
                 });
             }
-        }
         let eval = validate_eval_classif(&self.eval_set, nf)?;
         self.validate_constraints(nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
@@ -1414,14 +1412,13 @@ impl XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf, nc) = (task.n_samples(), task.n_features(), task.n_classes());
-        if let Some(w) = &self.sample_weight {
-            if w.len() != ns {
+        if let Some(w) = &self.sample_weight
+            && w.len() != ns {
                 return Err(SmeltError::DimensionMismatch {
                     expected: ns,
                     got: w.len(),
                 });
             }
-        }
         let eval = validate_eval_classif(&self.eval_set, nf)?;
         self.validate_constraints(nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());

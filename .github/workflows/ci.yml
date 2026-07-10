@@ -1,0 +1,59 @@
+name: CI
+
+# Tests + lint on every push/PR. Before this workflow existed the 584-test
+# suite only ran when someone ran it locally, and a tag could publish
+# wheels to PyPI (release.yml) from a red tree.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: cargo test (default features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+
+  test-parquet:
+    name: cargo test --features parquet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: parquet
+      - run: cargo test --features parquet
+
+  lint:
+    name: clippy (lib, deny warnings) + smelt-py check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: lint
+      # The library is clippy-clean and gated; --all-targets still carries
+      # legacy warnings (tracked in the audit backlog), so it stays
+      # advisory until that debt is paid.
+      - run: cargo clippy --lib -- -D warnings
+      - run: cargo clippy --all-targets
+        continue-on-error: true
+      # Catches binding breakage (the PyO3 crate compiles against the
+      # parent crate's API) without paying for a full maturin build.
+      - run: cargo check -p smelt-py

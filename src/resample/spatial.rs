@@ -78,13 +78,12 @@ impl Resample for SpatialBlockCV {
                 "SpatialBlockCV requires at least 1 fold".into(),
             ));
         }
-        if let Some(bs) = self.block_size {
-            if bs <= 0.0 {
+        if let Some(bs) = self.block_size
+            && bs <= 0.0 {
                 return Err(SmeltError::InvalidParameter(format!(
                     "SpatialBlockCV block_size must be positive, got {bs}"
                 )));
             }
-        }
 
         // Compute bounding box
         let (mut min_x, mut min_y) = (f64::INFINITY, f64::INFINITY);

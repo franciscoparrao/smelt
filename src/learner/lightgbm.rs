@@ -504,7 +504,7 @@ fn build_leaf_wise_tree(
     max_depth: Option<usize>,
     lambda: f64,
     min_child_weight: f64,
-    feature_importances: &mut Vec<f64>,
+    feature_importances: &mut [f64],
 ) -> LGBNode {
     let root_hist = build_leaf_hist(bins, grads, hess, weights, &indices, col_indices);
     let mut arena: Vec<ArenaNode> = vec![ArenaNode::Leaf { indices, depth: 0, hist: root_hist }];
