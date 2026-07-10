@@ -192,13 +192,36 @@ impl CsvLoader {
         Ok((feature_names, features, cat_indices))
     }
 
+    /// Rejects missing values in the target column. Features route missing
+    /// entries through the NaN pipeline (`is_missing` -> imputation
+    /// downstream), but a missing *target* has no valid handling a loader
+    /// can pick: in regression it would train on `f64::NAN` and silently
+    /// predict NaN (`check_no_nan` only covers features), and in
+    /// classification the literal string `"NA"` would be label-encoded as a
+    /// real class. ParquetLoader already rejects both; the CSV loaders now
+    /// match it.
+    fn check_target_not_missing(rows: &[Vec<String>], target_idx: usize) -> Result<()> {
+        for (i, row) in rows.iter().enumerate() {
+            if is_missing(&row[target_idx]) {
+                return Err(SmeltError::Csv(format!(
+                    "target value '{}' at data row {} is missing -- drop the row or fill the \
+                     target before loading (features may be missing, the target may not)",
+                    row[target_idx], i
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Load as a classification task. Target values are parsed as usize or auto-encoded.
     pub fn load_classif(&self) -> Result<ClassificationTask> {
         let (headers, rows) = self.read_raw()?;
         let target_idx = self.find_target_col(&headers)?;
+        Self::check_target_not_missing(&rows, target_idx)?;
 
         // Try parsing target as usize first, fall back to label encoding
-        let target_strings: Vec<String> = rows.iter().map(|r| r[target_idx].clone()).collect();
+        let target_strings: Vec<String> =
+            rows.iter().map(|r| r[target_idx].trim().to_string()).collect();
 
         let target: Vec<usize> = match target_strings[0].parse::<usize>() {
             Ok(_) => target_strings
@@ -233,17 +256,29 @@ impl CsvLoader {
             .with_categorical_features(&cat_indices)
     }
 
-    /// Load as a regression task. Target values must be numeric.
+    /// Load as a regression task. Target values must be numeric and finite.
     pub fn load_regress(&self) -> Result<RegressionTask> {
         let (headers, rows) = self.read_raw()?;
         let target_idx = self.find_target_col(&headers)?;
+        Self::check_target_not_missing(&rows, target_idx)?;
 
         let target: Vec<f64> = rows
             .iter()
-            .map(|r| {
-                r[target_idx].parse::<f64>().map_err(|_| {
+            .enumerate()
+            .map(|(i, r)| {
+                let v = r[target_idx].trim().parse::<f64>().map_err(|_| {
                     SmeltError::Csv(format!("cannot parse target '{}' as number", r[target_idx]))
-                })
+                })?;
+                // "inf"/"-inf" parse successfully but are as unusable as a
+                // missing target -- reject with the row instead of training
+                // on them (NaN literals are already caught by is_missing).
+                if !v.is_finite() {
+                    return Err(SmeltError::Csv(format!(
+                        "target value '{}' at data row {} is not finite",
+                        r[target_idx], i
+                    )));
+                }
+                Ok(v)
             })
             .collect::<Result<Vec<_>>>()?;
 

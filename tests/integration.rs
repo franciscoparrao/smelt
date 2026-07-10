@@ -2128,6 +2128,48 @@ fn load_csv_classification() {
     assert_eq!(task.feature_names(), &["x1", "x2"]);
 }
 
+/// Regression test (4th audit, M-8): the target column used to bypass the
+/// missing-value handling the features get. A literal "NaN" in a regression
+/// target (numpy.savetxt's output) parsed to f64::NAN and trained/predicted
+/// NaN silently; a literal "NA" in a classification target was label-encoded
+/// as a real class. Both must be load-time errors naming the row.
+#[test]
+fn load_csv_rejects_missing_target_values() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Regression: "NaN" literal in the target
+    let path = dir.path().join("nan_target.csv");
+    std::fs::write(&path, "x,y\n1.0,2.0\n3.0,NaN\n5.0,10.0\n").unwrap();
+    let err = CsvLoader::from_path(&path).target("y").load_regress();
+    let msg = format!("{}", err.unwrap_err());
+    assert!(msg.contains("row 1") && msg.contains("missing"), "got: {msg}");
+
+    // Regression: "inf" parses but is unusable as a target
+    let path = dir.path().join("inf_target.csv");
+    std::fs::write(&path, "x,y\n1.0,2.0\n3.0,inf\n").unwrap();
+    let msg = format!(
+        "{}",
+        CsvLoader::from_path(&path).target("y").load_regress().unwrap_err()
+    );
+    assert!(msg.contains("not finite"), "got: {msg}");
+
+    // Classification: "NA" must not become a class
+    let path = dir.path().join("na_target.csv");
+    std::fs::write(&path, "x,label\n1.0,a\n2.0,NA\n3.0,b\n").unwrap();
+    let msg = format!(
+        "{}",
+        CsvLoader::from_path(&path).target("label").load_classif().unwrap_err()
+    );
+    assert!(msg.contains("row 1") && msg.contains("missing"), "got: {msg}");
+
+    // Missing values in FEATURES stay allowed (NaN pipeline), only the
+    // target is strict.
+    let path = dir.path().join("na_feature.csv");
+    std::fs::write(&path, "x,y\nNA,2.0\n3.0,6.0\n").unwrap();
+    let task = CsvLoader::from_path(&path).target("y").load_regress().unwrap();
+    assert!(task.features()[[0, 0]].is_nan());
+}
+
 #[test]
 fn load_csv_regression() {
     let dir = tempfile::tempdir().unwrap();
