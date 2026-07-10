@@ -37,3 +37,22 @@ pub fn check_non_empty(features: &Array2<f64>) -> Result<()> {
     }
     Ok(())
 }
+
+/// Check that every coordinate pair is finite (no NaN/±inf).
+///
+/// The spatial learners compute pairwise distances from these: a single
+/// non-finite coordinate poisons every distance it touches, which either
+/// spreads NaN through all predictions (kriging weights) or breaks the
+/// total order `slice::sort` requires (GeoXGBoost's neighbour ranking —
+/// a panic on Rust ≥ 1.81). Features get this guard via [`check_no_nan`];
+/// coordinates need their own.
+pub fn check_coords_finite(coords: &[(f64, f64)]) -> Result<()> {
+    for (i, &(x, y)) in coords.iter().enumerate() {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(SmeltError::InvalidParameter(format!(
+                "non-finite coordinate at index {i}: ({x}, {y}) — every sample needs a finite georeference"
+            )));
+        }
+    }
+    Ok(())
+}

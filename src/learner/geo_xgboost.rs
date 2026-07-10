@@ -158,6 +158,7 @@ impl GeoXGBoost {
                 got: self.coords.len(),
             });
         }
+        crate::validate::check_coords_finite(&self.coords)?;
         if candidates.is_empty() {
             return Err(SmeltError::InvalidParameter(
                 "select_bandwidth requires at least one candidate bandwidth".into(),
@@ -354,6 +355,7 @@ impl TrainedGeoXGBoost {
                 got: new_coords.len(),
             });
         }
+        crate::validate::check_coords_finite(new_coords)?;
 
         let global_pred = self.global_model.predict(features)?;
         let global_vals = match &global_pred {
@@ -467,6 +469,7 @@ impl GeoXGBoost {
                 got: self.coords.len(),
             });
         }
+        crate::validate::check_coords_finite(&self.coords)?;
 
         let bandwidth = self.bandwidth.min(n_samples - 1);
 
@@ -640,6 +643,50 @@ mod tests {
     use super::*;
     use ndarray::Array2;
     use rand::prelude::*;
+
+    /// Regression test (4th audit, HIGH-3): a single NaN coordinate used to
+    /// PANIC the process inside rayon — `slice::sort` (Rust ≥ 1.81) detects
+    /// the non-total order that `partial_cmp().unwrap_or(Equal)` induces on
+    /// NaN distances. A missing georeference must be a clean `Err`, not a
+    /// crash.
+    #[test]
+    fn non_finite_coordinates_are_rejected_at_train_and_predict() {
+        let n = 20;
+        let features = Array2::from_shape_fn((n, 1), |(i, _)| i as f64);
+        let target: Vec<f64> = (0..n).map(|i| i as f64 * 0.5).collect();
+        let task = RegressionTask::new("nan-coords", features.clone(), target).unwrap();
+
+        let mut coords: Vec<(f64, f64)> = (0..n).map(|i| (i as f64, 0.0)).collect();
+        coords[3] = (0.0, f64::NAN);
+        let mut gxgb = GeoXGBoost::new(coords).with_n_estimators(5);
+        let Err(err) = gxgb.train_geo(&task) else {
+            panic!("NaN training coordinate must be rejected")
+        };
+        assert!(
+            err.to_string().contains("index 3"),
+            "error should name the offending coordinate: {err}"
+        );
+
+        let good_coords: Vec<(f64, f64)> = (0..n).map(|i| (i as f64, 0.0)).collect();
+        let mut gxgb = GeoXGBoost::new(good_coords.clone()).with_n_estimators(5);
+        let trained = gxgb.train_geo(&task).unwrap();
+        let Err(err) = trained.predict_spatial(
+            &features.slice(ndarray::s![0..1, ..]).to_owned(),
+            &[(f64::NAN, 0.0)],
+        ) else {
+            panic!("NaN query coordinate must be rejected")
+        };
+        assert!(err.to_string().contains("index 0"), "got: {err}");
+
+        // select_bandwidth shares the same guard.
+        let mut bad = good_coords;
+        bad[9] = (f64::NEG_INFINITY, 0.0);
+        let gxgb = GeoXGBoost::new(bad).with_n_estimators(5);
+        let Err(err) = gxgb.select_bandwidth(&task, &[4, 8]) else {
+            panic!("non-finite coordinate must be rejected in select_bandwidth")
+        };
+        assert!(err.to_string().contains("index 9"), "got: {err}");
+    }
 
     /// Regression test: the adaptive alpha (Eq. 19-20) must compare the local
     /// model's leave-one-out error against an out-of-fold error for the

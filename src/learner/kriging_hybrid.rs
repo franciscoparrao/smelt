@@ -424,6 +424,7 @@ impl KrigingHybrid {
                 got: self.coords.len(),
             });
         }
+        crate::validate::check_coords_finite(&self.coords)?;
 
         let mut base_learner = (self.factory)();
         let base_model = base_learner.train_regress(task)?;
@@ -496,6 +497,7 @@ impl TrainedKrigingHybrid {
                 got: new_coords.len(),
             });
         }
+        crate::validate::check_coords_finite(new_coords)?;
 
         let base_pred = self.base_model.predict(features)?;
         let base_vals = match &base_pred {
@@ -552,6 +554,46 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    /// Regression test (4th audit, HIGH-3): a single NaN coordinate used to
+    /// be accepted silently — it entered every query's kriging system (no
+    /// comparison can filter a NaN distance) and `predict_spatial` returned
+    /// `Ok` with ALL predictions NaN. Both train and predict must reject
+    /// non-finite coordinates with a clean error naming the index.
+    #[test]
+    fn non_finite_coordinates_are_rejected_at_train_and_predict() {
+        let n = 20;
+        let features = Array2::from_shape_fn((n, 1), |(i, _)| i as f64);
+        let target: Vec<f64> = (0..n).map(|i| i as f64 * 2.0).collect();
+        let task = RegressionTask::new("nan-coords", features.clone(), target).unwrap();
+
+        let mut coords: Vec<(f64, f64)> = (0..n).map(|i| (i as f64, 0.0)).collect();
+        coords[7] = (f64::NAN, 0.0);
+        let mut kh = KrigingHybrid::new(|| Box::new(LinearRegression::new()), coords);
+        let Err(err) = kh.train_regress_geo(&task) else {
+            panic!("NaN training coordinate must be rejected")
+        };
+        assert!(
+            err.to_string().contains("index 7"),
+            "error should name the offending coordinate: {err}"
+        );
+
+        // Clean train, NaN in the *query* coordinates.
+        let good_coords: Vec<(f64, f64)> = (0..n).map(|i| (i as f64, 0.0)).collect();
+        let mut kh = KrigingHybrid::new(|| Box::new(LinearRegression::new()), good_coords);
+        let trained = kh.train_regress_geo(&task).unwrap();
+        let mut query = vec![(1.5, 0.0), (2.5, 0.0)];
+        query[1] = (0.0, f64::INFINITY);
+        let Err(err) =
+            trained.predict_spatial(&features.slice(ndarray::s![0..2, ..]).to_owned(), &query)
+        else {
+            panic!("NaN query coordinate must be rejected")
+        };
+        assert!(
+            err.to_string().contains("index 1"),
+            "error should name the offending query coordinate: {err}"
+        );
+    }
 
     #[test]
     fn gaussian_elimination_solves_a_known_system() {
