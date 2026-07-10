@@ -38,7 +38,7 @@ fn main() {
     );
     space.insert(
         "n_estimators".into(),
-        ParamDistribution::Choice(vec![25.0, 50.0, 100.0]),
+        ParamDistribution::Choice(vec![25.0.into(), 50.0.into(), 100.0.into()]),
     );
 
     // Bayesian Optimization (TPE) — 20 evaluations
@@ -47,9 +47,9 @@ fn main() {
         |params| {
             Box::new(
                 XGBoost::new()
-                    .with_max_depth(params["max_depth"] as usize)
-                    .with_learning_rate(params["learning_rate"])
-                    .with_n_estimators(params["n_estimators"] as usize),
+                    .with_max_depth(params["max_depth"].as_usize().unwrap())
+                    .with_learning_rate(params["learning_rate"].as_f64().unwrap())
+                    .with_n_estimators(params["n_estimators"].as_usize().unwrap()),
             )
         },
         space.clone(),
@@ -61,7 +61,7 @@ fn main() {
     println!("Best score: {:.4}", bo_result.best_score);
     println!("Best params:");
     for (k, v) in &bo_result.best_params {
-        println!("  {k}: {v:.4}");
+        println!("  {k}: {:.4}", v.as_f64().unwrap());
     }
 
     // Compare with Random Search — same budget
@@ -70,9 +70,9 @@ fn main() {
         |params| {
             Box::new(
                 XGBoost::new()
-                    .with_max_depth(params["max_depth"] as usize)
-                    .with_learning_rate(params["learning_rate"])
-                    .with_n_estimators(params["n_estimators"] as usize),
+                    .with_max_depth(params["max_depth"].as_usize().unwrap())
+                    .with_learning_rate(params["learning_rate"].as_f64().unwrap())
+                    .with_n_estimators(params["n_estimators"].as_usize().unwrap()),
             )
         },
         space,

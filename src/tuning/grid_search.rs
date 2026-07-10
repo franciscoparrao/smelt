@@ -18,7 +18,7 @@ use rayon::prelude::*;
 ///
 /// ```
 /// use smelt_ml::prelude::*;
-/// use smelt_ml::tuning::{GridSearch, ParamGrid};
+/// use smelt_ml::tuning::{GridSearch, ParamGrid, ParamValue};
 /// use ndarray::array;
 ///
 /// let features = array![
@@ -29,11 +29,11 @@ use rayon::prelude::*;
 /// let task = ClassificationTask::new("tune", features, target).unwrap();
 ///
 /// let mut grid = ParamGrid::new();
-/// grid.insert("max_depth".into(), vec![1.0, 3.0, 5.0]);
+/// grid.insert("max_depth".into(), vec![ParamValue::Int(1), ParamValue::Int(3), ParamValue::Int(5)]);
 ///
 /// let gs = GridSearch::new(
 ///     |params| Box::new(DecisionTree::new()
-///         .with_max_depth(params["max_depth"] as usize)),
+///         .with_max_depth(params["max_depth"].as_usize().unwrap())),
 ///     grid,
 /// );
 /// let cv = CrossValidation::new(2).with_seed(42);

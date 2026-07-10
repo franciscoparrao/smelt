@@ -3,7 +3,7 @@
 //! Evaluates many configurations with few resources (small CV folds),
 //! discards the worst, and allocates more resources to the best.
 
-use super::{ParamDistribution, ParamSet, ParamSpace, TuneResult};
+use super::{ParamSet, ParamSpace, TuneResult};
 use crate::Result;
 use crate::benchmark;
 use crate::learner::Learner;
@@ -41,7 +41,7 @@ use rayon::prelude::*;
 ///
 /// let hb = Hyperband::new(
 ///     |params| Box::new(DecisionTree::new()
-///         .with_max_depth(params["max_depth"] as usize)),
+///         .with_max_depth(params["max_depth"].as_usize().unwrap())),
 ///     space,
 /// ).with_max_folds(4).with_seed(42);
 ///
@@ -91,21 +91,7 @@ impl Hyperband {
     }
 
     fn sample_random(&self, rng: &mut StdRng) -> ParamSet {
-        use rand::Rng;
-        let mut params = ParamSet::new();
-        for (name, dist) in &self.param_space {
-            let value = match dist {
-                ParamDistribution::Uniform(lo, hi) => rng.random_range(*lo..=*hi),
-                ParamDistribution::LogUniform(lo, hi) => {
-                    let log_lo = lo.log10();
-                    let log_hi = hi.log10();
-                    10.0f64.powf(rng.random_range(log_lo..=log_hi))
-                }
-                ParamDistribution::Choice(vals) => vals[rng.random_range(0..vals.len())],
-            };
-            params.insert(name.clone(), value);
-        }
-        params
+        super::sample_param_space(&self.param_space, rng)
     }
 
     /// Tune for classification using successive halving.

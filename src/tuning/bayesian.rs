@@ -4,7 +4,7 @@
 //! Models the distribution of good vs bad hyperparameter configurations
 //! and samples promising candidates via density ratio l(x)/g(x).
 
-use super::{ParamDistribution, ParamSet, ParamSpace, TuneResult};
+use super::{ParamDistribution, ParamSet, ParamSpace, ParamValue, TuneResult};
 use crate::Result;
 use crate::benchmark;
 use crate::learner::Learner;
@@ -42,7 +42,7 @@ use rand::rngs::StdRng;
 ///
 /// let bo = BayesianOptimizer::new(
 ///     |params| Box::new(DecisionTree::new()
-///         .with_max_depth(params["max_depth"] as usize)),
+///         .with_max_depth(params["max_depth"].as_usize().unwrap())),
 ///     space,
 /// ).with_n_iter(15).with_seed(42);
 ///
@@ -172,11 +172,7 @@ impl BayesianOptimizer {
 
     /// Sample a random parameter set from the space.
     fn sample_random(&self, rng: &mut StdRng) -> ParamSet {
-        let mut params = ParamSet::new();
-        for (name, dist) in &self.param_space {
-            params.insert(name.clone(), sample_dist(dist, rng));
-        }
-        params
+        super::sample_param_space(&self.param_space, rng)
     }
 
     /// Sample using TPE: split history into good/bad, build KDE, maximize l/g.
@@ -240,38 +236,43 @@ impl BayesianOptimizer {
         let mut params = ParamSet::new();
         for name in param_names {
             let dist = &self.param_space[name];
-            let good_vals: Vec<f64> = good_indices.iter().map(|&i| history[i].0[name]).collect();
 
             let value = match dist {
                 ParamDistribution::Uniform(lo, hi) => {
+                    let good_vals = numeric_values(history, good_indices, name);
                     let bw = bandwidth(&good_vals);
-                    let perturbed = base[name] + rng.random_range(-bw..bw);
-                    perturbed.clamp(*lo, *hi)
+                    let base_v = base[name]
+                        .as_f64()
+                        .expect("Uniform-distributed parameter must be numeric");
+                    let perturbed = base_v + rng.random_range(-bw..bw);
+                    ParamValue::Float(perturbed.clamp(*lo, *hi))
                 }
                 ParamDistribution::LogUniform(lo, hi) => {
+                    let good_vals = numeric_values(history, good_indices, name);
                     let log_vals: Vec<f64> = good_vals.iter().map(|v| v.ln()).collect();
                     let bw = bandwidth(&log_vals);
-                    let log_base = base[name].ln();
+                    let log_base = base[name]
+                        .as_f64()
+                        .expect("LogUniform-distributed parameter must be numeric")
+                        .ln();
                     let perturbed = (log_base + rng.random_range(-bw..bw)).exp();
-                    perturbed.clamp(*lo, *hi)
+                    ParamValue::Float(perturbed.clamp(*lo, *hi))
                 }
                 ParamDistribution::Choice(choices) => {
                     // Sample proportional to frequency in good set, with smoothing
                     let mut counts = vec![1.0; choices.len()]; // Laplace smoothing
-                    for &v in &good_vals {
-                        if let Some(pos) =
-                            choices.iter().position(|&c| (c - v).abs() < f64::EPSILON)
-                        {
+                    for &i in good_indices {
+                        if let Some(pos) = choices.iter().position(|c| *c == history[i].0[name]) {
                             counts[pos] += 1.0;
                         }
                     }
                     let total: f64 = counts.iter().sum();
                     let mut r = rng.random_range(0.0..total);
-                    let mut selected = choices[0];
+                    let mut selected = choices[0].clone();
                     for (i, &c) in counts.iter().enumerate() {
                         r -= c;
                         if r <= 0.0 {
-                            selected = choices[i];
+                            selected = choices[i].clone();
                             break;
                         }
                     }
@@ -299,11 +300,13 @@ impl BayesianOptimizer {
 
         for name in param_names {
             let dist = &self.param_space[name];
-            let vals: Vec<f64> = indices.iter().map(|&i| history[i].0[name]).collect();
-            let x = candidate[name];
 
             let log_d = match dist {
                 ParamDistribution::Uniform(lo, hi) => {
+                    let vals = numeric_values(history, indices, name);
+                    let x = candidate[name]
+                        .as_f64()
+                        .expect("Uniform-distributed parameter must be numeric");
                     let bw = bandwidth(&vals).max((*hi - *lo) * 0.01);
                     // Gaussian KDE
                     let n = vals.len() as f64;
@@ -315,8 +318,12 @@ impl BayesianOptimizer {
                     (density.max(1e-300)).ln()
                 }
                 ParamDistribution::LogUniform(lo, hi) => {
+                    let vals = numeric_values(history, indices, name);
                     let log_vals: Vec<f64> = vals.iter().map(|v| v.ln()).collect();
-                    let log_x = x.ln();
+                    let log_x = candidate[name]
+                        .as_f64()
+                        .expect("LogUniform-distributed parameter must be numeric")
+                        .ln();
                     let bw = bandwidth(&log_vals).max((hi.ln() - lo.ln()) * 0.01);
                     let n = log_vals.len() as f64;
                     let density: f64 = log_vals
@@ -329,18 +336,14 @@ impl BayesianOptimizer {
                 ParamDistribution::Choice(choices) => {
                     // Categorical: count frequency with smoothing
                     let mut counts = vec![1.0; choices.len()];
-                    for &v in &vals {
-                        if let Some(pos) =
-                            choices.iter().position(|&c| (c - v).abs() < f64::EPSILON)
-                        {
+                    for &i in indices {
+                        if let Some(pos) = choices.iter().position(|c| *c == history[i].0[name]) {
                             counts[pos] += 1.0;
                         }
                     }
                     let total: f64 = counts.iter().sum();
-                    let pos = choices
-                        .iter()
-                        .position(|&c| (c - x).abs() < f64::EPSILON)
-                        .unwrap_or(0);
+                    let x = &candidate[name];
+                    let pos = choices.iter().position(|c| c == x).unwrap_or(0);
                     (counts[pos] / total).ln()
                 }
             };
@@ -354,16 +357,19 @@ impl BayesianOptimizer {
 
 // ── Helper functions ────────────────────────────────────────────────
 
-fn sample_dist(dist: &ParamDistribution, rng: &mut StdRng) -> f64 {
-    match dist {
-        ParamDistribution::Uniform(lo, hi) => rng.random_range(*lo..=*hi),
-        ParamDistribution::LogUniform(lo, hi) => {
-            let log_lo = lo.log10();
-            let log_hi = hi.log10();
-            10.0f64.powf(rng.random_range(log_lo..=log_hi))
-        }
-        ParamDistribution::Choice(vals) => vals[rng.random_range(0..vals.len())],
-    }
+/// Read a numeric parameter's value across a set of history indices —
+/// shared by the `Uniform`/`LogUniform` arms of `sample_from_good` and
+/// `log_density`, which only ever model continuous (non-`Choice`)
+/// parameters and can assume every value is convertible via `as_f64`.
+fn numeric_values(history: &[(ParamSet, f64)], indices: &[usize], name: &str) -> Vec<f64> {
+    indices
+        .iter()
+        .map(|&i| {
+            history[i].0[name]
+                .as_f64()
+                .expect("Uniform/LogUniform-distributed parameter must be numeric")
+        })
+        .collect()
 }
 
 /// Gaussian kernel (standard normal PDF).

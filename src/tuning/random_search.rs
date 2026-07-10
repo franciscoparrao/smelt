@@ -1,6 +1,6 @@
 //! Random search over hyperparameter distributions.
 
-use super::{ParamDistribution, ParamSet, ParamSpace, TuneResult};
+use super::{ParamSet, ParamSpace, TuneResult};
 use crate::Result;
 use crate::benchmark;
 use crate::learner::Learner;
@@ -22,7 +22,7 @@ use rayon::prelude::*;
 ///
 /// ```
 /// use smelt_ml::prelude::*;
-/// use smelt_ml::tuning::{RandomSearch, ParamSpace, ParamDistribution};
+/// use smelt_ml::tuning::{RandomSearch, ParamSpace, ParamDistribution, ParamValue};
 /// use ndarray::array;
 ///
 /// let features = array![
@@ -33,11 +33,13 @@ use rayon::prelude::*;
 /// let task = ClassificationTask::new("tune", features, target).unwrap();
 ///
 /// let mut space = ParamSpace::new();
-/// space.insert("max_depth".into(), ParamDistribution::Choice(vec![1.0, 3.0, 5.0, 10.0]));
+/// space.insert("max_depth".into(), ParamDistribution::Choice(
+///     vec![ParamValue::Int(1), ParamValue::Int(3), ParamValue::Int(5), ParamValue::Int(10)]
+/// ));
 ///
 /// let rs = RandomSearch::new(
 ///     |params| Box::new(DecisionTree::new()
-///         .with_max_depth(params["max_depth"] as usize)),
+///         .with_max_depth(params["max_depth"].as_usize().unwrap())),
 ///     space,
 /// ).with_n_iter(5).with_seed(42);
 ///
@@ -79,24 +81,7 @@ impl RandomSearch {
     }
 
     fn sample_params(&self, rng: &mut impl Rng) -> ParamSet {
-        let mut params = ParamSet::new();
-        for (name, dist) in &self.param_space {
-            let value = match dist {
-                ParamDistribution::Uniform(low, high) => rng.random_range(*low..=*high),
-                ParamDistribution::LogUniform(low, high) => {
-                    let log_low = low.log10();
-                    let log_high = high.log10();
-                    let log_val = rng.random_range(log_low..=log_high);
-                    10.0f64.powf(log_val)
-                }
-                ParamDistribution::Choice(values) => {
-                    let idx = rng.random_range(0..values.len());
-                    values[idx]
-                }
-            };
-            params.insert(name.clone(), value);
-        }
-        params
+        super::sample_param_space(&self.param_space, rng)
     }
 
     /// Tune for classification.

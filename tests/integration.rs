@@ -1522,10 +1522,10 @@ fn grid_search_classif_finds_best() {
     let task = ClassificationTask::new("gs", features, target).unwrap();
 
     let mut grid = ParamGrid::new();
-    grid.insert("max_depth".into(), vec![1.0, 3.0, 5.0]);
+    grid.insert("max_depth".into(), vec![1.0.into(), 3.0.into(), 5.0.into()]);
 
     let gs = GridSearch::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
         grid,
     );
     let cv = CrossValidation::new(4).with_seed(42);
@@ -1558,10 +1558,10 @@ fn grid_search_regress() {
     let task = RegressionTask::new("gs_reg", features, target).unwrap();
 
     let mut grid = ParamGrid::new();
-    grid.insert("max_depth".into(), vec![1.0, 3.0, 5.0]);
+    grid.insert("max_depth".into(), vec![1.0.into(), 3.0.into(), 5.0.into()]);
 
     let gs = GridSearch::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
         grid,
     );
     let ho = Holdout::new(0.8).with_seed(42);
@@ -1592,15 +1592,15 @@ fn grid_search_multi_param() {
     let task = ClassificationTask::new("gs_multi", features, target).unwrap();
 
     let mut grid = ParamGrid::new();
-    grid.insert("max_depth".into(), vec![1.0, 3.0]);
-    grid.insert("min_samples_split".into(), vec![2.0, 4.0]);
+    grid.insert("max_depth".into(), vec![1.0.into(), 3.0.into()]);
+    grid.insert("min_samples_split".into(), vec![2.0.into(), 4.0.into()]);
 
     let gs = GridSearch::new(
         |params| {
             Box::new(
                 DecisionTree::new()
-                    .with_max_depth(params["max_depth"] as usize)
-                    .with_min_samples_split(params["min_samples_split"] as usize),
+                    .with_max_depth(params["max_depth"].as_usize().unwrap())
+                    .with_min_samples_split(params["min_samples_split"].as_usize().unwrap()),
             )
         },
         grid,
@@ -1634,8 +1634,8 @@ fn grid_search_parallel_evaluation_is_deterministic() {
     let task = ClassificationTask::new("gs_det", features, target).unwrap();
 
     let mut grid = ParamGrid::new();
-    grid.insert("max_depth".into(), vec![1.0, 2.0, 3.0, 4.0, 5.0]);
-    grid.insert("min_samples_split".into(), vec![2.0, 3.0, 4.0]);
+    grid.insert("max_depth".into(), vec![1.0.into(), 2.0.into(), 3.0.into(), 4.0.into(), 5.0.into()]);
+    grid.insert("min_samples_split".into(), vec![2.0.into(), 3.0.into(), 4.0.into()]);
     let cv = CrossValidation::new(2).with_seed(42);
 
     let make_gs = || {
@@ -1643,8 +1643,8 @@ fn grid_search_parallel_evaluation_is_deterministic() {
             |params| {
                 Box::new(
                     DecisionTree::new()
-                        .with_max_depth(params["max_depth"] as usize)
-                        .with_min_samples_split(params["min_samples_split"] as usize),
+                        .with_max_depth(params["max_depth"].as_usize().unwrap())
+                        .with_min_samples_split(params["min_samples_split"].as_usize().unwrap()),
                 )
             },
             grid.clone(),
@@ -1690,11 +1690,11 @@ fn random_search_classif() {
     let mut space = ParamSpace::new();
     space.insert(
         "max_depth".into(),
-        ParamDistribution::Choice(vec![1.0, 3.0, 5.0, 10.0]),
+        ParamDistribution::Choice(vec![1.0.into(), 3.0.into(), 5.0.into(), 10.0.into()]),
     );
 
     let rs = RandomSearch::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
         space,
     )
     .with_n_iter(5)
@@ -1730,7 +1730,7 @@ fn random_search_uniform() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 10.0));
 
     let rs = RandomSearch::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
         space,
     )
     .with_n_iter(8)
@@ -1741,7 +1741,7 @@ fn random_search_uniform() {
 
     assert_eq!(result.all_results.len(), 8);
     for (params, _) in &result.all_results {
-        let d = params["max_depth"];
+        let d = params["max_depth"].as_f64().unwrap();
         assert!(d >= 1.0 && d <= 10.0);
     }
 }
@@ -1757,13 +1757,13 @@ fn random_search_deterministic() {
     let mut space = ParamSpace::new();
     space.insert(
         "max_depth".into(),
-        ParamDistribution::Choice(vec![1.0, 2.0, 3.0, 4.0, 5.0]),
+        ParamDistribution::Choice(vec![1.0.into(), 2.0.into(), 3.0.into(), 4.0.into(), 5.0.into()]),
     );
 
     let cv = CrossValidation::new(2).with_seed(42);
 
     let rs1 = RandomSearch::new(
-        |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"] as usize)),
+        |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"].as_usize().unwrap())),
         space.clone(),
     )
     .with_n_iter(3)
@@ -1771,7 +1771,7 @@ fn random_search_deterministic() {
     let r1 = rs1.tune_classif(&task, &cv, &Accuracy).unwrap();
 
     let rs2 = RandomSearch::new(
-        |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"] as usize)),
+        |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"].as_usize().unwrap())),
         space,
     )
     .with_n_iter(3)
@@ -1809,7 +1809,7 @@ fn random_search_log_uniform() {
         |params| {
             Box::new(
                 LogisticRegression::new()
-                    .with_learning_rate(params["learning_rate"])
+                    .with_learning_rate(params["learning_rate"].as_f64().unwrap())
                     .with_max_iter(500),
             )
         },
@@ -1822,7 +1822,7 @@ fn random_search_log_uniform() {
     let result = rs.tune_classif(&task, &cv, &Accuracy).unwrap();
 
     for (params, _) in &result.all_results {
-        let lr = params["learning_rate"];
+        let lr = params["learning_rate"].as_f64().unwrap();
         assert!(lr >= 0.001 && lr <= 1.0, "lr={lr} out of bounds");
     }
 }
@@ -4248,7 +4248,7 @@ fn bayesian_optimizer_classif() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 10.0));
 
     let bo = BayesianOptimizer::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
         space,
     )
     .with_n_iter(15)
@@ -4286,7 +4286,7 @@ fn bayesian_optimizer_regress() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 8.0));
 
     let bo = BayesianOptimizer::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
         space,
     )
     .with_n_iter(12)
@@ -4319,7 +4319,7 @@ fn bayesian_optimizer_multi_param() {
     let mut space = ParamSpace::new();
     space.insert(
         "max_depth".into(),
-        ParamDistribution::Choice(vec![1.0, 3.0, 5.0, 7.0]),
+        ParamDistribution::Choice(vec![1.0.into(), 3.0.into(), 5.0.into(), 7.0.into()]),
     );
     space.insert(
         "n_estimators".into(),
@@ -4330,8 +4330,8 @@ fn bayesian_optimizer_multi_param() {
         |params| {
             Box::new(
                 RandomForest::new()
-                    .with_n_estimators(params["n_estimators"] as usize)
-                    .with_max_depth(params["max_depth"] as usize)
+                    .with_n_estimators(params["n_estimators"].as_usize().unwrap())
+                    .with_max_depth(params["max_depth"].as_usize().unwrap())
                     .with_seed(42),
             )
         },
@@ -4375,7 +4375,7 @@ fn bayesian_optimizer_log_uniform() {
         |params| {
             Box::new(
                 LogisticRegression::new()
-                    .with_learning_rate(params["learning_rate"])
+                    .with_learning_rate(params["learning_rate"].as_f64().unwrap())
                     .with_max_iter(500),
             )
         },
@@ -4389,7 +4389,7 @@ fn bayesian_optimizer_log_uniform() {
 
     // All learning rates should be in [0.001, 1.0]
     for (params, _) in &result.all_results {
-        let lr = params["learning_rate"];
+        let lr = params["learning_rate"].as_f64().unwrap();
         assert!(lr >= 0.001 && lr <= 1.0, "lr={lr} out of bounds");
     }
 }
@@ -4426,7 +4426,7 @@ fn bayesian_optimizer_beats_random() {
 
     // Bayesian with 15 iterations
     let bo = BayesianOptimizer::new(
-        |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"] as usize)),
+        |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"].as_usize().unwrap())),
         space.clone(),
     )
     .with_n_iter(15)
@@ -4435,7 +4435,7 @@ fn bayesian_optimizer_beats_random() {
 
     // Random with same budget
     let rs = RandomSearch::new(
-        |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"] as usize)),
+        |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"].as_usize().unwrap())),
         space,
     )
     .with_n_iter(15)
@@ -5396,7 +5396,7 @@ fn hyperband_classif() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 8.0));
 
     let hb = Hyperband::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
         space,
     )
     .with_max_folds(4)
@@ -5438,7 +5438,7 @@ fn hyperband_parallel_evaluation_is_deterministic() {
         let mut space = ParamSpace::new();
         space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 8.0));
         Hyperband::new(
-            |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
+            |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
             space,
         )
         .with_max_folds(4)
@@ -6820,7 +6820,7 @@ fn hyperband_regress() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 6.0));
 
     let hb = Hyperband::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"] as usize)),
+        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
         space,
     )
     .with_max_folds(3)

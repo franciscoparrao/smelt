@@ -501,10 +501,9 @@ Python), M19 restante (dtype/heurística int→classif).
       `--features parquet` (build debug con fixture generada vía Rust/
       polars directo, sin depender de pyarrow/pandas en el venv). Suite
       completa verde (213 lib + 74 doctests) durante todo el trabajo.
-    - Quedan del punto 9 original: M10 ParamSet tipado, M18 resampler stage
-      en Pipeline, duplicación (scanner ×5, train_binary/multiclass ×4,
-      EarlyStopper en XGBoost), TreeBuilder O(n²), single-source de versión
-      smelt-py.
+    - Quedan del punto 9 original: M18 resampler stage en Pipeline,
+      TreeBuilder O(n²), single-source de versión smelt-py. (M10 ParamSet
+      tipado y duplicación scanner/EarlyStopper resueltos más abajo.)
 
     **✅ Duplicación (scanner, EarlyStopper) RESUELTA 2026-07-09 — train_binary/multiclass evaluada y descartada deliberadamente**:
     - **EarlyStopper en XGBoost**: sus 3 métodos (`train_regress`,
@@ -554,5 +553,47 @@ Python), M19 restante (dtype/heurística int→classif).
       0 warnings nuevos de clippy (verificado explícitamente — la
       extracción de `accumulate_histogram` generó 3 warnings
       `needless_borrow` transitorios, corregidos antes de este commit).
+
+**✅ M10 (ParamSet tipado) RESUELTO 2026-07-09**: `ParamSet`/`ParamGrid`
+(`src/tuning/mod.rs`) eran `HashMap<String, f64>`/`HashMap<String, Vec<f64>>`
+— todo hiperparámetro forzado por `f64`, sin forma alguna de representar un
+valor string (ej. un `objective`/`variogram_model` choice) ni de distinguir
+un entero de un flotante salvo por convención (`params["max_depth"] as
+usize` en cada sitio de uso). Nuevo enum `ParamValue` (`Float`/`Int`/`Bool`/
+`Str`) con accessors tipados (`as_f64`/`as_usize`/`as_i64`/`as_bool`/
+`as_str`, todos devolviendo `Result` con mensaje claro en vez de un cast
+silencioso) e impls `From` para construcción ergonómica; `ParamSet =
+HashMap<String, ParamValue>`, `ParamGrid = HashMap<String, Vec<ParamValue>>`,
+`ParamDistribution::Choice(Vec<ParamValue>)` (Uniform/LogUniform siguen
+siendo solo-`f64`, ya que un rango continuo no tiene análogo string). `.
+as_usize()` trunca un `Float` igual que el cast `as usize` viejo, preservando
+byte a byte los resultados de tuning con seed fija ya existentes.
+- **Bonus no buscado**: los 3 tuners (`RandomSearch`, `BayesianOptimizer`,
+  `Hyperband`) duplicaban la misma lógica de "samplear un valor desde un
+  `ParamDistribution`" — como los tres necesitaban reescribirse para emitir
+  `ParamValue` en vez de `f64`, se unificó en `sample_param_space`/
+  `sample_one` (`tuning/mod.rs`) en vez de triplicar la nueva lógica.
+  `BayesianOptimizer`'s KDE (`sample_from_good`/`log_density`) mantiene su
+  cómputo Uniform/LogUniform sin cambios (vía `.as_f64()`), y su rama
+  `Choice` pasó de comparar `(c - v).abs() < f64::EPSILON` (un proxy de
+  igualdad para lo que ya eran valores discretos) a igualdad real de
+  `ParamValue` — estrictamente más correcto, no solo un refactor.
+- **smelt-py** (`smelt-py/src/tuning.rs`): `build_param_space` ahora parsea
+  cada valor de una lista `choice` de Python preservando su tipo real
+  (`bool`→`Bool`, `int`→`Int`, `float`→`Float`, `str`→`Str`, chequeados en
+  ese orden ya que `bool` es subclase de `int` en Python) en vez de forzar
+  `Vec<f64>` (que fallaba la extracción entera ante cualquier string). El
+  heurístico `is_integer_param` (allowlist de nombres) se mantiene *solo*
+  como fallback para el caso `Float` continuo (Uniform/LogUniform no cargan
+  "esto es un entero" en el tipo) — `Int`/`Bool`/`Str` ya no lo necesitan,
+  se propagan con su tipo real sin adivinar por nombre.
+- Verificado: 213 lib + 286 integración + 74 doctests (conteos idénticos a
+  antes del cambio), 0 warnings nuevos de clippy, ejemplo
+  `xgboost_tuning.rs` corrido end-to-end, y un script Python directo contra
+  el `.so` compilado confirmando (a) paridad exacta con el comportamiento
+  numérico previo (`max_depth`/`n_estimators` siguen devolviendo `int`
+  Python), y (b) la capacidad nueva: un `choice` de valores string/bool
+  ahora sobrevive el roundtrip completo (Python → Rust → tuning → Python)
+  como `str`/`bool` reales, algo que antes fallaba en la extracción misma.
 
 **Reglas de proceso que esta auditoría reafirma**: (1) ningún ítem se declara cerrado en un doc de progreso sin commit verificable que lo toque — el falso cierre de `subsample` sobrevivió una auditoría entera; (2) todo módulo numérico nuevo entra con al menos un golden test contra scipy/sklearn o una reimplementación independiente — los 2 HIGH estadísticos de esta ronda vivían en los únicos rincones sin referencia; (3) los tests de comportamiento deben ser discriminantes (fallar contra la implementación rota) — el test de cost_sensitive pasa con un no-op.

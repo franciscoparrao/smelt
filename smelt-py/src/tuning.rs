@@ -15,8 +15,20 @@ pub(crate) fn make_learner_factory(
     type L = Box<dyn smelt_ml::learner::Learner>;
     type PS = smelt_ml::tuning::ParamSet;
 
+    // The tuning factory signature (`Fn(&ParamSet) -> Box<dyn Learner>`, no
+    // `Result`) can't propagate a clean error for a misused param type, so a
+    // genuine type mismatch (e.g. a string Choice value for a numeric
+    // hyperparameter) panics with a clear message instead of silently
+    // falling back to `def` -- PyO3 catches panics at the `#[pymethods]`
+    // boundary (`optimize`, below) and surfaces them as a Python exception,
+    // not a process crash.
     fn get(p: &PS, k: &str, def: f64) -> f64 {
-        p.get(k).copied().unwrap_or(def)
+        p.get(k)
+            .map(|v| {
+                v.as_f64()
+                    .unwrap_or_else(|e| panic!("invalid value for parameter '{k}': {e}"))
+            })
+            .unwrap_or(def)
     }
 
     match learner_type {
@@ -69,6 +81,30 @@ pub(crate) fn make_learner_factory(
     }
 }
 
+/// Convert one Python value to a `ParamValue`, preserving its actual type
+/// (audit issue M10: a Python `Choice` list used to be coerced to `Vec<f64>`
+/// unconditionally, so a string choice like `["squared_error", "huber"]`
+/// failed extraction outright -- there was no way to tune a string-valued
+/// hyperparameter at all). Checked in order bool -> int -> float -> str
+/// since Python's `bool` is itself an `int` subclass (a bare `int` check
+/// first would silently read `True`/`False` as `1`/`0`).
+fn py_to_param_value(v: &Bound<'_, PyAny>) -> PyResult<smelt_ml::tuning::ParamValue> {
+    use smelt_ml::tuning::ParamValue;
+    if let Ok(b) = v.extract::<bool>() {
+        Ok(ParamValue::Bool(b))
+    } else if let Ok(i) = v.extract::<i64>() {
+        Ok(ParamValue::Int(i))
+    } else if let Ok(f) = v.extract::<f64>() {
+        Ok(ParamValue::Float(f))
+    } else if let Ok(s) = v.extract::<String>() {
+        Ok(ParamValue::Str(s))
+    } else {
+        Err(PyRuntimeError::new_err(
+            "choice values must be bool, int, float, or str",
+        ))
+    }
+}
+
 pub(crate) fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::tuning::ParamSpace> {
     use smelt_ml::tuning::{ParamDistribution, ParamSpace};
 
@@ -108,7 +144,12 @@ pub(crate) fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::t
                     space.insert(name, ParamDistribution::LogUniform(low, high));
                 }
                 "choice" => {
-                    let choices: Vec<f64> = required("values")?.extract()?;
+                    let values = required("values")?;
+                    let items: Vec<Bound<'_, PyAny>> = values.extract()?;
+                    let choices = items
+                        .iter()
+                        .map(py_to_param_value)
+                        .collect::<PyResult<Vec<_>>>()?;
                     space.insert(name, ParamDistribution::Choice(choices));
                 }
                 _ => return Err(PyRuntimeError::new_err(format!("Unknown param type: {dtype}"))),
@@ -116,8 +157,12 @@ pub(crate) fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::t
         } else if let Ok(tup) = val.extract::<(f64, f64)>() {
             // Shorthand: (low, high) → uniform
             space.insert(name, ParamDistribution::Uniform(tup.0, tup.1));
-        } else if let Ok(choices) = val.extract::<Vec<f64>>() {
-            // Shorthand: [1, 2, 3] → choice
+        } else if let Ok(items) = val.extract::<Vec<Bound<'_, PyAny>>>() {
+            // Shorthand: [1, 2, 3] or ["a", "b"] → choice
+            let choices = items
+                .iter()
+                .map(py_to_param_value)
+                .collect::<PyResult<Vec<_>>>()?;
             space.insert(name, ParamDistribution::Choice(choices));
         } else {
             return Err(PyRuntimeError::new_err(
@@ -203,7 +248,7 @@ impl PyBayesianOptimizer {
 
         let bp = pyo3::types::PyDict::new(py);
         for (k, v) in &result.best_params {
-            set_param(&bp, k, *v)?;
+            set_param(&bp, k, v)?;
         }
         dict.set_item("best_params", bp)?;
         dict.set_item("best_score", result.best_score)?;
@@ -213,7 +258,7 @@ impl PyBayesianOptimizer {
         for (params, score) in &result.all_results {
             let pd = pyo3::types::PyDict::new(py);
             for (k, v) in params {
-                set_param(&pd, k, *v)?;
+                set_param(&pd, k, v)?;
             }
             let tup = pyo3::types::PyTuple::new(py, &[pd.as_any(), score.into_pyobject(py)?.as_any()])?;
             history.append(tup)?;
@@ -224,7 +269,13 @@ impl PyBayesianOptimizer {
     }
 }
 
-/// Param names that are conceptually integer-valued and should be rounded.
+/// Param names that are conceptually integer-valued and should be rounded
+/// when sampled as a continuous `Float` (Uniform/LogUniform have no way to
+/// carry "this is really an integer" on their own). Not consulted for
+/// `Int`/`Bool`/`Str` values below -- those already carry their real type
+/// (e.g. from an integer- or string-valued `Choice` list), so no name-based
+/// guess is needed for them at all; this allowlist only exists for the
+/// continuous-range case.
 pub(crate) fn is_integer_param(name: &str) -> bool {
     matches!(
         name,
@@ -241,11 +292,23 @@ pub(crate) fn is_integer_param(name: &str) -> bool {
     )
 }
 
-pub(crate) fn set_param(dict: &Bound<'_, pyo3::types::PyDict>, name: &str, value: f64) -> PyResult<()> {
-    if is_integer_param(name) {
-        dict.set_item(name, value.round() as i64)
-    } else {
-        dict.set_item(name, value)
+pub(crate) fn set_param(
+    dict: &Bound<'_, pyo3::types::PyDict>,
+    name: &str,
+    value: &smelt_ml::tuning::ParamValue,
+) -> PyResult<()> {
+    use smelt_ml::tuning::ParamValue;
+    match value {
+        ParamValue::Int(v) => dict.set_item(name, v),
+        ParamValue::Bool(v) => dict.set_item(name, v),
+        ParamValue::Str(v) => dict.set_item(name, v),
+        ParamValue::Float(v) => {
+            if is_integer_param(name) {
+                dict.set_item(name, v.round() as i64)
+            } else {
+                dict.set_item(name, v)
+            }
+        }
     }
 }
 
