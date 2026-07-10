@@ -124,9 +124,17 @@ impl Learner for Pipeline {
             names = transformer.transform_names(&names)?;
         }
 
+        // Propagate class_names: rebuilding the task from scratch would
+        // re-derive n_classes as max(label)+1, silently narrowing the
+        // probability rows whenever this pipeline's training split lost the
+        // highest class -- exactly the width mismatch Stacking/DES defend
+        // against by forwarding class_names to every fold (a base learner
+        // that is itself a Pipeline used to destroy that propagation and
+        // panic downstream).
         let transformed_task =
             ClassificationTask::new(task.id(), features, task.target().to_vec())?
-                .with_feature_names(names)?;
+                .with_feature_names(names)?
+                .with_class_names(task.class_names().to_vec());
 
         let model = self.learner.train_classif(&transformed_task)?;
 

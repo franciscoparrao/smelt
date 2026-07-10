@@ -236,7 +236,10 @@ impl SpatialSmote {
             }
         }
 
-        let balanced_task = ClassificationTask::new(task.id(), result, new_target)?;
+        let balanced_task = ClassificationTask::new(task.id(), result, new_target)?
+            .with_feature_names(task.feature_names().to_vec())?
+            .with_feature_types(task.feature_types().to_vec())?
+            .with_class_names(task.class_names().to_vec());
         Ok((balanced_task, new_coords))
     }
 }

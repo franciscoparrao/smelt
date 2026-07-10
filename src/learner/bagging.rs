@@ -234,7 +234,11 @@ impl Learner for Bagging {
 
                 let boot_features = features.select(Axis(0), &indices);
                 let boot_target: Vec<usize> = indices.iter().map(|&idx| target[idx]).collect();
-                let boot_task = ClassificationTask::new(&task_id, boot_features, boot_target)?;
+                // class_names forwarded so a bootstrap that lost the highest
+                // class still yields full-width probability rows (same
+                // propagation Stacking/DeepForest folds need; audit LOW).
+                let boot_task = ClassificationTask::new(&task_id, boot_features, boot_target)?
+                    .with_class_names(task.class_names().to_vec());
 
                 let mut learner = factory();
                 learner.train_classif(&boot_task)

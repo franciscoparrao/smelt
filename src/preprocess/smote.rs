@@ -159,7 +159,13 @@ impl Smote {
             }
         }
 
-        ClassificationTask::new(task.id(), result, new_target)
+        // Keep the input task's metadata: dropping it here silently renamed
+        // features to x0/x1/... downstream (selector/importance output) and
+        // re-derived n_classes as max(label)+1 (audit HIGH-4/M-4).
+        ClassificationTask::new(task.id(), result, new_target)?
+            .with_feature_names(task.feature_names().to_vec())?
+            .with_feature_types(task.feature_types().to_vec())
+            .map(|t| t.with_class_names(task.class_names().to_vec()))
     }
 }
 

@@ -1343,6 +1343,105 @@ fn label_encoder_unknown_label() {
 
 // ── Pipeline tests ─────────────────────────────────────────────────
 
+/// Regression test (4th audit, HIGH-4): `Pipeline::train_classif` rebuilt
+/// the transformed task without `class_names`, so `n_classes` was re-derived
+/// as max(label)+1 — a training split that lost the highest class produced
+/// probability rows narrower than the task's real class count.
+#[test]
+fn pipeline_preserves_class_width_when_a_class_is_absent() {
+    let features = array![[0.0], [1.0], [2.0], [3.0]];
+    // Task declares 3 classes; the training labels only contain {0, 1}.
+    let target = vec![0, 0, 1, 1];
+    let task = ClassificationTask::new("narrow", features, target)
+        .unwrap()
+        .with_class_names(vec!["a".into(), "b".into(), "c".into()]);
+    assert_eq!(task.n_classes(), 3);
+
+    let mut pipe = Pipeline::new(
+        vec![Box::new(StandardScaler::new())],
+        Box::new(GaussianNB::new()),
+    );
+    let model = pipe.train_classif(&task).unwrap();
+    let pred = model.predict(task.features()).unwrap();
+    match pred {
+        Prediction::Classification { probabilities, .. } => {
+            let probs = probabilities.expect("GaussianNB emits probabilities");
+            assert_eq!(
+                probs[0].len(),
+                3,
+                "probability rows must keep the task's declared class width"
+            );
+        }
+        _ => panic!("expected classification prediction"),
+    }
+}
+
+/// The composition the audit probe crashed: Stacking's fold-wise
+/// `class_names` propagation used to be destroyed when the base learner is
+/// itself a Pipeline, panicking with index-out-of-bounds in ~half the seeds
+/// once a CV fold lost the rare class. All seeds must train cleanly.
+#[test]
+fn stacking_with_pipeline_base_survives_rare_classes() {
+    for seed in 0..20u64 {
+        let n = 12;
+        let features = Array2::from_shape_fn((n, 2), |(i, j)| {
+            ((i as f64 + seed as f64) * 0.7 + j as f64 * 1.3).sin()
+        });
+        // Rare highest class: a 2-fold split often leaves it out of one fold.
+        let mut target = vec![0usize; n];
+        for (i, t) in target.iter_mut().enumerate() {
+            *t = i % 2;
+        }
+        target[(seed as usize) % n] = 2;
+        let task = ClassificationTask::new("rare", features, target).unwrap();
+
+        let mut stack = Stacking::new(
+            vec![Box::new(|| {
+                Box::new(Pipeline::new(
+                    vec![Box::new(StandardScaler::new())],
+                    Box::new(GaussianNB::new()),
+                )) as Box<dyn Learner>
+            })],
+            || Box::new(LogisticRegression::new()),
+        )
+        .with_cv_folds(2);
+        stack
+            .train_classif(&task)
+            .unwrap_or_else(|e| panic!("seed {seed}: stacking over pipeline base failed: {e}"));
+    }
+}
+
+/// Regression test (4th audit, M-4): the resamplers rebuilt the balanced
+/// task without feature metadata, renaming every feature to x0/x1/... for
+/// selectors and importances downstream.
+#[test]
+fn resamplers_preserve_task_metadata() {
+    let features = array![
+        [0.0, 10.0],
+        [0.1, 11.0],
+        [0.2, 12.0],
+        [0.9, 13.0],
+        [1.0, 14.0],
+        [1.1, 15.0],
+        [1.2, 16.0],
+        [0.95, 17.0]
+    ];
+    let target = vec![0, 0, 0, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("meta", features, target)
+        .unwrap()
+        .with_feature_names(vec!["slope".into(), "ndvi".into()])
+        .unwrap()
+        .with_class_names(vec!["stable".into(), "slide".into(), "flow".into()]);
+
+    let balanced = Smote::new().with_k_neighbors(2).balance(&task).unwrap();
+    assert_eq!(balanced.feature_names(), &["slope", "ndvi"]);
+    assert_eq!(balanced.n_classes(), 3);
+
+    let balanced = Adasyn::new().with_k_neighbors(2).balance(&task).unwrap();
+    assert_eq!(balanced.feature_names(), &["slope", "ndvi"]);
+    assert_eq!(balanced.n_classes(), 3);
+}
+
 #[test]
 fn pipeline_passthrough() {
     let features = array![[0.0], [1.0], [2.0], [3.0]];
