@@ -119,7 +119,7 @@ impl GradientBoosting {
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum GBMode {
     Regression,
     BinaryClassif,
@@ -127,7 +127,7 @@ pub(crate) enum GBMode {
 }
 
 /// A trained Gradient Boosting ensemble, ready to predict.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedGradientBoosting {
     pub(crate) initial: Vec<f64>,
     pub(crate) trees: Vec<Node>,
@@ -228,6 +228,12 @@ impl TrainedModel for TrainedGradientBoosting {
                 .collect(),
         )
     }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::GradientBoosting(
+            self.clone(),
+        ))
+    }
 }
 
 impl Learner for GradientBoosting {
@@ -300,6 +306,55 @@ impl Learner for GradientBoosting {
     }
 }
 
+/// Refits every leaf's value via one Newton-Raphson step
+/// (`sum(grad) / sum(hess)` over the samples routed to that leaf), instead
+/// of leaving the plain mean-of-residuals a squared-error-minimizing
+/// `TreeBuilder` gives each leaf by construction (audit issue M7). The tree
+/// *structure* (which splits separate the data well) is still chosen by the
+/// SSE-based builder against the pseudo-residuals -- only the leaf *values*
+/// are corrected here to account for the loss's true curvature (Friedman
+/// 2001, sec. 4.6). For squared-error regression this is a no-op (hessian
+/// is constant 1 everywhere, so the Newton step degenerates to the same
+/// mean the tree already computed); it only changes behavior for the
+/// classification losses (log-loss / softmax), whose hessian varies per
+/// sample with the current prediction.
+fn refit_leaf_newton(
+    node: &mut Node,
+    features: &Array2<f64>,
+    indices: &[usize],
+    grads: &[f64],
+    hess: &[f64],
+) {
+    match node {
+        Node::Leaf(LeafValue::Value(v)) => {
+            let g: f64 = indices.iter().map(|&i| grads[i]).sum();
+            let h: f64 = indices.iter().map(|&i| hess[i]).sum();
+            if h > 1e-12 {
+                *v = g / h;
+            }
+            // Else: leave the SSE-based mean-residual value in place. A
+            // leaf with near-zero total hessian has no reliable Newton
+            // step; TreeBuilder already enforces `min_samples_leaf`, so
+            // this is only reachable via near-degenerate per-sample
+            // hessians (e.g. predictions already extremely confident),
+            // not the common path.
+        }
+        Node::Leaf(LeafValue::Class(..)) => {} // not produced by build_regressor
+        Node::Split { feature, threshold, left, right } => {
+            let (mut left_idx, mut right_idx) = (Vec::new(), Vec::new());
+            for &i in indices {
+                if features[[i, *feature]] <= *threshold {
+                    left_idx.push(i);
+                } else {
+                    right_idx.push(i);
+                }
+            }
+            refit_leaf_newton(left, features, &left_idx, grads, hess);
+            refit_leaf_newton(right, features, &right_idx, grads, hess);
+        }
+    }
+}
+
 impl GradientBoosting {
     fn train_binary(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
@@ -332,7 +387,21 @@ impl GradientBoosting {
                 None,
                 n_features,
             );
-            let root = builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng);
+            let mut root =
+                builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng);
+
+            // Newton step (audit issue M7): correct each leaf's value using
+            // the log-loss hessian p*(1-p) at the *current* ensemble
+            // prediction, evaluated on the same subsample the tree was
+            // built on.
+            let hess: Vec<f64> = current_f
+                .iter()
+                .map(|&f| {
+                    let p = sigmoid(f);
+                    (p * (1.0 - p)).max(1e-15)
+                })
+                .collect();
+            refit_leaf_newton(&mut root, features, &indices, &residuals, &hess);
 
             for i in 0..n_samples {
                 if let LeafValue::Value(v) = root.predict_one(features.row(i)) {
@@ -403,8 +472,16 @@ impl GradientBoosting {
                     None,
                     n_features,
                 );
-                let root =
+                let mut root =
                     builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng);
+
+                // Newton step (audit issue M7): diagonal softmax hessian
+                // p_ic*(1-p_ic), the same per-class approximation used
+                // elsewhere for multiclass boosting (e.g. CatBoost's
+                // `train_multiclass`).
+                let hess: Vec<f64> =
+                    probs.iter().map(|p| (p[c] * (1.0 - p[c])).max(1e-15)).collect();
+                refit_leaf_newton(&mut root, features, &indices, &residuals, &hess);
 
                 // Update scores for this class
                 for i in 0..n_samples {
@@ -428,5 +505,60 @@ impl GradientBoosting {
             feature_importances: total_importances,
             mode: GBMode::MultiClassif { n_classes },
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for M7 (docs/auditoria_motor_2026-07-05.md, Fase F):
+    /// `refit_leaf_newton` must replace each leaf's SSE-mean value with
+    /// `sum(grad) / sum(hess)` over the samples actually routed there --
+    /// not just leave whatever the squared-error-minimizing `TreeBuilder`
+    /// put there. A hand-built 2-leaf tree with very different per-sample
+    /// hessians on each side makes the two computations clearly diverge.
+    #[test]
+    fn refit_leaf_newton_uses_gradient_over_hessian_per_leaf() {
+        let features = Array2::from_shape_vec((4, 1), vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+        let mut tree = Node::Split {
+            feature: 0,
+            threshold: 0.5,
+            left: Box::new(Node::Leaf(LeafValue::Value(999.0))), // stand-in SSE value
+            right: Box::new(Node::Leaf(LeafValue::Value(999.0))),
+        };
+        let indices = vec![0, 1, 2, 3];
+        // Left leaf (samples 0,1): grads sum=3.0, hess sum=6.0 -> 0.5
+        // Right leaf (samples 2,3): grads sum=1.0, hess sum=0.5 -> 2.0
+        let grads = vec![1.0, 2.0, 0.5, 0.5];
+        let hess = vec![2.0, 4.0, 0.25, 0.25];
+
+        refit_leaf_newton(&mut tree, &features, &indices, &grads, &hess);
+
+        let Node::Split { left, right, .. } = &tree else {
+            panic!("expected split");
+        };
+        let Node::Leaf(LeafValue::Value(lv)) = **left else {
+            panic!("expected leaf")
+        };
+        let Node::Leaf(LeafValue::Value(rv)) = **right else {
+            panic!("expected leaf")
+        };
+        assert!((lv - 0.5).abs() < 1e-12, "left leaf should be sum(grad)/sum(hess)=0.5, got {lv}");
+        assert!((rv - 2.0).abs() < 1e-12, "right leaf should be sum(grad)/sum(hess)=2.0, got {rv}");
+    }
+
+    /// A leaf whose routed samples have (near-)zero total hessian has no
+    /// reliable Newton step; the pre-existing SSE-mean value must be left
+    /// untouched rather than blowing up via division by ~0.
+    #[test]
+    fn refit_leaf_newton_leaves_zero_hessian_leaf_unchanged() {
+        let features = Array2::from_shape_vec((2, 1), vec![0.0, 0.0]).unwrap();
+        let mut tree = Node::Leaf(LeafValue::Value(0.42));
+        refit_leaf_newton(&mut tree, &features, &[0, 1], &[1.0, 1.0], &[0.0, 0.0]);
+        let Node::Leaf(LeafValue::Value(v)) = tree else {
+            panic!("expected leaf")
+        };
+        assert!((v - 0.42).abs() < 1e-12, "zero-hessian leaf must keep its prior value, got {v}");
     }
 }

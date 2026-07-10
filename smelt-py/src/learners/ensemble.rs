@@ -2,7 +2,7 @@
 //! learners by id string (see `validate_learner_id`) rather than accepting
 //! an already-constructed Python learner object -- see module comment below.
 
-use crate::common::{add_explain_methods, declare_support};
+use crate::common::{add_explain_methods, add_persistence_methods, declare_support};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -39,6 +39,7 @@ pub(crate) fn registered_learner_ids() -> Vec<&'static str> {
 }
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct Bagging {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -108,6 +109,7 @@ impl Bagging {
 }
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct CostSensitiveClassifier {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -173,6 +175,7 @@ impl CostSensitiveClassifier {
 }
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct Stacking {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -259,6 +262,7 @@ impl Stacking {
 }
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct DynamicEnsemble {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -346,6 +350,17 @@ declare_support!(Bagging,                classif = true, regress = true);
 declare_support!(Stacking,               classif = true, regress = true);
 declare_support!(DynamicEnsemble,        classif = true, regress = false);
 declare_support!(CostSensitiveClassifier, classif = true, regress = false);
+
+// All 4 hold their base learner(s)' `Box<dyn TrainedModel>` internally, so
+// `SerializableModel` (`src/serialize.rs`) has no variant for any of
+// them -- `save()` always fails with a clear "does not support
+// serialization" error rather than being silently absent from the API.
+add_persistence_methods!(
+    Bagging => "Bagging",
+    Stacking => "Stacking",
+    DynamicEnsemble => "DynamicEnsemble",
+    CostSensitiveClassifier => "CostSensitiveClassifier",
+);
 
 // get_params/set_params are hand-written here (not via `declare_params!`)
 // because `base`/`base_learners`/`meta` need the same eager id validation

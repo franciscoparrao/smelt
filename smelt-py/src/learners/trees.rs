@@ -2,7 +2,7 @@
 //! GradientBoosting, HoeffdingTree, AdaptiveRandomForest, ObliqueTree,
 //! ObliqueForest.
 
-use crate::common::{define_learner, add_explain_methods, declare_support, declare_params};
+use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
@@ -11,6 +11,7 @@ use smelt_ml::learner::TrainedModel;
 // ── RandomForest ───────────────────────────────────────────────────────
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct RandomForest {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -75,6 +76,7 @@ impl RandomForest {
 // ── ExtraTrees ─────────────────────────────────────────────────────────
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct ExtraTrees {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -116,6 +118,7 @@ impl ExtraTrees {
 // ── DecisionTree ───────────────────────────────────────────────────────
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct DecisionTree {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -167,6 +170,7 @@ define_learner! {
         .with_max_depth(slf.max_depth)
         .with_seed(slf.seed),
     proba = true,
+    serial_as = "GradientBoosting",
 }
 
 define_learner! {
@@ -176,6 +180,16 @@ define_learner! {
         .with_grace_period(slf.grace_period)
         .with_max_depth(slf.max_depth),
     proba = true,
+    serial_as = "HoeffdingTree",
+    note = "Streaming (incremental) decision tree, exposed here batch-only \
+        (fit/predict, not partial_fit/predict_one). `grace_period` (default \
+        200) is the minimum samples a leaf must see before a split is even \
+        considered -- a streaming-oriented default. Fitting a single small \
+        batch (n well under grace_period) means the tree may never split at \
+        all, silently degrading to a majority-class predictor. For batch \
+        datasets with n in the hundreds or low thousands, pass a much \
+        smaller grace_period (e.g. max(10, n // 10)), or prefer \
+        RandomForest/ExtraTrees for non-streaming use cases.",
 }
 
 define_learner! {
@@ -203,6 +217,15 @@ define_learner! {
         .with_max_depth(slf.max_depth)
         .with_seed(slf.seed),
     proba = true,
+    serial_as = "AdaptiveRandomForest",
+    note = "Streaming ensemble of Hoeffding trees with ADWIN concept-drift \
+        detection, exposed here batch-only (fit/predict). `grace_period` \
+        (default 200, same streaming-oriented default as HoeffdingTree) is \
+        the minimum samples a leaf must see before splitting -- on a small \
+        batch dataset (n in the hundreds), trees may never split, degrading \
+        to near-chance accuracy silently. For batch use with n well under a \
+        few thousand, pass a much smaller grace_period (e.g. max(10, n // \
+        10)), or prefer RandomForest/ExtraTrees.",
 }
 
 define_learner! {
@@ -225,6 +248,12 @@ define_learner! {
         .with_early_stopping_rounds(slf.early_stopping_rounds)
         .with_seed(slf.seed),
     proba = true,
+    // `DeepForest` is a `Box<dyn TrainedModel>`-holding cascade internally
+    // (each layer's forests), so it has no `SerializableModel` variant --
+    // `save()`/`load()` always fail cleanly, matching the exclusion
+    // documented in `src/serialize.rs`. No literal string matches this on
+    // load, so any file is correctly rejected.
+    serial_as = "DeepForest",
 }
 
 define_learner! {
@@ -235,6 +264,7 @@ define_learner! {
         .with_lifetime(slf.lifetime)
         .with_seed(slf.seed),
     proba = true,
+    serial_as = "MondrianForest",
 }
 
 define_learner! {
@@ -245,6 +275,7 @@ define_learner! {
         .with_n_projections(slf.n_projections)
         .with_seed(slf.seed),
     proba = true,
+    serial_as = "ObliqueTree",
 }
 
 define_learner! {
@@ -256,6 +287,7 @@ define_learner! {
         .with_n_projections(slf.n_projections)
         .with_seed(slf.seed),
     proba = true,
+    serial_as = "ObliqueForest",
 }
 
 add_explain_methods!(RandomForest, ExtraTrees, DecisionTree, GradientBoosting, HoeffdingTree, AdaptiveRandomForest, DeepForest, MondrianForest, ObliqueTree, ObliqueForest);
@@ -274,3 +306,9 @@ declare_support!(ObliqueForest,     classif = true,  regress = true);
 declare_params!(RandomForest, { n_estimators => "n_estimators", max_depth => "max_depth", seed => "seed" });
 declare_params!(ExtraTrees,   { n_estimators => "n_estimators", max_depth => "max_depth", seed => "seed" });
 declare_params!(DecisionTree, { max_depth => "max_depth" });
+
+add_persistence_methods!(
+    RandomForest => "RandomForest",
+    ExtraTrees => "ExtraTrees",
+    DecisionTree => "DecisionTree",
+);

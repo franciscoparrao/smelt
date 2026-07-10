@@ -367,7 +367,7 @@ pub fn friedman_test(scores: &[&[f64]]) -> Result<FriedmanResult> {
 
     // p-value from chi-squared distribution with k-1 degrees of freedom
     let df = k_f - 1.0;
-    let p_value = 1.0 - chi_squared_cdf(chi2, df);
+    let p_value = chi_squared_sf(chi2, df);
 
     Ok(FriedmanResult {
         statistic: chi2,
@@ -468,7 +468,7 @@ pub fn mcnemar_test(pred_a: &[usize], pred_b: &[usize], truth: &[usize]) -> Resu
 
     // McNemar's chi-squared with continuity correction
     let chi2 = ((b - c).abs() - 1.0).max(0.0).powi(2) / (b + c);
-    let p_value = 1.0 - chi_squared_cdf(chi2, 1.0);
+    let p_value = chi_squared_sf(chi2, 1.0);
 
     Ok(TestResult {
         test: "McNemar",
@@ -564,39 +564,101 @@ fn standard_normal_cdf(x: f64) -> f64 {
     if x >= 0.0 { 1.0 - p * c } else { p * c }
 }
 
-// ── Helper: chi-squared CDF ────────────────────────────────────────
+// ── Helper: chi-squared survival function ──────────────────────────
 
-/// Approximate chi-squared CDF using the incomplete gamma function.
-fn chi_squared_cdf(x: f64, df: f64) -> f64 {
+/// Max iterations for the incomplete-gamma series/continued-fraction below.
+const INCOMPLETE_GAMMA_ITMAX: usize = 300;
+/// Relative convergence tolerance for the same.
+const INCOMPLETE_GAMMA_EPS: f64 = 1e-15;
+/// Floor to keep continued-fraction denominators away from exact zero.
+const INCOMPLETE_GAMMA_FPMIN: f64 = 1e-300;
+
+/// Chi-squared survival function `1 - cdf(x, df)`, i.e. the p-value for a
+/// chi-squared statistic. Computed directly via the regularized *upper*
+/// incomplete gamma `Q(df/2, x/2)` rather than `1.0 - cdf`: for the large
+/// statistics this module needs to handle (McNemar/Friedman on sizeable test
+/// sets or fold counts), the cdf is extremely close to 1 (e.g. `1 - 3e-67`),
+/// which *is* `1.0` at `f64` precision -- so `1.0 - cdf` catastrophically
+/// cancels to exactly `0.0`, silently reporting `p_value = 0.0` instead of
+/// the true tiny-but-nonzero value. Computing `Q` directly via a
+/// series/continued-fraction split (`Q = 1 - series` when `x < a+1`, `Q`
+/// from Lentz's continued fraction directly when `x >= a+1`, following
+/// Numerical Recipes §6.2) keeps full precision in the tail. The plain
+/// series alone needs on the order of `x` terms to converge, so a fixed
+/// 200-term cap (the previous implementation) silently truncated to `sf ~=
+/// 1.0` for any `x` beyond a couple hundred. Working entirely in log-space
+/// (via [`ln_gamma`] rather than `gamma(a).ln()`) also avoids the overflow a
+/// naive `gamma()` hits well before `df/2` or `x/2` reach the few hundred
+/// seen here.
+fn chi_squared_sf(x: f64, df: f64) -> f64 {
     if x <= 0.0 {
-        return 0.0;
+        return 1.0;
     }
-    lower_incomplete_gamma(df / 2.0, x / 2.0) / gamma(df / 2.0)
+    let a = df / 2.0;
+    let x = x / 2.0;
+    if x < a + 1.0 {
+        1.0 - incomplete_gamma_series(a, x)
+    } else {
+        incomplete_gamma_continued_fraction(a, x)
+    }
 }
 
-/// Lower incomplete gamma function via series expansion.
-fn lower_incomplete_gamma(a: f64, x: f64) -> f64 {
-    if x < 0.0 {
-        return 0.0;
-    }
-    let mut sum = 0.0;
-    let mut term = 1.0 / a;
-    sum += term;
-    for n in 1..200 {
-        term *= x / (a + n as f64);
-        sum += term;
-        if term.abs() < 1e-15 * sum.abs() {
+/// Series expansion for the regularized lower incomplete gamma `P(a,x)`,
+/// valid (and fast-converging) for `x < a+1`.
+fn incomplete_gamma_series(a: f64, x: f64) -> f64 {
+    let gln = ln_gamma(a);
+    let mut ap = a;
+    let mut sum = 1.0 / a;
+    let mut del = sum;
+    for _ in 0..INCOMPLETE_GAMMA_ITMAX {
+        ap += 1.0;
+        del *= x / ap;
+        sum += del;
+        if del.abs() < sum.abs() * INCOMPLETE_GAMMA_EPS {
             break;
         }
     }
-    sum * (-x).exp() * x.powf(a)
+    (sum * (-x + a * x.ln() - gln).exp()).clamp(0.0, 1.0)
 }
 
-/// Gamma function via Lanczos approximation.
+/// Continued-fraction expansion for the regularized upper incomplete gamma
+/// `Q(a,x) = 1 - P(a,x)`, valid (and fast-converging) for `x >= a+1`.
+fn incomplete_gamma_continued_fraction(a: f64, x: f64) -> f64 {
+    let gln = ln_gamma(a);
+    let mut b = x + 1.0 - a;
+    let mut c = 1.0 / INCOMPLETE_GAMMA_FPMIN;
+    let mut d = 1.0 / b;
+    let mut h = d;
+    for i in 1..=INCOMPLETE_GAMMA_ITMAX {
+        let an = -(i as f64) * (i as f64 - a);
+        b += 2.0;
+        d = an * d + b;
+        if d.abs() < INCOMPLETE_GAMMA_FPMIN {
+            d = INCOMPLETE_GAMMA_FPMIN;
+        }
+        c = b + an / c;
+        if c.abs() < INCOMPLETE_GAMMA_FPMIN {
+            c = INCOMPLETE_GAMMA_FPMIN;
+        }
+        d = 1.0 / d;
+        let del = d * c;
+        h *= del;
+        if (del - 1.0).abs() < INCOMPLETE_GAMMA_EPS {
+            break;
+        }
+    }
+    (h * (-x + a * x.ln() - gln).exp()).clamp(0.0, 1.0)
+}
+
+/// Natural log of the gamma function via the Lanczos approximation, valid
+/// for all real `x` except non-positive integers. Unlike `gamma(x).ln()`,
+/// this never overflows: `gamma(x)` itself exceeds `f64::MAX` for `x`
+/// beyond ~171, well within the range `ln_gamma` needs to support here
+/// (e.g. `a = df/2` for a Friedman test with a few hundred folds).
 #[allow(clippy::excessive_precision)]
-fn gamma(x: f64) -> f64 {
+fn ln_gamma(x: f64) -> f64 {
     if x < 0.5 {
-        return std::f64::consts::PI / ((std::f64::consts::PI * x).sin() * gamma(1.0 - x));
+        return (std::f64::consts::PI / (std::f64::consts::PI * x).sin()).ln() - ln_gamma(1.0 - x);
     }
     let x = x - 1.0;
     let g = 7.0;
@@ -618,22 +680,45 @@ fn gamma(x: f64) -> f64 {
     }
 
     let t = x + g + 0.5;
-    (2.0 * std::f64::consts::PI).sqrt() * t.powf(x + 0.5) * (-t).exp() * sum
+    0.5 * (2.0 * std::f64::consts::PI).ln() + (x + 0.5) * t.ln() - t + sum.ln()
 }
 
 // ── Helper: binomial CDF ───────────────────────────────────────────
 
 /// Binomial CDF: P(X ≤ k) where X ~ Binomial(n, p).
+///
+/// Computes each term's log-probability via [`ln_gamma`]-based log-binomial
+/// coefficients and combines them with a log-sum-exp, rather than the
+/// direct multiplicative recurrence `binom_coeff *= (n-i+1)/i` used before
+/// this fix. That recurrence overflows to `f64::INFINITY` once `C(n, n/2)`
+/// exceeds `f64::MAX` (around `n ~ 1030`), and the subsequent
+/// `binom_coeff * p.powi(i) * (1-p).powi(n-i)` -- `inf * (a vanishingly
+/// small power)` -- evaluates to `NaN`. That `NaN` then poisons the sum,
+/// and `NaN.min(1.0)` returns `1.0` (`f64::min` favors the non-NaN operand),
+/// so `sign_test` silently reported "not significant" for any sample size
+/// above ~1030, exactly where the evidence would otherwise be overwhelming.
 fn binomial_cdf(k: usize, n: usize, p: f64) -> f64 {
-    let mut sum = 0.0;
-    let mut binom_coeff = 1.0;
-    for i in 0..=k {
-        if i > 0 {
-            binom_coeff *= (n - i + 1) as f64 / i as f64;
-        }
-        sum += binom_coeff * p.powi(i as i32) * (1.0 - p).powi((n - i) as i32);
+    if n == 0 {
+        return 1.0;
     }
-    sum
+    let ln_p = p.ln();
+    let ln_1mp = (1.0 - p).ln();
+    let ln_terms: Vec<f64> = (0..=k)
+        .map(|i| ln_binom_coeff(n, i) + i as f64 * ln_p + (n - i) as f64 * ln_1mp)
+        .collect();
+    let max_ln = ln_terms.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    if !max_ln.is_finite() {
+        return 0.0;
+    }
+    let sum: f64 = ln_terms.iter().map(|&lt| (lt - max_ln).exp()).sum();
+    (max_ln + sum.ln()).exp().clamp(0.0, 1.0)
+}
+
+/// Log of the binomial coefficient `C(n, k)`, via [`ln_gamma`] so it never
+/// overflows the way a direct product/factorial computation would for
+/// large `n`.
+fn ln_binom_coeff(n: usize, k: usize) -> f64 {
+    ln_gamma(n as f64 + 1.0) - ln_gamma(k as f64 + 1.0) - ln_gamma((n - k) as f64 + 1.0)
 }
 
 // ── Convenience: compare_models ────────────────────────────────────
@@ -858,5 +943,110 @@ mod tests {
         assert!((standard_normal_cdf(0.0) - 0.5).abs() < 0.001);
         assert!((standard_normal_cdf(1.96) - 0.975).abs() < 0.01);
         assert!((standard_normal_cdf(-1.96) - 0.025).abs() < 0.01);
+    }
+
+    /// Regression test for the chi-squared CDF/SF fix: golden values from
+    /// `scipy.stats.chi2.sf`. The old series-only `chi_squared_cdf`
+    /// implementation (200-term cap) collapsed to `cdf ~= 0` for large `x`,
+    /// i.e. `sf ~= 1.0`, for every one of these -- all of which are
+    /// realistic chi-squared statistics from McNemar/Friedman on large test
+    /// sets or fold counts. Uses `chi_squared_sf` directly (not
+    /// `1.0 - chi_squared_cdf(...)`), since for `x` this large `cdf` itself
+    /// rounds to exactly `1.0` at `f64` precision and the subtraction would
+    /// catastrophically cancel to `0.0` regardless of whether the
+    /// underlying incomplete-gamma computation is correct.
+    #[test]
+    fn chi_squared_sf_matches_scipy_for_large_statistics() {
+        let cases: [(f64, f64, f64); 4] = [
+            // (x, df, scipy sf)
+            (1.0, 1.0, 0.31731050786291115),
+            (10.0, 3.0, 0.01856613546304325),
+            (300.0, 1.0, 3.2943623833139784e-67),
+            (800.0, 2.0, 1.9151695967139763e-174),
+        ];
+        for (x, df, expected_sf) in cases {
+            let sf = chi_squared_sf(x, df);
+            let rel_err = ((sf - expected_sf) / expected_sf).abs();
+            assert!(
+                rel_err < 1e-6,
+                "chi2 sf(x={x}, df={df}): got {sf}, expected {expected_sf} (rel err {rel_err})"
+            );
+        }
+    }
+
+    /// Regression test: McNemar with a large, heavily one-sided test set
+    /// (400 discordant pairs all favoring one model) used to report
+    /// p ~= 0.467 / not significant (chi_squared_cdf collapsing to ~0);
+    /// scipy gives p ~= 1.5e-88, which the fix now reproduces to high
+    /// relative precision (not just "very small").
+    #[test]
+    fn mcnemar_large_discordant_count_is_significant() {
+        let truth = vec![0usize; 400];
+        let mut pred_a = vec![0usize; 400];
+        let pred_b = vec![0usize; 400];
+        // A wrong on all 400, B right on all 400 -> b_count=0, c_count=400
+        for p in pred_a.iter_mut() {
+            *p = 1;
+        }
+        let result = mcnemar_test(&pred_a, &pred_b, &truth).unwrap();
+        assert!(result.significant);
+        let expected = 1.4988838490704967e-88;
+        let rel_err = ((result.p_value - expected) / expected).abs();
+        assert!(
+            rel_err < 1e-6,
+            "mcnemar p-value: got {}, expected {} (rel err {})",
+            result.p_value,
+            expected,
+            rel_err
+        );
+    }
+
+    /// Regression test for `binomial_cdf`/`sign_test` overflow: the old
+    /// multiplicative recurrence for the binomial coefficient overflowed to
+    /// `inf` around n~1030, producing `NaN` terms that `NaN.min(1.0)`
+    /// silently turned into p=1.0. Golden values from
+    /// `scipy.stats.binomtest`.
+    #[test]
+    fn sign_test_matches_scipy_for_large_n() {
+        // n=1100, k=440 (n_plus/n_minus split so min=440)
+        let mut a = vec![0.0; 1100];
+        let mut b = vec![0.0; 1100];
+        for i in 0..440 {
+            a[i] = 1.0; // a > b: counts as n_plus
+        }
+        for i in 440..1100 {
+            b[i] = 1.0; // b > a: counts as n_minus
+        }
+        let result = sign_test(&a, &b).unwrap();
+        let expected = 3.479075487473135e-11;
+        let rel_err = ((result.p_value - expected) / expected).abs();
+        assert!(
+            rel_err < 1e-4,
+            "sign_test p-value: got {}, expected {} (rel err {})",
+            result.p_value,
+            expected,
+            rel_err
+        );
+        assert!(result.significant);
+    }
+
+    #[test]
+    fn sign_test_matches_scipy_small_n() {
+        let mut a = vec![0.0; 10];
+        let mut b = vec![0.0; 10];
+        for i in 0..2 {
+            a[i] = 1.0;
+        }
+        for i in 2..10 {
+            b[i] = 1.0;
+        }
+        let result = sign_test(&a, &b).unwrap();
+        let expected = 0.109375;
+        assert!(
+            (result.p_value - expected).abs() < 1e-9,
+            "got {}, expected {}",
+            result.p_value,
+            expected
+        );
     }
 }

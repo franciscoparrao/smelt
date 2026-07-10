@@ -16,12 +16,13 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 // ── Oblique tree node ───────────────────────────────────────────────
 
 /// A projection: linear combination of features.
 /// Stored as sparse (feature_index, weight) pairs.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Projection(Vec<(usize, f64)>);
 
 impl Projection {
@@ -32,6 +33,7 @@ impl Projection {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 enum ObliqueNode {
     Leaf(ObliqueLeaf),
     Split {
@@ -42,6 +44,7 @@ enum ObliqueNode {
     },
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 enum ObliqueLeaf {
     Class(usize, Vec<f64>),
     Value(f64),
@@ -339,7 +342,9 @@ fn regression_leaf(target: &[f64], indices: &[usize]) -> ObliqueLeaf {
 
 // ── Trained models ──────────────────────────────────────────────────
 
-struct TrainedObliqueTree {
+/// A trained oblique (SPORF) decision tree.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TrainedObliqueTree {
     root: ObliqueNode,
     feature_names: Vec<String>,
     feature_importances: Vec<f64>,
@@ -361,9 +366,17 @@ impl TrainedModel for TrainedObliqueTree {
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
         normalize_importance(&self.feature_names, &self.feature_importances)
     }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::ObliqueTree(
+            self.clone(),
+        ))
+    }
 }
 
-struct TrainedObliqueForest {
+/// A trained oblique (SPORF) forest.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TrainedObliqueForest {
     trees: Vec<ObliqueNode>,
     feature_names: Vec<String>,
     feature_importances: Vec<f64>,
@@ -385,6 +398,12 @@ impl TrainedModel for TrainedObliqueForest {
 
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
         normalize_importance(&self.feature_names, &self.feature_importances)
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::ObliqueForest(
+            self.clone(),
+        ))
     }
 }
 

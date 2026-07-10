@@ -290,7 +290,7 @@ type FeatureBins = HistBins;
 
 /// Internal tree node: a leaf with a fitted value, or a split on a feature
 /// (numeric threshold or categorical membership).
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum XGBNode {
     /// Terminal node holding the leaf's fitted output value.
     Leaf {
@@ -985,7 +985,7 @@ impl<'a> XGBTreeBuilder<'a> {
 
 // ── Trained model ───────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum XGBMode {
     Regression,
     BinaryClassif,
@@ -993,7 +993,7 @@ pub(crate) enum XGBMode {
 }
 
 /// A trained XGBoost model, ready to predict.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedXGBoost {
     pub(crate) trees: Vec<XGBNode>,
     pub(crate) initial: Vec<f64>,
@@ -1101,6 +1101,10 @@ impl TrainedModel for TrainedXGBoost {
                 .map(|(n, &i)| (n.clone(), i / total))
                 .collect(),
         )
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::XGBoost(self.clone()))
     }
 }
 

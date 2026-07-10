@@ -12,6 +12,7 @@ use crate::task::{RegressionTask, Task};
 use ndarray::Array2;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use serde::{Deserialize, Serialize};
 
 /// Quantile Gradient Boosting regressor.
 ///
@@ -84,7 +85,9 @@ impl QuantileGB {
     }
 }
 
-struct TrainedQuantileGB {
+/// A trained Quantile Gradient Boosting regressor.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TrainedQuantileGB {
     trees: Vec<Node>,
     initial: f64,
     learning_rate: f64,
@@ -108,6 +111,12 @@ impl TrainedModel for TrainedQuantileGB {
             })
             .collect();
         Ok(Prediction::regression(predicted))
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::QuantileGB(
+            self.clone(),
+        ))
     }
 }
 

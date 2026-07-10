@@ -55,6 +55,7 @@ use ndarray::Array2;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use serde::{Deserialize, Serialize};
 
 /// Samples from `Exponential(rate)` via inverse-CDF (`-ln(U) / rate`). No
 /// `rand_distr` dependency for a single distribution, consistent with this
@@ -86,6 +87,7 @@ fn weighted_choice(rng: &mut impl Rng, weights: &[f64]) -> usize {
 /// Welford's online mean/variance for regression. `Vec`-backed and O(1)
 /// update/space per point, like `HoeffdingTree`'s `FeatureStats`.
 #[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize)]
 enum NodeStats {
     Classification { counts: Vec<usize> },
     Regression { n: usize, mean: f64, m2: f64 },
@@ -161,6 +163,7 @@ impl NodeStats {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 enum MondrianNodeKind {
     Leaf {
         stats: NodeStats,
@@ -178,6 +181,7 @@ enum MondrianNodeKind {
 /// descendant); `tau` is this node's OWN split time if it's a `Split` node,
 /// or the time it would need to exceed to split (capped at the tree's
 /// `lifetime`) if it's a `Leaf`.
+#[derive(Clone, Serialize, Deserialize)]
 struct MondrianNode {
     min_d: Vec<f64>,
     max_d: Vec<f64>,
@@ -738,7 +742,9 @@ impl Learner for MondrianTree {
     }
 }
 
-struct TrainedMondrianTree {
+/// A trained Mondrian tree.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TrainedMondrianTree {
     root: Option<Box<MondrianNode>>,
     n_classes: usize,
     n_features: usize,
@@ -776,6 +782,12 @@ impl TrainedModel for TrainedMondrianTree {
                 .collect();
             Ok(Prediction::regression(predicted))
         }
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::MondrianTree(
+            self.clone(),
+        ))
     }
 }
 
@@ -840,7 +852,9 @@ impl Learner for MondrianForest {
     }
 }
 
-struct TrainedMondrianForest {
+/// A trained Mondrian forest.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TrainedMondrianForest {
     trees: Vec<(Box<MondrianNode>, bool)>,
     n_features: usize,
     n_classes: usize,
@@ -898,6 +912,12 @@ impl TrainedModel for TrainedMondrianForest {
                 .collect();
             Ok(Prediction::regression(predicted))
         }
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::MondrianForest(
+            self.clone(),
+        ))
     }
 }
 

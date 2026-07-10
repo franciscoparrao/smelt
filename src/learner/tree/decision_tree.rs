@@ -72,7 +72,7 @@ impl DecisionTree {
 use serde::{Deserialize, Serialize};
 
 /// A trained CART decision tree, ready to predict.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedDecisionTree {
     pub(crate) root: Node,
     pub(crate) feature_names: Vec<String>,
@@ -128,6 +128,12 @@ impl TrainedModel for TrainedDecisionTree {
                 .map(|(name, &imp)| (name.clone(), imp / total))
                 .collect(),
         )
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::DecisionTree(
+            self.clone(),
+        ))
     }
 }
 

@@ -36,12 +36,20 @@ pub(crate) struct SpatialBlockCV {
 
 #[pymethods]
 impl SpatialBlockCV {
+    /// `block_size`, when given, fixes the grid cell side length (in the
+    /// same units as `coords`) independently of `n_folds` — otherwise the
+    /// grid resolution is derived from `n_folds` alone
+    /// (`ceil(sqrt(n_folds))` per side), which cannot express e.g. "2 km
+    /// blocks" over a large extent without inflating `n_folds`.
     #[new]
-    fn new(n_folds: usize, coords: &Bound<'_, PyAny>) -> PyResult<Self> {
+    #[pyo3(signature = (n_folds, coords, block_size=None))]
+    fn new(n_folds: usize, coords: &Bound<'_, PyAny>, block_size: Option<f64>) -> PyResult<Self> {
         let parsed = parse_coords(coords)?;
-        Ok(Self {
-            inner: smelt_ml::prelude::SpatialBlockCV::new(n_folds, parsed),
-        })
+        let inner = match block_size {
+            Some(bs) => smelt_ml::prelude::SpatialBlockCV::with_block_size(n_folds, parsed, bs),
+            None => smelt_ml::prelude::SpatialBlockCV::new(n_folds, parsed),
+        };
+        Ok(Self { inner })
     }
 
     fn splits(&self, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {

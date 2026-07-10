@@ -200,22 +200,44 @@ fn fit_variogram(
 /// pivoting. `matrix` is square, `rhs.len() == matrix.len()`.
 fn gaussian_elimination_solve(mut matrix: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> Result<Vec<f64>> {
     let n = rhs.len();
+    // Scaled partial pivoting (Golub & Van Loan §3.4.10): each row's pivot
+    // candidate is judged relative to *that row's own* largest entry, not a
+    // single absolute or matrix-global threshold. This matters because the
+    // ordinary-kriging system built by `ordinary_kriging` is a bordered
+    // system: a k×k semivariogram sub-block (whose scale is the fitted
+    // sill -- tiny for small-magnitude targets, e.g. geochemistry
+    // concentrations ~1e-5 giving sill ~1e-10) bordered by an unrelated,
+    // always-O(1) Lagrange-multiplier row/column of ones. A single
+    // matrix-global-max-relative threshold judges the semivariogram block's
+    // pivots against that unrelated O(1) border scale and incorrectly
+    // calls a perfectly well-conditioned small-scale system singular; a raw
+    // fixed absolute threshold has the same problem in the other direction
+    // for large-scale targets. Scaling each row by its own max entry (fixed
+    // at the start, swapped alongside the row -- the standard textbook
+    // algorithm) makes the check scale-invariant per row instead.
+    let mut row_scale: Vec<f64> = matrix
+        .iter()
+        .map(|row| row.iter().fold(0.0f64, |acc, &v| acc.max(v.abs())).max(f64::MIN_POSITIVE))
+        .collect();
+
     for col in 0..n {
         let mut pivot_row = col;
-        let mut pivot_val = matrix[col][col].abs();
+        let mut pivot_score = matrix[col][col].abs() / row_scale[col];
         for r in (col + 1)..n {
-            if matrix[r][col].abs() > pivot_val {
-                pivot_val = matrix[r][col].abs();
+            let score = matrix[r][col].abs() / row_scale[r];
+            if score > pivot_score {
+                pivot_score = score;
                 pivot_row = r;
             }
         }
-        if pivot_val < 1e-10 {
+        if pivot_score < 1e-12 {
             return Err(SmeltError::NumericalError(
                 "singular kriging system (duplicate or degenerate coordinates?)".into(),
             ));
         }
         matrix.swap(col, pivot_row);
         rhs.swap(col, pivot_row);
+        row_scale.swap(col, pivot_row);
 
         for r in (col + 1)..n {
             let factor = matrix[r][col] / matrix[col][col];
@@ -263,11 +285,24 @@ fn ordinary_kriging(
     }
 
     // Degenerate variogram: the base learner's residuals have ~zero variance
-    // (e.g. it already interpolates the training data), so γ(h) ≈ 0 for
-    // every lag — there's no spatially-structured signal to krige, and the
-    // system built from an all-zero variogram is singular. `nugget <= sill`
-    // by construction (see `fit_variogram`), so checking the sill suffices.
-    if fit.sill < 1e-9 {
+    // relative to their own scale (e.g. it already interpolates the training
+    // data), so γ(h) ≈ 0 for every lag — there's no spatially-structured
+    // signal to krige, and the system built from an all-zero variogram is
+    // singular. `nugget <= sill` by construction (see `fit_variogram`), so
+    // checking the sill suffices. The threshold is scaled by the residuals'
+    // own variance rather than a fixed absolute `1e-9`: with small-magnitude
+    // targets (e.g. geochemistry concentrations ~1e-5), a real
+    // spatially-structured sill can itself be ~1e-10 -- a fixed cutoff
+    // disabled the kriging correction unconditionally for exactly the
+    // datasets where it's most needed, silently degrading to base-model-only
+    // predictions regardless of how good the base model actually is.
+    let residual_variance = {
+        let n = residuals.len().max(1) as f64;
+        let mean = residuals.iter().sum::<f64>() / n;
+        residuals.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / n
+    };
+    let degenerate_sill_threshold = (residual_variance * 1e-9).max(f64::MIN_POSITIVE);
+    if fit.sill < degenerate_sill_threshold {
         return Ok(0.0);
     }
 
@@ -790,6 +825,59 @@ mod tests {
                 target[i]
             );
         }
+    }
+
+    /// Regression test for the M-8 finding (`docs/auditoria_motor_2026-07-05.md`):
+    /// with small-magnitude targets (e.g. geochemistry concentrations
+    /// ~1e-5), a genuinely spatially-structured sill can itself be tiny
+    /// (~1e-10) -- the fixed absolute `1e-9` threshold this test replaces
+    /// treated that as "degenerate" and silently returned the uncorrected
+    /// base prediction for every query, regardless of how much real
+    /// spatial signal there was to krige. The base learner here only sees
+    /// a feature uncorrelated with position, so the entire small-scale
+    /// spatial pattern in the target ends up in the residuals; the kriging
+    /// correction should recover a meaningful chunk of it.
+    #[test]
+    fn predict_spatial_corrects_small_magnitude_spatially_structured_residuals() {
+        let n = 30;
+        // Feature scrambled relative to position: uncorrelated with the
+        // spatial pattern below, so the base model can't explain it away.
+        let feats: Vec<f64> = (0..n).map(|i| ((i * 37) % 11) as f64).collect();
+        let coords: Vec<(f64, f64)> = (0..n).map(|i| (i as f64, 0.0)).collect();
+        // Smooth, small-magnitude (~1e-5) spatial pattern, independent of `feats`.
+        let target: Vec<f64> = (0..n).map(|i| 1e-5 * (i as f64 * 0.4).sin()).collect();
+
+        let features = Array2::from_shape_vec((n, 1), feats).unwrap();
+        let task = RegressionTask::new("t", features.clone(), target.clone()).unwrap();
+
+        let mut kh = KrigingHybrid::new(|| Box::new(LinearRegression::new()), coords.clone())
+            .with_n_neighbors(8);
+        let model = kh.train_regress_geo(&task).unwrap();
+
+        let mse = |predicted: &[f64]| -> f64 {
+            predicted.iter().zip(&target).map(|(p, t)| (p - t).powi(2)).sum::<f64>() / n as f64
+        };
+
+        let Prediction::Regression { predicted: base_pred, .. } = model.predict(&features).unwrap()
+        else {
+            panic!("expected regression");
+        };
+        let Prediction::Regression { predicted: spatial_pred, .. } = model
+            .predict_spatial(&features, &coords)
+            .expect("a small-scale but genuinely non-degenerate variogram must not fail predict_spatial")
+        else {
+            panic!("expected regression");
+        };
+
+        let base_mse = mse(&base_pred);
+        let spatial_mse = mse(&spatial_pred);
+        assert!(
+            spatial_mse < base_mse * 0.5,
+            "kriging correction should meaningfully reduce MSE on this spatially \
+             structured small-scale signal: base_mse={base_mse:e}, spatial_mse={spatial_mse:e} \
+             (under the old fixed 1e-9 threshold these would be identical -- the \
+             correction never activates)"
+        );
     }
 
     /// Regression test: duplicate training coordinates (e.g. repeated

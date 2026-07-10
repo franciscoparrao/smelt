@@ -116,7 +116,7 @@ fn train_binary_svm(
 }
 
 /// A trained Linear SVM (one binary or one-vs-rest classifier per class), ready to predict.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedLinearSVM {
     pub(crate) classifiers: Vec<Array1<f64>>, // one per class (OVR)
     pub(crate) n_classes: usize,
@@ -200,6 +200,12 @@ impl TrainedModel for TrainedLinearSVM {
                 .map(|(name, &imp)| (name.clone(), imp / total))
                 .collect(),
         )
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::LinearSVM(
+            self.clone(),
+        ))
     }
 }
 

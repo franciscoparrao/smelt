@@ -1953,6 +1953,44 @@ fn spatial_block_spatial_separation() {
 }
 
 #[test]
+fn spatial_block_with_block_size_uses_fixed_cell_size_not_n_folds() {
+    // 3 pairs of points 2000 units apart, each pair 1 unit apart (well within
+    // a block_size=1000 cell). With n_folds derived from n_folds alone
+    // (grid_size = ceil(sqrt(3)) = 2), the grid would only have 2 columns
+    // and could not resolve blocks this fine over a 4001-unit extent. With a
+    // fixed block_size=1000, grid_cols = ceil(4001/1000) = 5, so cell
+    // (col = floor(x/1000)) is 0, 2, 4 for the three pairs, and
+    // fold = col % n_folds(=3) gives folds 0, 2, 1 respectively — i.e. the
+    // grid resolution comes from block_size, independent of n_folds.
+    let coords = vec![
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (2000.0, 0.0),
+        (2001.0, 0.0),
+        (4000.0, 0.0),
+        (4001.0, 0.0),
+    ];
+    let cv = SpatialBlockCV::with_block_size(3, coords, 1000.0);
+    let splits = cv.splits(6).unwrap();
+    assert_eq!(splits.len(), 3);
+
+    let mut test_by_fold: Vec<Vec<usize>> = splits.iter().map(|(_, t)| t.clone()).collect();
+    for fold in &mut test_by_fold {
+        fold.sort();
+    }
+    assert_eq!(test_by_fold[0], vec![0, 1], "fold 0 should hold the first pair");
+    assert_eq!(test_by_fold[1], vec![4, 5], "fold 1 should hold the third pair");
+    assert_eq!(test_by_fold[2], vec![2, 3], "fold 2 should hold the second pair");
+}
+
+#[test]
+fn spatial_block_with_block_size_rejects_non_positive_block_size() {
+    let coords = vec![(0.0, 0.0), (1.0, 0.0)];
+    let cv = SpatialBlockCV::with_block_size(2, coords, 0.0);
+    assert!(cv.splits(2).is_err());
+}
+
+#[test]
 fn spatial_buffer_removes_nearby() {
     // Tight cluster at (0,0) and one point far at (100,100)
     let coords = vec![(0.0, 0.0), (0.1, 0.0), (0.0, 0.1), (100.0, 100.0)];

@@ -144,7 +144,12 @@ impl LightGBM {
         self.other_rate = r;
         self
     }
-    /// Sets the fraction of rows randomly subsampled for each tree.
+    /// Sets the fraction of rows randomly subsampled for each tree, applied
+    /// *before* GOSS sampling: GOSS's own top/other-rate selection then runs
+    /// on this row population instead of the full training set, exactly as
+    /// the official implementation restricts `bagging_fraction` to operate
+    /// alongside (not instead of) GOSS. With the default `1.0`, this is a
+    /// no-op and GOSS sees the full training set, matching prior behavior.
     pub fn with_subsample(mut self, s: f64) -> Self {
         self.subsample = s;
         self
@@ -186,7 +191,7 @@ type Bins = HistBins;
 
 /// Internal tree node: a leaf with a fitted value, or a split on a feature
 /// (numeric threshold or categorical membership).
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum LGBNode {
     /// Terminal node holding the leaf's fitted output value.
     Leaf {
@@ -272,15 +277,21 @@ impl LGBNode {
 
 // ── GOSS sampling ───────────────────────────────────────────────────
 
+/// GOSS sampling restricted to `candidates` (a subset of `0..grads.len()`,
+/// typically the output of [`LightGBM::sample_rows`] row bagging -- the
+/// full `0..grads.len()` range when `subsample=1.0`). `top_rate`/
+/// `other_rate` apply to `candidates.len()`, not the full training set, so
+/// row bagging and GOSS compound rather than conflict.
 fn goss_sample(
     grads: &[f64],
     _hess: &[f64],
+    candidates: &[usize],
     top_rate: f64,
     other_rate: f64,
     rng: &mut StdRng,
 ) -> (Vec<usize>, Vec<f64>) {
-    let n = grads.len();
-    let mut sorted: Vec<usize> = (0..n).collect();
+    let n = candidates.len();
+    let mut sorted: Vec<usize> = candidates.to_vec();
     sorted.sort_by(|&a, &b| {
         grads[b]
             .abs()
@@ -312,10 +323,10 @@ fn goss_sample(
     let mut selected: Vec<usize> = top_indices.to_vec();
     selected.extend_from_slice(&sampled_rest);
 
-    // Scatter weights back to original sample indices (0..n): build_recursive
-    // and find_best_split_hist look up `weights[i]` by original sample id,
-    // not by position within `selected`.
-    let mut weights = vec![0.0; n];
+    // Scatter weights back to original sample indices (0..grads.len()):
+    // build_recursive and find_best_split_hist look up `weights[i]` by
+    // original sample id, not by position within `selected`/`candidates`.
+    let mut weights = vec![0.0; grads.len()];
     for &i in top_indices {
         weights[i] = 1.0;
     }
@@ -385,6 +396,23 @@ fn build_leaf_hist(
         .collect()
 }
 
+/// Denominator floor for `split_gain`/`leaf_weight`: guards `lambda=0`
+/// (the default) combined with `min_child_weight=0` -- or a genuinely
+/// zero-hessian loss -- from dividing by exactly zero and propagating
+/// NaN/Inf into the tree (audit issue M6). A no-op under the actual
+/// defaults, where `min_child_weight=1.0` already keeps every accepted
+/// split's `hl`/`hr` >= 1.0.
+const GAIN_DENOM_EPS: f64 = 1e-12;
+
+/// Second-order (Newton) split gain, shared by the numeric and categorical
+/// split search below (previously duplicated inline at each call site).
+#[inline]
+fn split_gain(gl: f64, hl: f64, gr: f64, hr: f64, lambda: f64) -> f64 {
+    0.5 * (gl * gl / (hl + lambda).max(GAIN_DENOM_EPS)
+        + gr * gr / (hr + lambda).max(GAIN_DENOM_EPS)
+        - (gl + gr) * (gl + gr) / (hl + hr + lambda).max(GAIN_DENOM_EPS))
+}
+
 /// Find best split from a cached histogram (no scanning).
 fn find_best_from_cache(
     bins: &Bins,
@@ -407,10 +435,7 @@ fn find_best_from_cache(
                     *nan_g,
                     *nan_h,
                     min_child_weight,
-                    |gl, hl, gr, hr| {
-                        0.5 * (gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
-                            - (gl + gr) * (gl + gr) / (hl + hr + lambda))
-                    },
+                    |gl, hl, gr, hr| split_gain(gl, hl, gr, hr, lambda),
                 )
                 .map(|(left_cats, gain, nan_left)| LeafCandidate {
                     gain,
@@ -435,9 +460,7 @@ fn find_best_from_cache(
                 if hl < min_child_weight || hr < min_child_weight {
                     continue;
                 }
-                let gain = 0.5
-                    * (gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
-                        - total_g * total_g / (total_h + lambda));
+                let gain = split_gain(gl, hl, gr, hr, lambda);
                 if gain > best_gain {
                     best_gain = gain;
                     best = Some((bin, gain, false));
@@ -452,9 +475,7 @@ fn find_best_from_cache(
                     if hl < min_child_weight || hr < min_child_weight {
                         continue;
                     }
-                    let gain = 0.5
-                        * (gl * gl / (hl + lambda) + gr * gr / (hr + lambda)
-                            - total_g * total_g / (total_h + lambda));
+                    let gain = split_gain(gl, hl, gr, hr, lambda);
                     if gain > best_gain {
                         best_gain = gain;
                         best = Some((bin, gain, true));
@@ -687,12 +708,12 @@ fn leaf_weight(
 ) -> f64 {
     let g: f64 = indices.iter().map(|&i| grads[i] * weights[i]).sum();
     let h: f64 = indices.iter().map(|&i| hess[i] * weights[i]).sum();
-    -g / (h + lambda)
+    -g / (h + lambda).max(GAIN_DENOM_EPS)
 }
 
 // ── Trained model ───────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum LGBMode {
     Regression,
     BinaryClassif,
@@ -700,7 +721,7 @@ pub(crate) enum LGBMode {
 }
 
 /// A trained LightGBM model, ready to predict.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedLightGBM {
     pub(crate) trees: Vec<LGBNode>,
     pub(crate) initial: Vec<f64>,
@@ -805,6 +826,10 @@ impl TrainedModel for TrainedLightGBM {
                 .collect(),
         )
     }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::LightGBM(self.clone()))
+    }
 }
 
 // ── Learner ─────────────────────────────────────────────────────────
@@ -820,6 +845,23 @@ impl LightGBM {
             v
         } else {
             (0..nf).collect()
+        }
+    }
+
+    /// Row bagging: the candidate population `goss_sample` then does its own
+    /// top/other-rate selection over. `subsample=1.0` (the default) returns
+    /// all `ns` rows, so GOSS's behavior is unchanged from before this
+    /// method existed.
+    fn sample_rows(&self, rng: &mut StdRng, ns: usize) -> Vec<usize> {
+        if self.subsample < 1.0 {
+            let k = (ns as f64 * self.subsample).ceil().max(1.0) as usize;
+            let mut v: Vec<usize> = (0..ns).collect();
+            v.shuffle(rng);
+            v.truncate(k);
+            v.sort_unstable();
+            v
+        } else {
+            (0..ns).collect()
         }
     }
 }
@@ -847,8 +889,9 @@ impl Learner for LightGBM {
             let grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
             let hess = vec![1.0; ns];
 
+            let bag = self.sample_rows(&mut rng, ns);
             let (selected, weights) =
-                goss_sample(&grads, &hess, self.top_rate, self.other_rate, &mut rng);
+                goss_sample(&grads, &hess, &bag, self.top_rate, self.other_rate, &mut rng);
             let cols = self.sample_cols(&mut rng, nf);
 
             let tree = build_leaf_wise_tree(
@@ -933,8 +976,9 @@ impl LightGBM {
                     p * (1.0 - p).max(1e-15)
                 })
                 .collect();
+            let bag = self.sample_rows(&mut rng, ns);
             let (selected, weights) =
-                goss_sample(&grads, &hess, self.top_rate, self.other_rate, &mut rng);
+                goss_sample(&grads, &hess, &bag, self.top_rate, self.other_rate, &mut rng);
             let cols = self.sample_cols(&mut rng, nf);
 
             let tree = build_leaf_wise_tree(
@@ -1016,6 +1060,7 @@ impl LightGBM {
         for _ in 0..self.n_estimators {
             let probs: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
             let cols = self.sample_cols(&mut rng, nf);
+            let bag = self.sample_rows(&mut rng, ns);
             for c in 0..nc {
                 let grads: Vec<f64> = (0..ns)
                     .map(|i| probs[i][c] - if target[i] == c { 1.0 } else { 0.0 })
@@ -1024,7 +1069,7 @@ impl LightGBM {
                     .map(|i| (probs[i][c] * (1.0 - probs[i][c])).max(1e-15))
                     .collect();
                 let (selected, weights) =
-                    goss_sample(&grads, &hess, self.top_rate, self.other_rate, &mut rng);
+                    goss_sample(&grads, &hess, &bag, self.top_rate, self.other_rate, &mut rng);
                 let tree = build_leaf_wise_tree(
                     &bins,
                     &grads,
@@ -1080,6 +1125,22 @@ impl LightGBM {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression test for M6 (docs/auditoria_motor_2026-07-05.md, Fase F):
+    /// `leaf_weight` and `split_gain` divide by `h + lambda` with no floor.
+    /// `lambda=0.0` is the default, and a genuinely (or near-)zero-hessian
+    /// leaf/child is reachable whenever a user sets `min_child_weight=0.0`
+    /// (its own default is 1.0, which normally keeps this from triggering) --
+    /// without a clamp this produced `-g/0.0` = +-infinity or NaN instead of
+    /// a finite (if extreme) leaf weight.
+    #[test]
+    fn leaf_weight_and_split_gain_stay_finite_at_zero_hessian_and_lambda() {
+        let lw = leaf_weight(&[1.0], &[0.0], &[1.0], &[0], 0.0);
+        assert!(lw.is_finite(), "leaf_weight with h=0, lambda=0 must not be NaN/Inf, got {lw}");
+
+        let g = split_gain(1.0, 0.0, -1.0, 0.0, 0.0);
+        assert!(g.is_finite(), "split_gain with hl=hr=0, lambda=0 must not be NaN/Inf, got {g}");
+    }
 
     /// Regression test for the histogram binning boundary bug (src/learner/histogram.rs):
     /// LightGBM always uses histogram splits, so a binary feature that perfectly
@@ -1141,10 +1202,12 @@ mod tests {
         let top_rate = 0.2;
         let other_rate = 0.1;
         let trials = 200;
+        let all: Vec<usize> = (0..n).collect();
         let mut total = 0.0;
         for t in 0..trials {
             let mut rng = StdRng::seed_from_u64(t as u64);
-            let (selected, weights) = goss_sample(&grads, &hess, top_rate, other_rate, &mut rng);
+            let (selected, weights) =
+                goss_sample(&grads, &hess, &all, top_rate, other_rate, &mut rng);
             total += selected.iter().map(|&i| weights[i] * hess[i]).sum::<f64>();
         }
         let avg = total / trials as f64;
@@ -1166,12 +1229,57 @@ mod tests {
             *g = 100.0; // unmistakably the top 20
         }
         let mut rng = StdRng::seed_from_u64(0);
-        let (selected, weights) = goss_sample(&grads, &hess, 0.1, 0.1, &mut rng);
+        let all: Vec<usize> = (0..n).collect();
+        let (selected, weights) = goss_sample(&grads, &hess, &all, 0.1, 0.1, &mut rng);
 
         for i in 0..20 {
             assert!(selected.contains(&i), "top-gradient sample {i} should always be selected");
             assert_eq!(weights[i], 1.0, "top-gradient samples must have weight 1.0");
         }
+    }
+
+    /// Regression test for the HIGH finding: `subsample` was accepted by
+    /// the builder and stored, but never consulted anywhere in training --
+    /// confirmed by a probe showing `subsample=1.0` and `subsample=0.05`
+    /// produced bit-for-bit identical predictions. With row bagging wired
+    /// into `goss_sample`'s candidate pool, a small `subsample` must change
+    /// the fitted model.
+    #[test]
+    fn subsample_actually_changes_the_fitted_model() {
+        use rand::Rng as _;
+        let mut rng = StdRng::seed_from_u64(7);
+        let n = 500;
+        let mut feats = Vec::with_capacity(n);
+        let mut target = Vec::with_capacity(n);
+        for _ in 0..n {
+            let x: f64 = rng.random::<f64>() * 10.0;
+            feats.push(x);
+            target.push(2.0 * x + rng.random::<f64>());
+        }
+        let features = Array2::from_shape_vec((n, 1), feats).unwrap();
+        let task = RegressionTask::new("lgb_subsample", features.clone(), target).unwrap();
+
+        let mut full = LightGBM::new().with_n_estimators(20).with_subsample(1.0);
+        let mut bagged = LightGBM::new().with_n_estimators(20).with_subsample(0.05);
+
+        let pred_full = full.train_regress(&task).unwrap().predict(&features).unwrap();
+        let pred_bagged = bagged.train_regress(&task).unwrap().predict(&features).unwrap();
+
+        let (Prediction::Regression { predicted: p_full, .. }, Prediction::Regression { predicted: p_bagged, .. }) =
+            (pred_full, pred_bagged)
+        else {
+            panic!("expected regression predictions");
+        };
+        let max_abs_diff = p_full
+            .iter()
+            .zip(&p_bagged)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            max_abs_diff > 1e-6,
+            "subsample=0.05 should produce different predictions than subsample=1.0, \
+             but max |diff| = {max_abs_diff} (subsample is being silently ignored)"
+        );
     }
 
     /// y depends on the parity of a 7-code categorical feature: one numeric

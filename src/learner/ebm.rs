@@ -13,6 +13,7 @@ use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::Array2;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use serde::{Deserialize, Serialize};
 
 /// Explainable Boosting Machine.
 ///
@@ -81,7 +82,8 @@ impl EBM {
 }
 
 /// Trained EBM. Each entry in `shape_trees` is a list of boosted stumps for that feature.
-struct TrainedEBM {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TrainedEBM {
     /// shape_trees[feature][round] = tree trained on that feature at that round
     shape_trees: Vec<Vec<Node>>,
     intercept: f64,
@@ -154,6 +156,10 @@ impl TrainedModel for TrainedEBM {
                 .map(|(n, &i)| (n.clone(), i / total))
                 .collect(),
         )
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::EBM(self.clone()))
     }
 }
 

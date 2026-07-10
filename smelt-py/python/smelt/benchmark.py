@@ -4,6 +4,9 @@ import numpy as np
 from smelt._smelt import accuracy_score, CrossValidation, SpatialBlockCV
 
 
+_NEEDS_COORDS = {"GeoXGBoost", "KrigingHybrid"}
+
+
 def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
     """Compare multiple learners with cross-validation.
 
@@ -18,7 +21,9 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
     cv : int or CV object, optional (default: 5)
         Number of folds, or a CV object (CrossValidation, SpatialBlockCV, ...).
     coords : array-like, optional
-        If provided with `cv` as int, uses SpatialBlockCV.
+        If provided with `cv` as int, uses SpatialBlockCV. Also passed to
+        the per-fold `fit()`/`predict()` calls of spatial learners
+        (``GeoXGBoost``, ``KrigingHybrid``), which require it.
         Accepts numpy array (Nx2), list of (x, y) tuples, or list of [x, y] lists.
     metrics : dict, optional
         Mapping of name → metric function. Default: {"accuracy": accuracy_score}.
@@ -53,6 +58,8 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
     else:
         splitter = cv
 
+    coords_arr = np.asarray(coords) if coords is not None else None
+
     n = len(y)
     splits = splitter.splits(n)
     is_classif = np.issubdtype(y.dtype, np.integer) or len(np.unique(y)) < 20
@@ -73,6 +80,15 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
             results[name]["_skipped"] = f"{name} does not support {task_name}"
             continue
 
+        needs_coords = type(learner_template).__name__ in _NEEDS_COORDS
+        if needs_coords and coords_arr is None:
+            results[name] = {
+                m: {"mean": float("nan"), "std": float("nan"), "folds": []}
+                for m in metrics
+            }
+            results[name]["_skipped"] = f"{name} requires coords= to be passed to benchmark()"
+            continue
+
         fold_scores = {m: [] for m in metrics}
 
         for train_idx, test_idx in splits:
@@ -87,8 +103,12 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
             # Clone learner (create fresh instance with same params)
             learner = learner_template.__class__(**_get_params(learner_template))
             try:
-                learner.fit(X_tr, y_tr)
-                preds = learner.predict(X_te)
+                if needs_coords:
+                    learner.fit(X_tr, y_tr, coords_arr[train_idx])
+                    preds = learner.predict(X_te, coords_arr[test_idx])
+                else:
+                    learner.fit(X_tr, y_tr)
+                    preds = learner.predict(X_te)
             except RuntimeError as exc:
                 # Incompatible learner (e.g. GaussianNB on regression target)
                 for m in metrics:

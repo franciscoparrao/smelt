@@ -41,7 +41,7 @@ impl Default for GaussianNB {
 }
 
 /// A trained Gaussian Naive Bayes classifier, ready to predict.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedGaussianNB {
     pub(crate) means: Vec<Vec<f64>>,     // [class][feature]
     pub(crate) variances: Vec<Vec<f64>>, // [class][feature]
@@ -97,6 +97,12 @@ impl TrainedModel for TrainedGaussianNB {
             truth: None,
             probabilities: Some(probabilities),
         })
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::GaussianNB(
+            self.clone(),
+        ))
     }
 }
 

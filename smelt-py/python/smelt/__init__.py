@@ -53,6 +53,12 @@ from smelt._smelt import (
     XLearner,
     RLearner,
     DrLearner,
+    # Clustering / anomaly detection
+    KMeans,
+    DBSCAN,
+    IsolationForest,
+    # Data loaders
+    CsvLoader,
     # Preprocessing
     StandardScaler,
     Smote,
@@ -100,6 +106,15 @@ from smelt._smelt import (
 from smelt.filters import cumulative_ranking
 from smelt.spatial import spatial_leave_one_out
 
+try:
+    # Only present when the extension was built with `--features parquet`
+    # (pulls in polars, ~200 transitive crates) -- opt-in, so a plain
+    # `pip install smelt` / `maturin develop` build doesn't need it.
+    from smelt._smelt import ParquetLoader
+    _HAS_PARQUET = True
+except ImportError:
+    _HAS_PARQUET = False
+
 __version__ = "0.5.1"
 __all__ = [
     "XGBoost", "CatBoost", "LightGBM",
@@ -110,6 +125,8 @@ __all__ = [
     "HoeffdingTree", "AdaptiveRandomForest", "MondrianForest", "DeepForest", "ExtremeLearningMachine", "LinearSVM", "ObliqueTree", "ObliqueForest", "QuantileForest", "QuantileGB",
     "Bagging", "Stacking", "DynamicEnsemble", "CostSensitiveClassifier", "registered_learner_ids",
     "TLearner", "SLearner", "XLearner", "RLearner", "DrLearner",
+    "KMeans", "DBSCAN", "IsolationForest",
+    "CsvLoader",
     "StandardScaler", "Smote", "SpatialSmote",
     "CrossValidation", "SpatialBlockCV", "SpatialBufferCV", "StratifiedCV", "GroupCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",

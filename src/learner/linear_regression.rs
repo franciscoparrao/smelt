@@ -100,7 +100,7 @@ fn solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
 use serde::{Deserialize, Serialize};
 
 /// Trained OLS model: fitted weights (including bias) plus feature names.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedLinearRegression {
     pub(crate) weights: Array1<f64>,
     pub(crate) feature_names: Vec<String>,
@@ -137,6 +137,12 @@ impl TrainedModel for TrainedLinearRegression {
                 .map(|(i, name)| (name.clone(), self.weights[i].abs() / total))
                 .collect(),
         )
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::LinearRegression(
+            self.clone(),
+        ))
     }
 }
 

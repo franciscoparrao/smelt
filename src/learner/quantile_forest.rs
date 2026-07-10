@@ -5,6 +5,7 @@
 //!
 //! Reference: Meinshausen, N. (2006). Quantile Regression Forests. JMLR 7, 983-999.
 
+use crate::learner::tree::MaxFeatures;
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
@@ -14,6 +15,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 /// Quantile Regression Forest.
 ///
@@ -44,6 +46,7 @@ pub struct QuantileForest {
     n_estimators: usize,
     max_depth: Option<usize>,
     min_samples_leaf: usize,
+    max_features: MaxFeatures,
     seed: u64,
 }
 
@@ -53,13 +56,21 @@ impl Default for QuantileForest {
             n_estimators: 100,
             max_depth: None,
             min_samples_leaf: 5,
+            max_features: MaxFeatures::Auto,
             seed: 42,
         }
     }
 }
 
 impl QuantileForest {
-    /// Creates a quantile regression forest with default hyperparameters.
+    /// Creates a quantile regression forest with default hyperparameters --
+    /// including, like [`RandomForest`](super::RandomForest)/
+    /// [`ExtraTrees`](super::ExtraTrees), *all* features considered per
+    /// split for this regression-only forest (see [`MaxFeatures`]), not the
+    /// `sqrt(n_features)` this builder used to hardcode regardless of
+    /// `max_features` setting -- QRF was the one regression forest left
+    /// out when RF/ExtraTrees regression switched to an all-features
+    /// default.
     pub fn new() -> Self {
         Self::default()
     }
@@ -80,6 +91,18 @@ impl QuantileForest {
         self.min_samples_leaf = n;
         self
     }
+    /// Forces the classic `sqrt(n_features)` candidate-feature heuristic,
+    /// overriding the all-features default.
+    pub fn with_max_features_sqrt(mut self) -> Self {
+        self.max_features = MaxFeatures::Sqrt;
+        self
+    }
+    /// Sets an explicit fraction of features considered at each split,
+    /// overriding the all-features default.
+    pub fn with_max_features_fraction(mut self, f: f64) -> Self {
+        self.max_features = MaxFeatures::Fraction(f);
+        self
+    }
     /// Sets the RNG seed used for bootstrap sampling and feature subsetting.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
@@ -89,6 +112,7 @@ impl QuantileForest {
 
 // ── QRF Tree internals ─────────────────────────────────────────────
 
+#[derive(Clone, Serialize, Deserialize)]
 enum QRFNode {
     Leaf {
         values: Vec<f64>,
@@ -128,6 +152,7 @@ fn build_qrf_tree(
     max_depth: Option<usize>,
     min_samples_leaf: usize,
     n_features: usize,
+    max_features: Option<usize>,
     depth: usize,
     rng: &mut impl Rng,
 ) -> QRFNode {
@@ -138,10 +163,13 @@ fn build_qrf_tree(
         return QRFNode::Leaf { values };
     }
 
-    // Random feature subset
-    let n_try = ((n_features as f64).sqrt().ceil() as usize).max(1);
+    // Random feature subset: `max_features` (from `MaxFeatures::resolve`,
+    // `None` meaning "all features") rather than a hardcoded
+    // `sqrt(n_features)`, so this regression forest follows the same
+    // task-appropriate default as RandomForest/ExtraTrees regression.
+    let n_try = max_features.unwrap_or(n_features).clamp(1, n_features);
     let mut feat_indices: Vec<usize> = (0..n_features).collect();
-    for i in 0..n_try.min(n_features) {
+    for i in 0..n_try {
         let j = rng.random_range(i..n_features);
         feat_indices.swap(i, j);
     }
@@ -152,7 +180,7 @@ fn build_qrf_tree(
     // MSE-based splitting
     let parent_mse = mse_indices(target, indices);
 
-    for &feat in &feat_indices[..n_try.min(n_features)] {
+    for &feat in &feat_indices[..n_try] {
         let mut sorted: Vec<usize> = indices.to_vec();
         sorted.sort_by(|&a, &b| {
             features[[a, feat]]
@@ -189,6 +217,7 @@ fn build_qrf_tree(
                 max_depth,
                 min_samples_leaf,
                 n_features,
+                max_features,
                 depth + 1,
                 rng,
             );
@@ -199,6 +228,7 @@ fn build_qrf_tree(
                 max_depth,
                 min_samples_leaf,
                 n_features,
+                max_features,
                 depth + 1,
                 rng,
             );
@@ -229,6 +259,7 @@ fn mse_indices(target: &[f64], indices: &[usize]) -> f64 {
 // ── Trained QRF ─────────────────────────────────────────────────────
 
 /// Trained Quantile Regression Forest with access to quantile predictions.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedQuantileForest {
     trees: Vec<QRFNode>,
     n_features: usize,
@@ -272,6 +303,12 @@ impl TrainedModel for TrainedQuantileForest {
         let predicted = self.predict_quantile(features, 0.5)?;
         Ok(Prediction::regression(predicted))
     }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::QuantileForest(
+            self.clone(),
+        ))
+    }
 }
 
 // ── Learner impl ────────────────────────────────────────────────────
@@ -287,6 +324,7 @@ impl Learner for QuantileForest {
         let target = task.target();
         let n_samples = task.n_samples();
         let n_features = task.n_features();
+        let max_features = self.max_features.resolve(n_features, false);
 
         let trees: Vec<QRFNode> = (0..self.n_estimators)
             .into_par_iter()
@@ -303,6 +341,7 @@ impl Learner for QuantileForest {
                     self.max_depth,
                     self.min_samples_leaf,
                     n_features,
+                    max_features,
                     0,
                     &mut rng,
                 )
@@ -310,5 +349,83 @@ impl Learner for QuantileForest {
             .collect();
 
         Ok(Box::new(TrainedQuantileForest { trees, n_features }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test: before this fix, QuantileForest hardcoded
+    /// `sqrt(n_features)` candidates per split regardless of `max_features`
+    /// (which didn't exist as a setting at all) -- the same failure mode
+    /// that motivated RandomForest/ExtraTrees regression switching to an
+    /// all-features default (`docs/auditoria_motor_2026-07-05.md` M-2).
+    /// With most features pure noise, the all-features default (now QRF's
+    /// default too) should out-predict the old hardcoded sqrt behavior.
+    #[test]
+    fn default_beats_sqrt_heuristic_when_few_features_are_informative() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let n = 400;
+        let p = 48;
+        let mut feats = Vec::with_capacity(n * p);
+        let mut target = Vec::with_capacity(n);
+        for _ in 0..n {
+            let mut row = Vec::with_capacity(p);
+            for _ in 0..p {
+                row.push(rng.random::<f64>());
+            }
+            let y = 5.0 * row[0] - 3.0 * row[1] + 2.0 * row[2] + rng.random::<f64>() * 0.1;
+            feats.extend_from_slice(&row);
+            target.push(y);
+        }
+        let features = Array2::from_shape_vec((n, p), feats).unwrap();
+        let task = RegressionTask::new("qrf_sparse_signal", features.clone(), target.clone()).unwrap();
+
+        let rmse = |predicted: &[f64]| -> f64 {
+            (predicted.iter().zip(&target).map(|(p, t)| (p - t).powi(2)).sum::<f64>() / n as f64)
+                .sqrt()
+        };
+
+        fn regression_values(pred: Prediction) -> Vec<f64> {
+            let Prediction::Regression { predicted, .. } = pred else {
+                panic!("expected regression");
+            };
+            predicted
+        }
+
+        let mut default_qrf = QuantileForest::new().with_n_estimators(50).with_seed(1);
+        let default_model = default_qrf.train_regress(&task).unwrap();
+        let default_rmse = rmse(&regression_values(default_model.predict(&features).unwrap()));
+
+        let mut sqrt_qrf = QuantileForest::new()
+            .with_n_estimators(50)
+            .with_seed(1)
+            .with_max_features_sqrt();
+        let sqrt_model = sqrt_qrf.train_regress(&task).unwrap();
+        let sqrt_rmse = rmse(&regression_values(sqrt_model.predict(&features).unwrap()));
+
+        assert!(
+            default_rmse < sqrt_rmse,
+            "all-features default (RMSE={default_rmse}) should beat sqrt(p) \
+             heuristic (RMSE={sqrt_rmse}) when only 3/{p} features carry signal"
+        );
+    }
+
+    #[test]
+    fn max_features_fraction_is_plumbed_through() {
+        let features = Array2::from_shape_fn((50, 10), |(i, j)| ((i + j) % 7) as f64);
+        let target: Vec<f64> = (0..50).map(|i| i as f64 * 0.1).collect();
+        let task = RegressionTask::new("qrf_fraction", features.clone(), target).unwrap();
+
+        let mut qrf = QuantileForest::new()
+            .with_n_estimators(5)
+            .with_seed(1)
+            .with_max_features_fraction(0.3);
+        let model = qrf.train_regress(&task).unwrap();
+        let Prediction::Regression { predicted, .. } = model.predict(&features).unwrap() else {
+            panic!("expected regression");
+        };
+        assert_eq!(predicted.len(), 50);
     }
 }

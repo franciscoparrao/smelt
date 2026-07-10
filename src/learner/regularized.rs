@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 /// Trained Ridge/Lasso/Elastic Net model: fitted weights (including bias)
 /// shared across the three regularized-regression learners.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedRegularizedRegression {
     pub(crate) weights: Array1<f64>,
     pub(crate) feature_names: Vec<String>,
@@ -49,6 +49,12 @@ impl TrainedModel for TrainedRegularizedRegression {
                 .map(|(i, name)| (name.clone(), self.weights[i].abs() / total))
                 .collect(),
         )
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::RegularizedRegression(
+            self.clone(),
+        ))
     }
 }
 

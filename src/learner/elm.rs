@@ -15,9 +15,10 @@ use ndarray::{Array1, Array2};
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use serde::{Deserialize, Serialize};
 
 /// Hidden-layer activation function.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Activation {
     /// `1 / (1 + e^-x)`. Default -- the original paper's activation.
     Sigmoid,
@@ -35,6 +36,47 @@ impl Activation {
             Activation::Relu => x.max(0.0),
         }
     }
+}
+
+/// Computes per-feature mean/std over `features` and returns
+/// `(standardized, mean, std)`, where `standardized` has mean 0 and unit
+/// variance per column (a constant column gets `std` floored to `1.0`,
+/// leaving it as literal zeros rather than dividing by zero -- a constant
+/// column carries no information regardless of scale). ELM's fixed random
+/// input-to-hidden weights are drawn `Uniform(-1,1)`, which implicitly
+/// assumes inputs already sit on an O(1) scale (Huang et al.'s original
+/// benchmarks are normalized). With features on the realistic real-world
+/// scales common in this crate's GIS-adjacent niche (UTM coordinates,
+/// elevations in meters), `w . x` saturates the sigmoid/tanh activation and
+/// the hidden layer degenerates -- the model still "trains" without error
+/// but predicts near-useless output. Standardizing internally (and storing
+/// `mean`/`std` on the trained model to apply identically at predict time,
+/// see [`standardize_apply`]) makes ELM scale-invariant like the rest of
+/// the catalog, at zero asymptotic cost.
+fn standardize_fit(features: &Array2<f64>) -> (Array2<f64>, Array1<f64>, Array1<f64>) {
+    let n = features.nrows() as f64;
+    let mean = features.mean_axis(ndarray::Axis(0)).expect("features has at least one row");
+    let n_features = mean.len();
+    let mut std = Array1::zeros(n_features);
+    for j in 0..n_features {
+        let var = features.column(j).iter().map(|&v| (v - mean[j]).powi(2)).sum::<f64>() / n;
+        std[j] = if var.sqrt() < 1e-12 { 1.0 } else { var.sqrt() };
+    }
+    let standardized = standardize_apply(features, &mean, &std);
+    (standardized, mean, std)
+}
+
+/// Applies a previously-fit `(mean, std)` standardization to `features`.
+/// Used both to finish [`standardize_fit`] and, at predict time, to apply
+/// the exact same transform the model was trained on.
+fn standardize_apply(features: &Array2<f64>, mean: &Array1<f64>, std: &Array1<f64>) -> Array2<f64> {
+    let mut out = features.clone();
+    for j in 0..mean.len() {
+        for i in 0..features.nrows() {
+            out[[i, j]] = (features[[i, j]] - mean[j]) / std[j];
+        }
+    }
+    out
 }
 
 /// Solves the symmetric positive-definite system `Ax = b` via Gaussian
@@ -193,19 +235,24 @@ impl ExtremeLearningMachine {
     }
 }
 
-struct TrainedELM {
-    input_weights: Array2<f64>,
-    biases: Array1<f64>,
-    output_weights: Array2<f64>,
-    activation: Activation,
-    is_classifier: bool,
-    n_features: usize,
+/// A trained Extreme Learning Machine.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TrainedELM {
+    pub(crate) input_weights: Array2<f64>,
+    pub(crate) biases: Array1<f64>,
+    pub(crate) output_weights: Array2<f64>,
+    pub(crate) activation: Activation,
+    pub(crate) is_classifier: bool,
+    pub(crate) n_features: usize,
+    pub(crate) feature_mean: Array1<f64>,
+    pub(crate) feature_std: Array1<f64>,
 }
 
 impl TrainedModel for TrainedELM {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
         crate::validate::check_n_features(features, self.n_features)?;
-        let mut h = features.dot(&self.input_weights);
+        let standardized = standardize_apply(features, &self.feature_mean, &self.feature_std);
+        let mut h = standardized.dot(&self.input_weights);
         for mut row in h.rows_mut() {
             for (v, &bias) in row.iter_mut().zip(self.biases.iter()) {
                 *v = self.activation.apply(*v + bias);
@@ -242,6 +289,12 @@ impl TrainedModel for TrainedELM {
             Ok(Prediction::regression(predicted))
         }
     }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::ExtremeLearningMachine(
+            self.clone(),
+        ))
+    }
 }
 
 impl Learner for ExtremeLearningMachine {
@@ -256,8 +309,9 @@ impl Learner for ExtremeLearningMachine {
         let n_classes = task.n_classes();
         let n_features = task.n_features();
 
+        let (standardized, feature_mean, feature_std) = standardize_fit(features);
         let (w, b) = self.random_hidden_layer(n_features);
-        let h = self.hidden_output(features, &w, &b);
+        let h = self.hidden_output(&standardized, &w, &b);
 
         let mut one_hot = Array2::zeros((task.n_samples(), n_classes));
         for (i, &label) in target.iter().enumerate() {
@@ -273,6 +327,8 @@ impl Learner for ExtremeLearningMachine {
             activation: self.activation,
             is_classifier: true,
             n_features,
+            feature_mean,
+            feature_std,
         }))
     }
 
@@ -282,8 +338,9 @@ impl Learner for ExtremeLearningMachine {
         let target = task.target();
         let n_features = task.n_features();
 
+        let (standardized, feature_mean, feature_std) = standardize_fit(features);
         let (w, b) = self.random_hidden_layer(n_features);
-        let h = self.hidden_output(features, &w, &b);
+        let h = self.hidden_output(&standardized, &w, &b);
         let targets = Array2::from_shape_vec((target.len(), 1), target.to_vec())
             .expect("target length matches n_samples by construction");
 
@@ -296,6 +353,8 @@ impl Learner for ExtremeLearningMachine {
             activation: self.activation,
             is_classifier: false,
             n_features,
+            feature_mean,
+            feature_std,
         }))
     }
 }
@@ -403,6 +462,46 @@ mod tests {
         assert!(Activation::Tanh.apply(0.0).abs() < 1e-9);
         assert_eq!(Activation::Relu.apply(-5.0), 0.0);
         assert_eq!(Activation::Relu.apply(5.0), 5.0);
+    }
+
+    /// Regression test for the HIGH finding: ELM's `Uniform(-1,1)` random
+    /// input weights implicitly assume features on an O(1) scale. On a
+    /// perfectly linear relationship (the easiest possible fit) with
+    /// features at a realistic GIS scale (UTM-like coordinates, ~1e4), the
+    /// unstandardized model saturated the sigmoid and produced relative
+    /// RMSE ~0.85 (confirmed via a probe before this fix); with internal
+    /// standardization it should fit just as well as it does on [0,10]
+    /// features.
+    #[test]
+    fn fits_a_linear_trend_at_realistic_gis_feature_scales() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let n = 400;
+        let mut feats = Vec::with_capacity(n);
+        let mut target = Vec::with_capacity(n);
+        for _ in 0..n {
+            let x: f64 = rng.random::<f64>() * 1.0e4;
+            feats.push(x);
+            target.push(2.0 * x + 1.0);
+        }
+        let features = Array2::from_shape_vec((n, 1), feats).unwrap();
+        let task = RegressionTask::new("elm_gis_scale", features.clone(), target.clone()).unwrap();
+
+        let mut elm = ExtremeLearningMachine::new().with_n_hidden(100).with_seed(2);
+        let model = elm.train_regress(&task).unwrap();
+        let pred = model.predict(&features).unwrap();
+        let Prediction::Regression { predicted, .. } = pred else {
+            panic!("expected regression");
+        };
+        let mse: f64 = predicted.iter().zip(&target).map(|(p, t)| (p - t).powi(2)).sum::<f64>() / n as f64;
+        let target_var: f64 = {
+            let mean = target.iter().sum::<f64>() / n as f64;
+            target.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / n as f64
+        };
+        let relative_rmse = (mse / target_var).sqrt();
+        assert!(
+            relative_rmse < 0.05,
+            "should fit a perfect linear trend at GIS feature scales, got relative RMSE={relative_rmse}"
+        );
     }
 
     #[test]

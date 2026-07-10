@@ -9,21 +9,21 @@ use super::{
     ExtremeLearningMachine, GaussianNB, GradientBoosting, HoeffdingTree, KNearestNeighbors, Lasso,
     Learner, LightGBM, LinearRegression, LinearSVM, LogisticRegression, MondrianForest,
     MondrianTree, ObliqueForest, ObliqueTree, QuantileForest, QuantileGB, RandomForest, Ridge,
-    XGBoost,
+    XGBoost, EBM,
 };
 use crate::{Result, SmeltError};
 
 /// Construct a learner by its `id()` string, using default hyperparameters.
 ///
 /// Not every learner is registered: [`super::Bagging`], [`super::Stacking`],
-/// [`super::DynamicEnsemble`] and [`super::CostSensitiveClassifier`] wrap
-/// *other* learners via a base-learner factory that has no sensible
-/// default (`CostSensitiveClassifier` additionally needs an explicit cost
-/// matrix with no sensible default either), and [`super::GeoXGBoost`] needs
-/// training coordinates supplied externally. [`super::ObliqueForest`], by
-/// contrast, is a self-contained ensemble of its own oblique trees (not
-/// pluggable) and *is* registered. See [`registered_learner_ids`] for the
-/// full list.
+/// [`super::DynamicEnsemble`], [`super::CostSensitiveClassifier`] and
+/// [`super::KrigingHybrid`] wrap *other* learners via a base-learner factory
+/// that has no sensible default (`CostSensitiveClassifier` additionally
+/// needs an explicit cost matrix with no sensible default either), and
+/// [`super::GeoXGBoost`] needs training coordinates supplied externally.
+/// [`super::ObliqueForest`] and [`EBM`], by contrast, are self-contained
+/// (no factory, no external coordinates) and *are* registered. See
+/// [`registered_learner_ids`] for the full list.
 pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
     Ok(match id {
         "adaboost" => Box::new(AdaBoost::default()),
@@ -31,6 +31,7 @@ pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
         "catboost" => Box::new(CatBoost::default()),
         "decision_tree" => Box::new(DecisionTree::default()),
         "deep_forest" => Box::new(DeepForest::default()),
+        "ebm" => Box::new(EBM::default()),
         "elastic_net" => Box::new(ElasticNet::default()),
         "elm" => Box::new(ExtremeLearningMachine::default()),
         "extra_trees" => Box::new(ExtraTrees::default()),
@@ -55,8 +56,8 @@ pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
         other => {
             return Err(SmeltError::InvalidParameter(format!(
                 "unknown learner id \"{other}\" (or not registry-constructible: \
-                 ensembles like bagging/stacking/dynamic_ensemble need a base-learner \
-                 factory, and geo_xgboost needs training coordinates)"
+                 ensembles like bagging/stacking/dynamic_ensemble/kriging_hybrid need a \
+                 base-learner factory, and geo_xgboost needs training coordinates)"
             )));
         }
     })
@@ -70,6 +71,7 @@ pub fn registered_learner_ids() -> &'static [&'static str] {
         "catboost",
         "decision_tree",
         "deep_forest",
+        "ebm",
         "elastic_net",
         "elm",
         "extra_trees",
@@ -113,11 +115,36 @@ mod tests {
 
     #[test]
     fn factory_based_ensemble_ids_are_not_registered() {
-        for id in ["bagging", "stacking", "dynamic_ensemble", "cost_sensitive", "geo_xgboost"] {
+        for id in [
+            "bagging",
+            "stacking",
+            "dynamic_ensemble",
+            "cost_sensitive",
+            "kriging_hybrid",
+            "geo_xgboost",
+        ] {
             assert!(
                 learner_from_id(id).is_err(),
                 "{id} should not be registry-constructible"
             );
         }
+    }
+
+    /// Regression test (HIGH-5, `docs/auditoria_motor_2026-07-05.md`): the
+    /// README's "27 self-contained learners" / "33 supervised learners"
+    /// claims went stale for months without anything catching it. This
+    /// doesn't validate the README text itself (nothing outside a doc test
+    /// can), but pins the registry count to a literal so that adding or
+    /// removing a registered learner without updating README.md's "Model
+    /// registry" bullet and "All Supervised Learners" table fails CI
+    /// immediately instead of silently drifting.
+    #[test]
+    fn registered_learner_count_matches_readme_claim() {
+        assert_eq!(
+            registered_learner_ids().len(),
+            27,
+            "registry count changed -- update the \"Model registry\" bullet \
+             and \"All Supervised Learners\" table in README.md to match"
+        );
     }
 }

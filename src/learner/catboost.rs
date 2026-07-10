@@ -240,7 +240,7 @@ fn ordered_target_encode(
 /// Oblivious (symmetric) tree: same split at each depth level.
 /// All nodes at the same depth use the same (feature, threshold).
 /// Total leaves = 2^depth.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ObliviousTree {
     /// One split per depth level: (feature_index, threshold).
     splits: Vec<(usize, f64)>,
@@ -338,7 +338,6 @@ fn build_oblivious_tree(
     n_features: usize,
     lambda: f64,
 ) -> ObliviousTree {
-    let n_leaves = 1 << depth;
     let mut splits = Vec::with_capacity(depth);
     let mut nan_lefts = Vec::with_capacity(depth);
     let mut partitions: Vec<Vec<usize>> = vec![indices.to_vec()];
@@ -425,6 +424,16 @@ fn build_oblivious_tree(
             }
         }
 
+        // Because the split is shared across every current leaf (the
+        // oblivious/symmetric-tree property), a level's best available gain
+        // can be negative even though each individual leaf's greedy gain
+        // would be checked separately in a non-oblivious tree: forcing that
+        // split would make the loss worse on net. Stop growing rather than
+        // accept it -- the tree simply ends up shallower than `depth`.
+        if best_gain <= 0.0 {
+            break;
+        }
+
         let threshold = bins.boundaries[best_feat][best_bin];
         splits.push((best_feat, threshold));
         nan_lefts.push(best_nan_left);
@@ -486,7 +495,10 @@ fn build_oblivious_tree(
         cache = new_cache;
     }
 
-    let mut leaf_weights = vec![0.0; n_leaves];
+    // Not necessarily `n_leaves` (2^depth): a level breaks out of the loop
+    // above and stops growing early if its best available gain is <= 0, so
+    // `partitions.len()` is the true final leaf count.
+    let mut leaf_weights = vec![0.0; partitions.len()];
     for (leaf_idx, partition) in partitions.iter().enumerate() {
         let g: f64 = partition.iter().map(|&i| grads[i]).sum();
         let h: f64 = partition.iter().map(|&i| hess[i]).sum();
@@ -506,7 +518,7 @@ fn build_oblivious_tree(
 
 // ── Trained model ───────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum CBMode {
     Regression,
     BinaryClassif,
@@ -514,7 +526,7 @@ pub(crate) enum CBMode {
 }
 
 /// A trained CatBoost model, ready to predict.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedCatBoost {
     pub(crate) trees: Vec<ObliviousTree>,
     pub(crate) initial: Vec<f64>,
@@ -522,36 +534,57 @@ pub struct TrainedCatBoost {
     pub(crate) mode: CBMode,
     pub(crate) feature_names: Vec<String>,
     pub(crate) cat_features: Vec<usize>,
-    pub(crate) cat_encodings: HashMap<usize, HashMap<i64, f64>>,
+    /// One target-statistic encoding map per class output. Regression and
+    /// binary classification have a single output, so this has exactly one
+    /// entry. Multiclass has `n_classes` entries — each computed from that
+    /// class's own one-vs-rest binary indicator target (audit issue M4: a
+    /// single encoding computed from the raw class *index* as if it were a
+    /// continuous/ordinal target conflated unrelated nominal classes into
+    /// one meaningless "average class index" statistic).
+    pub(crate) cat_encodings: Vec<HashMap<usize, HashMap<i64, f64>>>,
     /// Target prior used as the fallback encoding for categories never seen
     /// during training (audit issue M3: they used to pass through as raw codes
-    /// into thresholds living in target-statistic space). `serde(default)` so
-    /// models serialized before this field existed still load (0.0 keeps a
-    /// neutral value; retrain to get the real prior).
+    /// into thresholds living in target-statistic space), index-aligned with
+    /// `cat_encodings`. `serde(default)` so models serialized before this
+    /// field existed still load (empty keeps the pre-M4 neutral fallback of
+    /// 0.0 for every class; retrain to get the real priors).
     #[serde(default)]
-    pub(crate) prior: f64,
+    pub(crate) prior: Vec<f64>,
+}
+
+impl TrainedCatBoost {
+    /// Apply the `c`-th output's categorical encoding (using its final
+    /// training statistics) to raw features. NaN stays NaN (missing category
+    /// → NaN-aware split routing); unseen categories fall back to that
+    /// output's training prior. `c` is always 0 for Regression/BinaryClassif
+    /// (a single output); MultiClassif has one independently-fit encoding
+    /// per class (see `cat_encodings`'s doc comment).
+    fn encode_for_output(&self, features: &Array2<f64>, c: usize) -> Array2<f64> {
+        let mut encoded = features.clone();
+        let Some(encodings_by_col) = self.cat_encodings.get(c) else {
+            return encoded; // pre-M4 model with no stored encodings at all
+        };
+        let prior = self.prior.get(c).copied().unwrap_or(0.0);
+        for (&col, encodings) in encodings_by_col {
+            for i in 0..features.nrows() {
+                let raw = features[[i, col]];
+                if raw.is_nan() {
+                    continue;
+                }
+                encoded[[i, col]] = encodings.get(&(raw as i64)).copied().unwrap_or(prior);
+            }
+        }
+        encoded
+    }
 }
 
 impl TrainedModel for TrainedCatBoost {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
         crate::validate::check_n_features(features, self.feature_names.len())?;
 
-        // Apply categorical encoding (using final training statistics).
-        // NaN stays NaN (missing category → NaN-aware split routing);
-        // unseen categories fall back to the training prior.
-        let mut encoded = features.clone();
-        for (&col, encodings) in &self.cat_encodings {
-            for i in 0..features.nrows() {
-                let raw = features[[i, col]];
-                if raw.is_nan() {
-                    continue;
-                }
-                encoded[[i, col]] = encodings.get(&(raw as i64)).copied().unwrap_or(self.prior);
-            }
-        }
-
         match &self.mode {
             CBMode::Regression => {
+                let encoded = self.encode_for_output(features, 0);
                 let predicted: Vec<f64> = (0..encoded.nrows())
                     .into_par_iter()
                     .map(|i| {
@@ -566,6 +599,7 @@ impl TrainedModel for TrainedCatBoost {
                 Ok(Prediction::regression(predicted))
             }
             CBMode::BinaryClassif => {
+                let encoded = self.encode_for_output(features, 0);
                 let results: Vec<(usize, Vec<f64>)> = (0..encoded.nrows())
                     .into_par_iter()
                     .map(|i| {
@@ -593,13 +627,21 @@ impl TrainedModel for TrainedCatBoost {
             CBMode::MultiClassif { n_classes } => {
                 let k = *n_classes;
                 let ni = self.trees.len() / k;
-                let results: Vec<(usize, Vec<f64>)> = (0..encoded.nrows())
+                // One independently-encoded feature matrix per class output
+                // (audit issue M4) — each class's trees were trained on
+                // categorical stats derived from that class's own
+                // one-vs-rest indicator target, not a single shared
+                // "average class index" encoding.
+                let encoded_by_class: Vec<Array2<f64>> =
+                    (0..k).map(|c| self.encode_for_output(features, c)).collect();
+                let n_rows = features.nrows();
+                let results: Vec<(usize, Vec<f64>)> = (0..n_rows)
                     .into_par_iter()
                     .map(|i| {
-                        let r = encoded.row(i);
                         let mut scores = self.initial.clone();
                         for iter in 0..ni {
                             for c in 0..k {
+                                let r = encoded_by_class[c].row(i);
                                 scores[c] +=
                                     self.learning_rate * self.trees[iter * k + c].predict_one(r);
                             }
@@ -627,6 +669,10 @@ impl TrainedModel for TrainedCatBoost {
                 })
             }
         }
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::CatBoost(self.clone()))
     }
 }
 
@@ -704,8 +750,8 @@ impl Learner for CatBoost {
             mode: CBMode::Regression,
             feature_names: task.feature_names().to_vec(),
             cat_features,
-            cat_encodings,
-            prior,
+            cat_encodings: vec![cat_encodings],
+            prior: vec![prior],
         }))
     }
 
@@ -804,8 +850,8 @@ impl CatBoost {
             mode: CBMode::BinaryClassif,
             feature_names: task.feature_names().to_vec(),
             cat_features,
-            cat_encodings,
-            prior,
+            cat_encodings: vec![cat_encodings],
+            prior: vec![prior],
         }))
     }
 
@@ -817,25 +863,50 @@ impl CatBoost {
         let mut rng = StdRng::seed_from_u64(self.seed);
         let cat_features = self.effective_cat_features(task);
 
-        let target_f64: Vec<f64> = target.iter().map(|&t| t as f64).collect();
-        let prior = target_f64.iter().sum::<f64>() / ns as f64;
-        let encoded = ordered_target_encode(
-            features,
-            &target_f64,
-            &cat_features,
-            prior,
-            self.prior_strength,
-            &mut rng,
-        );
-
-        let cat_encodings = build_final_encodings(
-            features,
-            &target_f64,
-            &cat_features,
-            prior,
-            self.prior_strength,
-        );
-        let eval_encoded = eval.map(|(ef, _)| Self::encode_eval(ef, &cat_encodings, prior));
+        // One target-statistic encoding per class (audit issue M4): the raw
+        // class index (0, 1, 2, ...) has no meaning as a continuous target
+        // for nominal classes, so a single encoding computed from it (as
+        // this used to do) produced a meaningless "average class index"
+        // statistic instead of per-class target information. Each class c
+        // gets its own ordered target encoding from a one-vs-rest binary
+        // indicator (1{class == c}), its own final encoding map (used at
+        // predict time), and its own histogram bins — matching how that
+        // class's gradients/hessians are actually computed below.
+        let one_vs_rest: Vec<Vec<f64>> = (0..nc)
+            .map(|c| target.iter().map(|&t| if t == c { 1.0 } else { 0.0 }).collect())
+            .collect();
+        let priors: Vec<f64> = one_vs_rest
+            .iter()
+            .map(|ind| ind.iter().sum::<f64>() / ns as f64)
+            .collect();
+        let encoded_by_class: Vec<Array2<f64>> = (0..nc)
+            .map(|c| {
+                ordered_target_encode(
+                    features,
+                    &one_vs_rest[c],
+                    &cat_features,
+                    priors[c],
+                    self.prior_strength,
+                    &mut rng,
+                )
+            })
+            .collect();
+        let cat_encodings: Vec<HashMap<usize, HashMap<i64, f64>>> = (0..nc)
+            .map(|c| {
+                build_final_encodings(
+                    features,
+                    &one_vs_rest[c],
+                    &cat_features,
+                    priors[c],
+                    self.prior_strength,
+                )
+            })
+            .collect();
+        let eval_encoded_by_class: Option<Vec<Array2<f64>>> = eval.map(|(ef, _)| {
+            (0..nc)
+                .map(|c| Self::encode_eval(ef, &cat_encodings[c], priors[c]))
+                .collect()
+        });
 
         let mut cc = vec![0usize; nc];
         for &t in target {
@@ -850,7 +921,8 @@ impl CatBoost {
             eval.map(|(ef, _)| (0..ef.nrows()).map(|_| initial.clone()).collect());
         let mut trees = Vec::with_capacity(self.n_estimators * nc);
         let indices: Vec<usize> = (0..ns).collect();
-        let bins = HistBins::build(&encoded, 64);
+        let bins_by_class: Vec<HistBins> =
+            encoded_by_class.iter().map(|enc| HistBins::build(enc, 64)).collect();
         let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
@@ -863,7 +935,7 @@ impl CatBoost {
                     .map(|i| (probs[i][c] * (1.0 - probs[i][c])).max(1e-15))
                     .collect();
                 let tree = build_oblivious_tree(
-                    &bins,
+                    &bins_by_class[c],
                     &grads,
                     &hess,
                     &indices,
@@ -872,9 +944,10 @@ impl CatBoost {
                     self.lambda,
                 );
                 for i in 0..ns {
-                    fv[i][c] += self.learning_rate * tree.predict_one(encoded.row(i));
+                    fv[i][c] += self.learning_rate * tree.predict_one(encoded_by_class[c].row(i));
                 }
-                if let (Some(efv), Some(ee)) = (&mut eval_fv, &eval_encoded) {
+                if let (Some(efv), Some(eebc)) = (&mut eval_fv, &eval_encoded_by_class) {
+                    let ee = &eebc[c];
                     for i in 0..ee.nrows() {
                         efv[i][c] += self.learning_rate * tree.predict_one(ee.row(i));
                     }
@@ -907,7 +980,7 @@ impl CatBoost {
             feature_names: task.feature_names().to_vec(),
             cat_features,
             cat_encodings,
-            prior,
+            prior: priors,
         }))
     }
 }
@@ -989,6 +1062,33 @@ mod tests {
             / n as f64)
             .sqrt();
         assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
+    }
+
+    /// Regression test for M5 (docs/auditoria_motor_2026-07-05.md, Fase F):
+    /// `build_oblivious_tree` used to always split `depth` times regardless
+    /// of gain, even when the best available split at some level made the
+    /// loss strictly worse (gain <= 0) -- a real possibility for oblivious
+    /// trees specifically, since the split is forced across every current
+    /// leaf simultaneously rather than chosen greedily per leaf. With
+    /// perfectly uninformative gradients (every sample has gradient 0), no
+    /// split can improve on gain 0, so the tree must stay a single leaf
+    /// (`splits.len() == 0`) instead of forcing `depth` pointless splits.
+    #[test]
+    fn zero_gain_stops_growth_instead_of_forcing_a_split() {
+        let n = 200;
+        let features = Array2::<f64>::from_shape_fn((n, 3), |(i, j)| ((i * 7 + j * 3) % 11) as f64);
+        let grads = vec![0.0; n];
+        let hess = vec![1.0; n];
+        let indices: Vec<usize> = (0..n).collect();
+        let bins = HistBins::build(&features, 64);
+
+        let tree = build_oblivious_tree(&bins, &grads, &hess, &indices, 6, 3, 1.0);
+        assert_eq!(
+            tree.splits.len(),
+            0,
+            "zero-gradient data has no beneficial split; tree should stay a single leaf"
+        );
+        assert_eq!(tree.leaf_weights.len(), 1);
     }
 
     /// Regression test for audit issue M2: NaN gradient/hessian mass used to be
@@ -1085,6 +1185,58 @@ mod tests {
         assert!(
             (enc0 - (1.0 + 3.0 + 2.0) / 3.0).abs() < 1e-12,
             "category 0 statistic must not include the NaN row's target (100), got {enc0}"
+        );
+    }
+
+    /// Regression test for M4 (docs/auditoria_motor_2026-07-05.md, Fase F):
+    /// `train_multiclass` used to encode categorical features once, from the
+    /// raw class *index* treated as a continuous target -- meaningless for
+    /// nominal classes. This constructs a categorical feature where that
+    /// collapses two genuinely distinguishable categories onto the same
+    /// encoded value: category 0 is a 50/50 mix of class 0 and class 2
+    /// (average index (0+2)/2 = 1.0), category 1 is 100% class 1 (average
+    /// index 1.0) -- under the old shared encoding both categories land at
+    /// ~1.0 and the tree has no way to split on this feature at all, even
+    /// though it's perfectly informative once encoded per-class
+    /// (one-vs-rest: category 1 is 100% positive for class 1 and 0% for
+    /// class 0/2; category 0 is 50% positive for class 0 and class 2, 0%
+    /// for class 1). With the per-class fix, class 1 must be near-perfectly
+    /// separable on this feature alone.
+    #[test]
+    fn multiclass_categorical_uses_per_class_target_stats() {
+        let n = 300;
+        let mut features = Array2::<f64>::zeros((n, 2));
+        let mut target = vec![0usize; n];
+        for i in 0..n {
+            if i < 150 {
+                features[[i, 0]] = 0.0; // category 0: mixed class 0/2
+                target[i] = if i % 2 == 0 { 0 } else { 2 };
+            } else {
+                features[[i, 0]] = 1.0; // category 1: pure class 1
+                target[i] = 1;
+            }
+            features[[i, 1]] = ((i * 37) % 17) as f64; // uninformative noise feature
+        }
+        let task = ClassificationTask::new("multiclass_cat", features.clone(), target.clone())
+            .unwrap();
+        let mut cb = CatBoost::new()
+            .with_n_estimators(50)
+            .with_depth(3)
+            .with_cat_features(vec![0]);
+        let model = cb.train_classif(&task).unwrap();
+        let pred = model.predict(&features).unwrap();
+        let Prediction::Classification { predicted, .. } = pred else {
+            panic!("expected classification")
+        };
+
+        // Class 1 (pure category 1) must be recovered essentially perfectly;
+        // the old shared "average class index" encoding could not separate
+        // it from category 0 at all on this feature.
+        let class1_recall = (150..n).filter(|&i| predicted[i] == 1).count() as f64 / 150.0;
+        assert!(
+            class1_recall > 0.95,
+            "class 1 (pure category) should be near-perfectly recovered via per-class \
+             target stats, got recall={class1_recall}"
         );
     }
 

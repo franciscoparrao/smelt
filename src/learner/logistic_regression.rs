@@ -118,7 +118,7 @@ use serde::{Deserialize, Serialize};
 
 /// Trained logistic regression model: one binary classifier per class
 /// (one-vs-rest for multiclass) plus the feature scaling used at train time.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedLogisticRegression {
     pub(crate) classifiers: Vec<Array1<f64>>,
     pub(crate) n_classes: usize,
@@ -214,6 +214,12 @@ impl TrainedModel for TrainedLogisticRegression {
                 .map(|(name, &imp)| (name.clone(), imp / n_classifiers / total * n_classifiers))
                 .collect(),
         )
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::LogisticRegression(
+            self.clone(),
+        ))
     }
 }
 

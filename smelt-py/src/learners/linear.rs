@@ -1,7 +1,7 @@
 //! Linear learners: LogisticRegression, LinearRegression, Ridge, Lasso,
 //! ElasticNet, LinearSVM.
 
-use crate::common::{define_learner, add_explain_methods, declare_support, declare_params};
+use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
@@ -10,6 +10,7 @@ use smelt_ml::learner::TrainedModel;
 // ── LogisticRegression ─────────────────────────────────────────────────
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct LogisticRegression {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -56,6 +57,7 @@ impl LogisticRegression {
 // ── LinearRegression ───────────────────────────────────────────────────
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct LinearRegression {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -90,6 +92,7 @@ impl LinearRegression {
 // ── Ridge ──────────────────────────────────────────────────────────────
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct Ridge {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -128,6 +131,10 @@ define_learner! {
     params = { alpha: f64 = 1.0 },
     ctor = |slf| smelt_ml::prelude::Lasso::new(slf.alpha),
     proba = false,
+    // Lasso/ElasticNet/Ridge all wrap the same Rust `RegularizedRegression`
+    // learner (differing only in L1/L2 mix), so they share one
+    // `SerializableModel` variant.
+    serial_as = "RegularizedRegression",
 }
 
 define_learner! {
@@ -135,6 +142,7 @@ define_learner! {
     params = { alpha: f64 = 1.0, l1_ratio: f64 = 0.5 },
     ctor = |slf| smelt_ml::prelude::ElasticNet::new(slf.alpha, slf.l1_ratio),
     proba = false,
+    serial_as = "RegularizedRegression",
 }
 
 define_learner! {
@@ -146,6 +154,7 @@ define_learner! {
         .with_learning_rate(slf.learning_rate)
         .with_seed(slf.seed),
     proba = true,
+    serial_as = "LinearSVM",
 }
 
 add_explain_methods!(LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet, LinearSVM);
@@ -160,3 +169,11 @@ declare_support!(LinearSVM,          classif = true,  regress = false);
 declare_params!(LogisticRegression, {});
 declare_params!(LinearRegression,   {});
 declare_params!(Ridge,              { alpha => "alpha" });
+
+add_persistence_methods!(
+    LogisticRegression => "LogisticRegression",
+    LinearRegression => "LinearRegression",
+    // Shares `RegularizedRegression` with Lasso/ElasticNet -- see their
+    // `define_learner!` invocations above.
+    Ridge => "RegularizedRegression",
+);

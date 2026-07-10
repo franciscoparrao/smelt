@@ -21,6 +21,7 @@ use ndarray::Array2;
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
 /// ADWIN (ADaptive WINdowing) concept-drift detector (Bifet & Gavaldà, 2007).
@@ -40,6 +41,17 @@ use std::collections::VecDeque;
 /// [`Adwin::with_max_window`] rather than solved algorithmically -- a
 /// reasonable scope call given this detector runs twice per tree per
 /// incoming sample in [`AdaptiveRandomForest`], not as a one-off analysis.
+///
+/// **Sensitivity floor** (audit issue N7): capping the window also caps how
+/// small an error-rate change this can ever detect, once the window is full.
+/// At the balanced cut (`n0 = n1 = max_window/2`), `epsilon = sqrt((1/n) *
+/// ln(4n/delta))`; with the default `max_window = 200` and
+/// [`AdaptiveRandomForest`]'s default warning delta (0.01), that's
+/// `epsilon ~= 0.34` -- a change in the running error rate smaller than
+/// ~34 percentage points, sustained across the whole window, is invisible
+/// to this detector at its default settings, no matter how long it persists.
+/// Smaller/gradual drifts need either a larger `max_window` (more memory and
+/// per-`add` cost) or a larger `delta` (more false positives) to be caught.
 #[derive(Debug, Clone)]
 pub struct Adwin {
     delta: f64,
@@ -148,17 +160,38 @@ fn sample_poisson(rng: &mut impl Rng, lambda: f64) -> u32 {
     k - 1
 }
 
-/// Builds a fresh `HoeffdingTree` with the given hyperparameters. A free
+/// Builds a fresh `HoeffdingTree` with the given hyperparameters, restricted
+/// to `feature_subset` (audit issue N6: each ensemble member gets its own
+/// random feature subspace, like `RandomForest`/`ExtraTrees` -- otherwise
+/// every tree in the "forest" would consider every feature at every split,
+/// and diversity would come only from online bagging's resampling, not from
+/// the feature-subspace diversity real random forests rely on too). A free
 /// function (not a `&self` method) so it can be called from inside a loop
 /// that already holds a mutable borrow of `AdaptiveRandomForest::trees`.
-fn build_tree(split_confidence: f64, grace_period: usize, max_depth: Option<usize>) -> HoeffdingTree {
+fn build_tree(
+    split_confidence: f64,
+    grace_period: usize,
+    max_depth: Option<usize>,
+    feature_subset: Vec<usize>,
+) -> HoeffdingTree {
     let mut t = HoeffdingTree::new()
         .with_delta(split_confidence)
-        .with_grace_period(grace_period);
+        .with_grace_period(grace_period)
+        .with_feature_subset(feature_subset);
     if let Some(d) = max_depth {
         t = t.with_max_depth(d);
     }
     t
+}
+
+/// Draws `k` distinct feature indices out of `0..n_features` uniformly at
+/// random (Fisher-Yates via `SliceRandom::shuffle`, then truncate).
+fn random_feature_subset(rng: &mut StdRng, n_features: usize, k: usize) -> Vec<usize> {
+    use rand::seq::SliceRandom;
+    let mut all: Vec<usize> = (0..n_features).collect();
+    all.shuffle(rng);
+    all.truncate(k.min(n_features).max(1));
+    all
 }
 
 /// Majority vote across a set of (possibly still-streaming) trees. Skips
@@ -205,6 +238,11 @@ struct Member {
     warning: Adwin,
     drift: Adwin,
     background: Option<BackgroundTree>,
+    /// This slot's random feature subspace (audit issue N6), fixed once at
+    /// creation and reused for every background/replacement tree built for
+    /// this slot -- a drift-triggered replacement restarts learning, not
+    /// the slot's place in the ensemble's feature-subspace diversity.
+    feature_subset: Vec<usize>,
 }
 
 /// Adaptive Random Forest: an ensemble of streaming Hoeffding trees with
@@ -330,16 +368,18 @@ impl AdaptiveRandomForest {
         self.total_drifts
     }
 
-    fn new_tree(&self) -> HoeffdingTree {
-        build_tree(self.split_confidence, self.grace_period, self.max_depth)
-    }
-
-    fn new_member(&self) -> Member {
+    fn new_member(&self, feature_subset: Vec<usize>) -> Member {
         Member {
-            tree: self.new_tree(),
+            tree: build_tree(
+                self.split_confidence,
+                self.grace_period,
+                self.max_depth,
+                feature_subset.clone(),
+            ),
             warning: Adwin::new(self.delta_warning),
             drift: Adwin::new(self.delta_drift),
             background: None,
+            feature_subset,
         }
     }
 
@@ -347,7 +387,18 @@ impl AdaptiveRandomForest {
     pub fn partial_fit(&mut self, features: &[f64], label: usize, n_classes: usize) {
         self.n_classes = self.n_classes.max(n_classes);
         if self.trees.is_empty() {
-            self.trees = (0..self.n_trees).map(|_| self.new_member()).collect();
+            // Random feature subspace per tree (audit issue N6), sized like
+            // RandomForest/ExtraTrees' classification default: sqrt(p).
+            // n_features is only known now, from this first sample -- like
+            // HoeffdingTree itself, ARF has no batch-upfront shape.
+            let n_features = features.len();
+            let subset_size = (n_features as f64).sqrt().ceil() as usize;
+            self.trees = (0..self.n_trees)
+                .map(|_| {
+                    let subset = random_feature_subset(&mut self.rng, n_features, subset_size);
+                    self.new_member(subset)
+                })
+                .collect();
         }
         // Copied out before the loop: `self.trees.iter_mut()` below holds a
         // borrow of that one field, but building a replacement tree needs
@@ -398,14 +449,24 @@ impl AdaptiveRandomForest {
 
             if warned && member.background.is_none() {
                 member.background = Some(BackgroundTree {
-                    tree: build_tree(split_confidence, grace_period, max_depth),
+                    tree: build_tree(
+                        split_confidence,
+                        grace_period,
+                        max_depth,
+                        member.feature_subset.clone(),
+                    ),
                 });
             }
 
             if drifted {
                 member.tree = match member.background.take() {
                     Some(bg) => bg.tree,
-                    None => build_tree(split_confidence, grace_period, max_depth),
+                    None => build_tree(
+                        split_confidence,
+                        grace_period,
+                        max_depth,
+                        member.feature_subset.clone(),
+                    ),
                 };
                 member.warning = Adwin::new(delta_warning);
                 member.drift = Adwin::new(delta_drift);
@@ -451,7 +512,9 @@ impl Learner for AdaptiveRandomForest {
     }
 }
 
-struct TrainedAdaptiveRandomForest {
+/// A trained Adaptive Random Forest ensemble of streaming Hoeffding trees.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TrainedAdaptiveRandomForest {
     trees: Vec<HoeffdingTree>,
     n_features: usize,
     n_classes: usize,
@@ -476,6 +539,12 @@ impl TrainedModel for TrainedAdaptiveRandomForest {
             truth: None,
             probabilities: Some(probabilities),
         })
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::AdaptiveRandomForest(
+            self.clone(),
+        ))
     }
 }
 
@@ -505,6 +574,81 @@ mod tests {
         assert!(
             detected_in_second_regime,
             "ADWIN should detect the injected mean shift from 0.05 to 0.6"
+        );
+    }
+
+    /// Regression test for N6 (docs/auditoria_motor_2026-07-05.md, Fase F):
+    /// each tree in the ensemble must get its own random feature subspace
+    /// (sized like RandomForest/ExtraTrees' sqrt(p) classification default),
+    /// not consider every feature -- and different trees must actually end
+    /// up with different subsets (the diversity this is meant to provide).
+    #[test]
+    fn arf_gives_each_tree_a_distinct_random_feature_subspace() {
+        let mut rng = StdRng::seed_from_u64(3);
+        let mut arf = AdaptiveRandomForest::new().with_n_trees(8).with_seed(5);
+        let n_features = 10;
+        for _ in 0..50 {
+            let x: Vec<f64> = (0..n_features).map(|_| rng.random::<f64>()).collect();
+            let y = rng.random_range(0..2);
+            arf.partial_fit(&x, y, 2);
+        }
+
+        let expected_size = (n_features as f64).sqrt().ceil() as usize; // 4
+        for member in &arf.trees {
+            assert_eq!(member.feature_subset.len(), expected_size);
+            assert!(member.feature_subset.iter().all(|&f| f < n_features));
+            let mut sorted = member.feature_subset.clone();
+            sorted.sort();
+            sorted.dedup();
+            assert_eq!(sorted.len(), expected_size, "feature subset must not contain duplicates");
+        }
+
+        let distinct_subsets: std::collections::HashSet<Vec<usize>> = arf
+            .trees
+            .iter()
+            .map(|m| {
+                let mut s = m.feature_subset.clone();
+                s.sort();
+                s
+            })
+            .collect();
+        assert!(
+            distinct_subsets.len() > 1,
+            "with 8 trees and C(10,4)=210 possible subsets, at least two trees should differ, \
+             got {} distinct subset(s)",
+            distinct_subsets.len()
+        );
+    }
+
+    /// Regression/golden test for N7's documented sensitivity floor: with
+    /// the default `max_window=200` and a delta of 0.01 (this crate's
+    /// default warning delta), the doc comment on `Adwin` derives a floor of
+    /// ~0.34 at the balanced cut. A clearly-smaller sustained jump must not
+    /// be detected; a clearly-larger one must be, once the new regime has
+    /// had the full window length to take over.
+    #[test]
+    fn adwin_sensitivity_floor_matches_doc_derivation() {
+        let detects_shift = |first: f64, second: f64| -> bool {
+            let mut adwin = Adwin::new(0.01);
+            for _ in 0..200 {
+                adwin.add(first);
+            }
+            let mut detected = false;
+            for _ in 0..200 {
+                if adwin.add(second) {
+                    detected = true;
+                }
+            }
+            detected
+        };
+
+        assert!(
+            !detects_shift(0.0, 0.15),
+            "a 0.15 jump is well below the documented ~0.34 floor and should not be detected"
+        );
+        assert!(
+            detects_shift(0.0, 0.6),
+            "a 0.6 jump is well above the documented ~0.34 floor and should be detected"
         );
     }
 

@@ -106,4 +106,13 @@ pub trait TrainedModel: Send + Sync {
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
         None
     }
+
+    /// Convert this trained model into its serializable form, if this
+    /// concrete type has a `SerializableModel` variant (`src/serialize.rs`).
+    /// Returns `None` for the `Box<dyn TrainedModel>`-holding composites
+    /// (Bagging, Pipeline, Stacking, GeoXGBoost, DeepForest, KrigingHybrid,
+    /// DynamicEnsemble, CostSensitiveClassifier) that have no variant.
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        None
+    }
 }

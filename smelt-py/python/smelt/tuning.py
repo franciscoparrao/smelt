@@ -1,5 +1,6 @@
 """Hyperparameter tuning with spatial-aware cross-validation."""
 
+import warnings
 import numpy as np
 from itertools import product
 
@@ -117,10 +118,24 @@ class RandomSearch:
                 if self.use_proba:
                     try:
                         proba = learner.predict_proba(X[test_idx])
-                        score = self.metric(y[test_idx].tolist(), proba.tolist())
-                    except Exception:
+                    except AttributeError:
+                        # This learner has no predict_proba at all (e.g.
+                        # ExtraTrees/DecisionTree in the Python bindings) --
+                        # warn loudly rather than silently degrading to hard
+                        # labels, since a probability-based metric (AUC, log
+                        # loss, Brier) scored on 0/1 predictions is degenerate,
+                        # not just less precise.
+                        warnings.warn(
+                            f"{self.learner_class.__name__} has no predict_proba; "
+                            f"falling back to hard-label predictions for the "
+                            f"use_proba=True metric -- scores will be degenerate, "
+                            f"not just less precise.",
+                            stacklevel=2,
+                        )
                         preds = learner.predict(X[test_idx])
                         score = self.metric(y[test_idx].tolist(), preds.tolist())
+                    else:
+                        score = self.metric(y[test_idx].tolist(), proba.tolist())
                 else:
                     preds = learner.predict(X[test_idx])
                     score = self.metric(y[test_idx].tolist(), preds.tolist())

@@ -65,7 +65,7 @@ fn k_nearest(train: &Array2<f64>, sample: ArrayView1<f64>, k: usize) -> Vec<usiz
 use serde::{Deserialize, Serialize};
 
 /// A trained KNN classifier, ready to predict by majority vote over neighbors.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedKnnClassifier {
     pub(crate) features: Array2<f64>,
     pub(crate) target: Vec<usize>,
@@ -104,10 +104,16 @@ impl TrainedModel for TrainedKnnClassifier {
             probabilities: Some(probabilities),
         })
     }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::KnnClassifier(
+            self.clone(),
+        ))
+    }
 }
 
 /// A trained KNN regressor, ready to predict by averaging over neighbors.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedKnnRegressor {
     pub(crate) features: Array2<f64>,
     pub(crate) target: Vec<f64>,
@@ -128,6 +134,12 @@ impl TrainedModel for TrainedKnnRegressor {
             .collect();
 
         Ok(Prediction::regression(predicted))
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::KnnRegressor(
+            self.clone(),
+        ))
     }
 }
 

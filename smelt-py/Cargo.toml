@@ -15,3 +15,9 @@ smelt-ml = { path = ".." }
 pyo3 = { version = "0.24", features = ["extension-module", "multiple-pymethods", "abi3-py38"] }
 numpy = "0.24"
 ndarray = "0.16"
+
+[features]
+# Mirrors smelt-ml's own `parquet` feature (pulls in polars, ~200 transitive
+# crates) -- opt-in, not on by default, so a plain `maturin develop` build
+# stays fast; enable with `maturin develop --features parquet`.
+parquet = ["smelt-ml/parquet"]

@@ -58,7 +58,7 @@ impl AdaBoost {
 }
 
 /// A trained AdaBoost (SAMME) ensemble, ready to predict.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedAdaBoost {
     pub(crate) stumps: Vec<TrainedStump>,
     pub(crate) alphas: Vec<f64>,
@@ -67,7 +67,7 @@ pub struct TrainedAdaBoost {
 }
 
 /// A trained decision stump (depth-1 tree) stored as a simple split.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedStump {
     feature: usize,
     threshold: f64,
@@ -210,14 +210,18 @@ impl TrainedModel for TrainedAdaBoost {
             probabilities: Some(probabilities),
         })
     }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::AdaBoost(self.clone()))
+    }
 }
 
-impl Learner for AdaBoost {
-    fn id(&self) -> &str {
-        "adaboost"
-    }
-
-    fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+impl AdaBoost {
+    /// Trains and returns the concrete [`TrainedAdaBoost`] directly (rather
+    /// than through the boxed `Box<dyn TrainedModel>` [`Learner::train_classif`]
+    /// returns), so callers -- in this module, its unit tests -- can inspect
+    /// internals like the number of stumps actually trained.
+    fn fit_classif(&mut self, task: &ClassificationTask) -> Result<TrainedAdaBoost> {
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
@@ -231,14 +235,37 @@ impl Learner for AdaBoost {
         for _ in 0..self.n_estimators {
             let (stump, err) = train_stump(features, target, &weights, n_classes);
 
-            if err >= 1.0 - 1e-10 / n_classes as f64 {
+            // SAMME's "can't improve" condition is "no better than random
+            // guessing among n_classes classes", i.e. `err >= 1 - 1/K`. The
+            // previous `1.0 - 1e-10 / n_classes as f64` was off by many
+            // orders of magnitude (evaluates to ~1.0 for any realistic K),
+            // so this guard almost never actually fired, letting SAMME
+            // accept stumps barely better than chance -- in a many-class
+            // problem with `learning_rate < 1.0` those could still receive
+            // a net-positive alpha (see below) and get amplified into the
+            // ensemble's vote.
+            if err >= 1.0 - 1.0 / n_classes as f64 {
                 break;
-            } // can't improve
+            }
+
+            // A perfect stump (err=0) leaves every sample weight unchanged
+            // below (nothing was misclassified to reweight), so every
+            // subsequent round would retrain the *identical* stump --
+            // remember this so the loop can stop instead of wasting the
+            // rest of `n_estimators` re-adding it.
+            let perfect = err <= 0.0;
             let err = err.max(1e-10); // avoid log(0)
 
-            // SAMME alpha
+            // SAMME alpha (Zhu et al. 2009, "Multi-class AdaBoost",
+            // Algorithm 1: `alpha = ln((1-err)/err) + ln(K-1)`). The
+            // learning rate scales the *entire* alpha, not just the
+            // error-ratio term -- multiplying only the first term (the
+            // previous implementation) left `ln(n_classes - 1)` unscaled,
+            // so with a small learning rate the class-count term alone
+            // could keep `alpha > 0` for a stump this same round's guard
+            // was supposed to reject as no-better-than-chance.
             let alpha =
-                self.learning_rate * ((1.0 - err) / err).ln() + (n_classes as f64 - 1.0).ln();
+                self.learning_rate * (((1.0 - err) / err).ln() + (n_classes as f64 - 1.0).ln());
 
             if alpha <= 0.0 {
                 break;
@@ -260,13 +287,82 @@ impl Learner for AdaBoost {
 
             stumps.push(stump);
             alphas.push(alpha);
+
+            if perfect {
+                break;
+            }
         }
 
-        Ok(Box::new(TrainedAdaBoost {
+        Ok(TrainedAdaBoost {
             stumps,
             alphas,
             n_classes,
             feature_names: task.feature_names().to_vec(),
-        }))
+        })
+    }
+}
+
+impl Learner for AdaBoost {
+    fn id(&self) -> &str {
+        "adaboost"
+    }
+
+    fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        Ok(Box::new(self.fit_classif(task)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    /// Regression test: a stump with err=0 (perfectly separates the two
+    /// classes) used to leave every sample weight unchanged (nothing
+    /// misclassified to reweight), so every remaining round would retrain
+    /// the *identical* stump. The trained ensemble should stop with a
+    /// single stump once one achieves err=0, instead of wasting the rest
+    /// of `n_estimators`.
+    #[test]
+    fn perfect_stump_stops_training_early() {
+        let features = array![[0.0], [1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0]];
+        let target = vec![0usize, 0, 0, 0, 1, 1, 1, 1];
+        let task = ClassificationTask::new("ada_perfect", features, target).unwrap();
+
+        let mut ada = AdaBoost::new().with_n_estimators(50);
+        let model = ada.fit_classif(&task).unwrap();
+        assert_eq!(
+            model.stumps.len(),
+            1,
+            "a perfectly-separating stump should stop training immediately"
+        );
+    }
+
+    /// Regression test for the learning-rate scaling bug: SAMME's alpha is
+    /// `ln((1-err)/err) + ln(K-1)`, and `learning_rate` must scale the
+    /// *whole* expression (Zhu et al. 2009). The previous implementation
+    /// multiplied only the first term, leaving `ln(K-1)` unscaled -- with
+    /// `learning_rate=0.0` that bug would still produce `alpha = ln(K-1) >
+    /// 0` (nonzero) for any stump better than a coin flip in a 3+ class
+    /// problem, when it should produce exactly `alpha = 0.0` and reject
+    /// every candidate immediately (`alpha <= 0.0` guard), leaving an
+    /// empty ensemble.
+    #[test]
+    fn learning_rate_scales_the_full_samme_alpha() {
+        // 3 classes in blocks -- a single split can separate at most 2 of
+        // the 3 blocks perfectly, so `err > 0` and the log-ratio term is
+        // exercised (not the degenerate err=0 early-stop path above).
+        let features = array![[0.0], [1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+        let target = vec![0usize, 0, 0, 1, 1, 1, 2, 2, 2];
+        let task = ClassificationTask::new("ada_lr_zero", features, target).unwrap();
+
+        let mut ada = AdaBoost::new().with_n_estimators(5).with_learning_rate(0.0);
+        let model = ada.fit_classif(&task).unwrap();
+        assert!(
+            model.stumps.is_empty(),
+            "learning_rate=0.0 should scale the entire SAMME alpha to exactly 0.0 \
+             and reject every stump immediately, got {} stumps",
+            model.stumps.len()
+        );
     }
 }

@@ -1,7 +1,8 @@
 //! Miscellaneous learners: KNearestNeighbors, GaussianNB, AdaBoost, EBM,
 //! QuantileForest, QuantileGB, ExtremeLearningMachine.
 
-use crate::common::{define_learner, add_explain_methods, declare_support, declare_params};
+use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params};
+use crate::common::{load_model_checked, save_model};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::PyRuntimeError;
@@ -58,12 +59,35 @@ impl KNearestNeighbors {
     fn predict_proba<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray2<f64>>> {
         predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
+
+    /// Save the fitted model to a JSON file.
+    fn save(&self, path: &str) -> PyResult<()> {
+        save_model(&self.trained, path)
+    }
+
+    /// Load a previously saved model from a JSON file. Unlike other
+    /// learners, `KNearestNeighbors` maps to one of two distinct
+    /// `SerializableModel` variants (`KnnClassifier`/`KnnRegressor`)
+    /// depending on `is_classif`, since classification and regression KNN
+    /// are separate Rust types -- checked accordingly here instead of via
+    /// `add_persistence_methods!`'s single fixed `serial_as`.
+    #[staticmethod]
+    #[pyo3(signature = (path, is_classif=false))]
+    fn load(path: &str, is_classif: bool) -> PyResult<Self> {
+        let expected = if is_classif { "KnnClassifier" } else { "KnnRegressor" };
+        Ok(Self {
+            trained: Some(load_model_checked(path, expected)?),
+            is_classif,
+            k: 5,
+        })
+    }
 }
 
 
 // ── GaussianNB ─────────────────────────────────────────────────────────
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct GaussianNB {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -106,6 +130,7 @@ define_learner! {
         .with_n_estimators(slf.n_estimators)
         .with_learning_rate(slf.learning_rate),
     proba = true,
+    serial_as = "AdaBoost",
 }
 
 define_learner! {
@@ -117,6 +142,7 @@ define_learner! {
         .with_max_depth(slf.max_depth)
         .with_seed(slf.seed),
     proba = true,
+    serial_as = "EBM",
 }
 
 define_learner! {
@@ -128,6 +154,7 @@ define_learner! {
         .with_min_samples_leaf(slf.min_samples_leaf)
         .with_seed(slf.seed),
     proba = false,
+    serial_as = "QuantileForest",
 }
 
 define_learner! {
@@ -139,9 +166,11 @@ define_learner! {
         .with_max_depth(slf.max_depth)
         .with_seed(slf.seed),
     proba = false,
+    serial_as = "QuantileGB",
 }
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct ExtremeLearningMachine {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -239,3 +268,8 @@ declare_support!(ExtremeLearningMachine, classif = true, regress = true);
 
 declare_params!(KNearestNeighbors, { k => "k" });
 declare_params!(GaussianNB,        {});
+
+add_persistence_methods!(
+    GaussianNB => "GaussianNB",
+    ExtremeLearningMachine => "ExtremeLearningMachine",
+);

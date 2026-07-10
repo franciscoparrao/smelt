@@ -6,7 +6,7 @@ use crate::common::{
     predict_proba_values, predict_values, shap_impl, smelt_err, to_array2, conformal_predict_impl,
     EvalKind,
 };
-use crate::common::{add_explain_methods, declare_support, declare_params};
+use crate::common::{add_explain_methods, add_persistence_methods, declare_support, declare_params};
 use crate::learners::ensemble::validate_learner_id;
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::PyRuntimeError;
@@ -48,6 +48,7 @@ fn resolve_objective(objective: &str, huber_delta: f64) -> PyResult<smelt_ml::pr
 // ── XGBoost ────────────────────────────────────────────────────────────
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct XGBoost {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -178,6 +179,7 @@ impl XGBoost {
 // ── CatBoost ───────────────────────────────────────────────────────────
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct CatBoost {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -260,6 +262,7 @@ impl CatBoost {
 // ── LightGBM ───────────────────────────────────────────────────────────
 
 #[pyclass]
+#[derive(Default)]
 pub(crate) struct LightGBM {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
@@ -799,6 +802,18 @@ declare_params!(LightGBM, {
     max_depth => "max_depth",
     seed => "seed",
 });
+
+// GeoXGBoost/KrigingHybrid are excluded here: they hold their trained model
+// as a concrete `Option<TrainedGeoXGBoost>`/`Option<TrainedKrigingHybrid>`
+// (not `Option<Box<dyn TrainedModel>>`, since both expose an inherent
+// `predict_spatial` beyond the `TrainedModel` trait), and both are already
+// excluded from `SerializableModel` (see `src/serialize.rs`) since they hold
+// `Box<dyn TrainedModel>` internally.
+add_persistence_methods!(
+    XGBoost => "XGBoost",
+    CatBoost => "CatBoost",
+    LightGBM => "LightGBM",
+);
 
 declare_params!(GeoXGBoost, {
     bandwidth => "bandwidth",

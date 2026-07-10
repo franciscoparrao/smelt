@@ -14,7 +14,7 @@ use rand::seq::index::sample;
 use serde::{Deserialize, Serialize};
 
 /// A node in a decision tree: either a leaf prediction or an internal split.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum Node {
     /// A terminal node holding the prediction for samples that reach it.
     Leaf(LeafValue),
@@ -32,7 +32,7 @@ pub enum Node {
 }
 
 /// The prediction stored at a leaf node.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum LeafValue {
     /// Classification leaf: predicted class index and per-class probability vector.
     Class(usize, Vec<f64>),
@@ -82,13 +82,24 @@ pub(crate) enum MaxFeatures {
     Auto,
     /// Force the `sqrt(n_features)` heuristic regardless of task.
     Sqrt,
-    /// Explicit fraction of `n_features` in `(0.0, 1.0]`.
+    /// Explicit fraction of `n_features`, intended to be in `(0.0, 1.0]`.
+    /// `f <= 0.0` falls back to the `sqrt(n_features)` heuristic (see
+    /// [`MaxFeatures::resolve`]) rather than degenerating to a single
+    /// feature per split.
     Fraction(f64),
 }
 
 impl MaxFeatures {
     /// Resolves to the number of candidate features per split, or `None`
     /// for "consider all features" (no subsampling).
+    ///
+    /// `Fraction(f)` with `f <= 0.0` resolves to the `sqrt(n_features)`
+    /// heuristic, not "0 features" (which `.max(1.0)` would otherwise turn
+    /// into "1 feature per split"). This preserves the sentinel meaning
+    /// `with_max_features_fraction(0.0)` had before `MaxFeatures` existed
+    /// as an enum with its own explicit `Sqrt` variant -- silently
+    /// reinterpreting it as "1 feature" instead would change any existing
+    /// caller's model without a compile error or a runtime one.
     pub(crate) fn resolve(&self, n_features: usize, is_classif: bool) -> Option<usize> {
         match self {
             MaxFeatures::Auto => {
@@ -99,7 +110,10 @@ impl MaxFeatures {
                 }
             }
             MaxFeatures::Sqrt => Some(sqrt_heuristic(n_features)),
-            MaxFeatures::Fraction(f) => Some((n_features as f64 * f).ceil().max(1.0) as usize),
+            MaxFeatures::Fraction(f) if *f <= 0.0 => Some(sqrt_heuristic(n_features)),
+            MaxFeatures::Fraction(f) => {
+                Some((n_features as f64 * f.min(1.0)).ceil().max(1.0) as usize)
+            }
         }
     }
 }
@@ -417,4 +431,33 @@ pub(crate) fn classification_leaf(
 pub(crate) fn regression_leaf(target: &[f64], indices: &[usize]) -> LeafValue {
     let mean = indices.iter().map(|&i| target[i]).sum::<f64>() / indices.len() as f64;
     LeafValue::Value(mean)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test: before this fix, `Fraction(0.0)` resolved to
+    /// `(n_features as f64 * 0.0).ceil().max(1.0) = 1` -- a single feature
+    /// per split -- silently changing the meaning `0.0` had before
+    /// `MaxFeatures` existed as an enum, when it was a sentinel for "use
+    /// the sqrt(n_features) heuristic". `Fraction(f<=0.0)` must resolve the
+    /// same as `Sqrt`, not degenerate to 1 feature.
+    #[test]
+    fn fraction_zero_or_negative_falls_back_to_sqrt_heuristic() {
+        let sqrt_resolved = MaxFeatures::Sqrt.resolve(48, false);
+        assert_eq!(MaxFeatures::Fraction(0.0).resolve(48, false), sqrt_resolved);
+        assert_eq!(MaxFeatures::Fraction(-1.0).resolve(48, false), sqrt_resolved);
+        assert_eq!(sqrt_resolved, Some(7)); // ceil(sqrt(48)) = 7
+    }
+
+    /// A positive fraction still resolves proportionally, unaffected by the
+    /// `f <= 0.0` special case.
+    #[test]
+    fn fraction_positive_resolves_proportionally() {
+        assert_eq!(MaxFeatures::Fraction(0.5).resolve(10, false), Some(5));
+        assert_eq!(MaxFeatures::Fraction(1.0).resolve(10, false), Some(10));
+        // Values above 1.0 are clamped, not extrapolated past n_features.
+        assert_eq!(MaxFeatures::Fraction(2.0).resolve(10, false), Some(10));
+    }
 }

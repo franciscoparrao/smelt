@@ -19,8 +19,24 @@ pub(crate) fn to_array2(x: PyReadonlyArray2<'_, f64>) -> Array2<f64> {
     x.as_array().to_owned()
 }
 
+/// Maps a core `SmeltError` to a Python exception. Bad-input variants (an
+/// out-of-range/inconsistent hyperparameter, or mismatched array lengths --
+/// exactly what `Vec<i64>`/labels validation elsewhere in this crate already
+/// raises `ValueError` for) become `ValueError`, matching Python convention
+/// and the errors' own semantics; everything else (internal/numerical
+/// failures, I/O, not-yet-fitted) stays `RuntimeError` as before. Before
+/// this, every `SmeltError` -- including the now-typed `InvalidParameter`/
+/// `DimensionMismatch` the core added in Fase C of the 2026-07-04 audit --
+/// mapped to the same `RuntimeError` regardless of whether it was a usage
+/// mistake a caller should `except ValueError` for.
 pub(crate) fn smelt_err(e: smelt_ml::SmeltError) -> PyErr {
-    PyRuntimeError::new_err(format!("{}", e))
+    use smelt_ml::SmeltError;
+    match &e {
+        SmeltError::InvalidParameter(_) | SmeltError::DimensionMismatch { .. } => {
+            pyo3::exceptions::PyValueError::new_err(format!("{e}"))
+        }
+        _ => PyRuntimeError::new_err(format!("{e}")),
+    }
 }
 
 pub(crate) fn is_integer(y: &Bound<'_, PyAny>) -> bool {
@@ -47,6 +63,32 @@ pub(crate) fn extract_class_labels(y: &Bound<'_, PyAny>) -> PyResult<Vec<usize>>
             usize::try_from(v).map_err(|_| {
                 pyo3::exceptions::PyValueError::new_err(format!(
                     "negative class label {v} at index {i}; class labels must be non-negative integers"
+                ))
+            })
+        })
+        .collect()
+}
+
+/// Convert Python integer treatment-arm labels (0=control, 1=treated, ...)
+/// to non-negative `usize` arm indices, for the causal meta-learners
+/// (`causal.rs`). Those `estimate()` methods used to declare `treatment:
+/// Vec<usize>` directly in the `#[pymethods]` signature, so PyO3 extracted
+/// it into `Vec<usize>` *before the function body ran* -- a negative
+/// treatment value (an easy typo, e.g. the SVM-style `-1` convention)
+/// raised an opaque `OverflowError: can't convert negative int to
+/// unsigned` with no mention of which argument or index was at fault.
+/// Declaring the parameter as `Vec<i64>` instead and validating explicitly
+/// here gives a clear `ValueError` naming the actual problem, matching
+/// [`extract_class_labels`]'s existing convention.
+pub(crate) fn extract_treatment_labels(treatment: Vec<i64>) -> PyResult<Vec<usize>> {
+    treatment
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| {
+            usize::try_from(v).map_err(|_| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "negative treatment arm {v} at index {i}; treatment must be encoded as \
+                     non-negative integers (0=control, 1=treated, ...)"
                 ))
             })
         })
@@ -176,6 +218,38 @@ pub(crate) fn not_fitted() -> PyErr {
     PyRuntimeError::new_err("Model not fitted. Call fit() first.")
 }
 
+/// Save a fitted model to a JSON file. Fails with a clear error for
+/// composite learners that hold other trained models internally (Bagging,
+/// Stacking, DynamicEnsemble, CostSensitiveClassifier, GeoXGBoost,
+/// KrigingHybrid, DeepForest) -- `SerializableModel` has no variant for
+/// those, so `to_serializable` returns `None`.
+pub(crate) fn save_model(trained: &Option<Box<dyn TrainedModel>>, path: &str) -> PyResult<()> {
+    let model = trained.as_deref().ok_or_else(not_fitted)?;
+    let serializable = model.to_serializable().ok_or_else(|| {
+        PyRuntimeError::new_err(
+            "this model type does not support serialization: it holds other trained \
+             models internally, and smelt_ml::serialize::SerializableModel has no \
+             variant for it",
+        )
+    })?;
+    smelt_ml::serialize::save_json(&serializable, path).map_err(smelt_err)
+}
+
+/// Load a model from a JSON file, checking its `model_type` tag against
+/// `expected` so e.g. `RandomForest.load("catboost_model.json")` fails
+/// clearly instead of silently wrapping the wrong learner's predictions
+/// under the `RandomForest` class name.
+pub(crate) fn load_model_checked(path: &str, expected: &str) -> PyResult<Box<dyn TrainedModel>> {
+    let serializable = smelt_ml::serialize::load_json(path).map_err(smelt_err)?;
+    let actual = serializable.type_name();
+    if actual != expected {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "expected a '{expected}' model in {path}, found '{actual}'"
+        )));
+    }
+    Ok(Box::new(serializable))
+}
+
 /// Parse coords from numpy array (Nx2), list of tuples, or list of lists.
 pub(crate) fn parse_coords(coords: &Bound<'_, PyAny>) -> PyResult<Vec<(f64, f64)>> {
     let parsed = parse_coords_unchecked(coords)?;
@@ -238,6 +312,14 @@ pub(crate) fn resolve_measure(metric: &str) -> PyResult<Box<dyn Measure>> {
         "recall" => Ok(Box::new(Recall)),
         "logloss" => Ok(Box::new(LogLoss)),
         "auc" => Ok(Box::new(AucRoc)),
+        // Added alongside balanced_accuracy_score/kappa_score/mcc_score/
+        // brier_score (measures.rs): those functions existed, but the
+        // measures usable *by name* here (e.g. `BayesianOptimizer.optimize`,
+        // `permutation_importance`) didn't include them.
+        "balanced_accuracy" => Ok(Box::new(BalancedAccuracy)),
+        "kappa" => Ok(Box::new(CohensKappa)),
+        "mcc" => Ok(Box::new(Mcc)),
+        "brier" => Ok(Box::new(Brier)),
         _ => Err(PyRuntimeError::new_err(format!("Unknown metric: {metric}"))),
     }
 }
@@ -398,14 +480,24 @@ pub(crate) fn conformal_predict_impl<'py>(
 /// `colsample_bytree` either) rather than the full Rust builder surface.
 ///
 /// Invoke this in the same file you want the generated struct to live in.
+///
+/// An optional trailing `note = "..."` becomes the class's Python
+/// docstring (`#[doc = ...]` on the generated `#[pyclass]` struct, which
+/// PyO3 surfaces as `__doc__`) -- use it for caveats a user would only
+/// otherwise discover by reading the Rust source, e.g. a streaming
+/// learner's batch-mode hyperparameter defaults not suiting small batches.
 macro_rules! define_learner {
     (
         name = $name:ident,
         params = { $( $field:ident : $ty:ty = $default:expr ),* $(,)? },
         ctor = |$slf:ident| $ctor_expr:expr,
-        proba = $has_proba:tt $(,)?
+        proba = $has_proba:tt,
+        serial_as = $serial_as:literal
+        $(, note = $note:literal)? $(,)?
     ) => {
+        $( #[doc = $note] )?
         #[pyo3::pyclass]
+        #[derive(Default)]
         pub(crate) struct $name {
             trained: Option<Box<dyn smelt_ml::learner::TrainedModel>>,
             is_classif: bool,
@@ -472,6 +564,27 @@ macro_rules! define_learner {
                     }
                 }
                 Ok(())
+            }
+
+            /// Save the fitted model to a JSON file.
+            fn save(&self, path: &str) -> pyo3::PyResult<()> {
+                crate::common::save_model(&self.trained, path)
+            }
+
+            /// Load a previously saved model from a JSON file. `is_classif` must
+            /// match how the model was originally trained -- the saved file
+            /// carries no such flag of its own. Hyperparameters revert to
+            /// placeholder defaults; only the fitted state (predictions, feature
+            /// importances) is restored -- refit to recover the original
+            /// `get_params()` values.
+            #[staticmethod]
+            #[pyo3(signature = (path, is_classif=false))]
+            fn load(path: &str, is_classif: bool) -> pyo3::PyResult<Self> {
+                Ok(Self {
+                    trained: Some(crate::common::load_model_checked(path, $serial_as)?),
+                    is_classif,
+                    ..Default::default()
+                })
             }
         }
 
@@ -623,3 +736,42 @@ macro_rules! declare_params {
     };
 }
 pub(crate) use declare_params;
+
+/// Declares `save`/`load` for a hand-written learner wrapper struct (one
+/// that doesn't go through `define_learner!`). `$name` must implement
+/// `Default` (for `load`'s placeholder hyperparameters) and have `trained:
+/// Option<Box<dyn TrainedModel>>` / `is_classif: bool` fields. `$serial_as`
+/// is the expected `SerializableModel::type_name()` for this learner --
+/// checked on load so e.g. loading a CatBoost file into `RandomForest`
+/// fails clearly instead of silently predicting with the wrong model.
+/// Invoke this in the same file that defines the struct.
+macro_rules! add_persistence_methods {
+    ($($name:ident => $serial_as:literal),+ $(,)?) => {
+        $(
+            #[pyo3::pymethods]
+            impl $name {
+                /// Save the fitted model to a JSON file.
+                fn save(&self, path: &str) -> pyo3::PyResult<()> {
+                    crate::common::save_model(&self.trained, path)
+                }
+
+                /// Load a previously saved model from a JSON file. `is_classif`
+                /// must match how the model was originally trained -- the saved
+                /// file carries no such flag of its own. Hyperparameters revert
+                /// to placeholder defaults; only the fitted state (predictions,
+                /// feature importances) is restored -- refit to recover the
+                /// original `get_params()` values.
+                #[staticmethod]
+                #[pyo3(signature = (path, is_classif=false))]
+                fn load(path: &str, is_classif: bool) -> pyo3::PyResult<Self> {
+                    Ok(Self {
+                        trained: Some(crate::common::load_model_checked(path, $serial_as)?),
+                        is_classif,
+                        ..Default::default()
+                    })
+                }
+            }
+        )+
+    };
+}
+pub(crate) use add_persistence_methods;

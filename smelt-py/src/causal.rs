@@ -7,7 +7,7 @@
 //! the id-string fields need that same eager validation, which the generic
 //! macro doesn't know how to do.
 
-use crate::common::{smelt_err, to_array2};
+use crate::common::{extract_treatment_labels, smelt_err, to_array2};
 use crate::learners::ensemble::validate_learner_id;
 use numpy::{PyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
@@ -49,10 +49,11 @@ impl TLearner {
         &self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
-        treatment: Vec<usize>,
+        treatment: Vec<i64>,
         outcome: Vec<f64>,
     ) -> PyResult<PyObject> {
         let features = to_array2(x);
+        let treatment = extract_treatment_labels(treatment)?;
         let control = self.control.clone();
         let treated = self.treated.clone();
         let learner = smelt_ml::causal::meta_learners::TLearner::new(
@@ -121,10 +122,11 @@ impl SLearner {
         &self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
-        treatment: Vec<usize>,
+        treatment: Vec<i64>,
         outcome: Vec<f64>,
     ) -> PyResult<PyObject> {
         let features = to_array2(x);
+        let treatment = extract_treatment_labels(treatment)?;
         let base = self.base.clone();
         let learner = smelt_ml::causal::meta_learners::SLearner::new(move || {
             smelt_ml::prelude::learner_from_id(&base).expect("validated in SLearner::new")
@@ -210,10 +212,11 @@ impl XLearner {
         &self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
-        treatment: Vec<usize>,
+        treatment: Vec<i64>,
         outcome: Vec<f64>,
     ) -> PyResult<PyObject> {
         let features = to_array2(x);
+        let treatment = extract_treatment_labels(treatment)?;
         let control = self.control.clone();
         let treated = self.treated.clone();
         let tau_control = self.tau_control.clone();
@@ -332,10 +335,11 @@ impl RLearner {
         &self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
-        treatment: Vec<usize>,
+        treatment: Vec<i64>,
         outcome: Vec<f64>,
     ) -> PyResult<PyObject> {
         let features = to_array2(x);
+        let treatment = extract_treatment_labels(treatment)?;
         let outcome_id = self.outcome.clone();
         let propensity_id = self.propensity.clone();
         let effect_id = self.effect.clone();
@@ -448,10 +452,11 @@ impl DrLearner {
         &self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
-        treatment: Vec<usize>,
+        treatment: Vec<i64>,
         outcome: Vec<f64>,
     ) -> PyResult<PyObject> {
         let features = to_array2(x);
+        let treatment = extract_treatment_labels(treatment)?;
         let control = self.control.clone();
         let treated = self.treated.clone();
         let propensity = self.propensity.clone();

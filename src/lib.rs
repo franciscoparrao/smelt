@@ -67,11 +67,18 @@ pub use error::{Result, SmeltError};
 /// Convenience re-exports for `use smelt_ml::prelude::*`
 pub mod prelude {
     pub use crate::benchmark::{self, BenchmarkResult};
+    pub use crate::benchmark_design::{
+        BenchmarkDesign, BenchmarkEntry, benchmark_classif, benchmark_regress,
+    };
     pub use crate::causal::{
         CausalEffect, CausalForest, CausalForestResult,
         meta_learners::{DrLearner, RLearner, SLearner, TLearner, XLearner},
     };
     pub use crate::cluster::{ClusterResult, DBSCAN, IsolationForest, KMeans};
+    pub use crate::conformal::{
+        ConformalClassifier, ConformalInterval, ConformalRegressor, ConformalSet,
+        cqr::{CQR, CQRInterval},
+    };
     pub use crate::data::CsvLoader;
     #[cfg(feature = "parquet")]
     pub use crate::data::ParquetLoader;
@@ -93,6 +100,8 @@ pub mod prelude {
         Accuracy, AteBias, AucRoc, BalancedAccuracy, Brier, CohensKappa, F1Score, LogLoss, Mae,
         Mape, Mcc, Measure, Pehe, Precision, RSquared, Recall, Rmse,
     };
+    pub use crate::multilabel::{ClassifierChain, MultiLabelPrediction, TrainedClassifierChain};
+    pub use crate::multioutput::{MultiOutputPrediction, RegressorChain, TrainedRegressorChain};
     pub use crate::prediction::Prediction;
     pub use crate::preprocess::{
         Adasyn, FilterSelector, ImputeStrategy, Imputer, LabelEncoder, MinMaxScaler, OneHotEncoder,

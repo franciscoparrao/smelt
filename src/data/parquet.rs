@@ -40,6 +40,8 @@ pub struct ParquetLoader {
 }
 
 impl ParquetLoader {
+    /// Creates a loader for the Parquet file at `path`, with no target column
+    /// or forced categorical columns set yet.
     pub fn from_path(path: impl AsRef<Path>) -> Self {
         Self {
             path: path.as_ref().to_string_lossy().to_string(),
@@ -48,6 +50,7 @@ impl ParquetLoader {
         }
     }
 
+    /// Sets the name of the column to use as the prediction target.
     pub fn target(mut self, col: &str) -> Self {
         self.target_col = Some(col.to_string());
         self

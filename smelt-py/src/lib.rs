@@ -1,7 +1,9 @@
 //! Python bindings for smelt-ml via PyO3.
 
 mod causal;
+mod cluster;
 mod common;
+mod data;
 mod feature_selection;
 mod learners;
 mod measures;
@@ -13,6 +15,10 @@ mod tuning;
 use pyo3::prelude::*;
 
 use causal::{DrLearner, RLearner, SLearner, TLearner, XLearner};
+use cluster::{DBSCAN, IsolationForest, KMeans};
+use data::CsvLoader;
+#[cfg(feature = "parquet")]
+use data::ParquetLoader;
 use feature_selection::{
     filter_anova_f, filter_cmim, filter_correlation, filter_information_gain, filter_jmi,
     filter_jmim, filter_mrmr, filter_mutual_information, filter_relief, filter_variance, rfe,
@@ -82,6 +88,16 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<XLearner>()?;
     m.add_class::<RLearner>()?;
     m.add_class::<DrLearner>()?;
+
+    // Clustering / anomaly detection
+    m.add_class::<KMeans>()?;
+    m.add_class::<DBSCAN>()?;
+    m.add_class::<IsolationForest>()?;
+
+    // Data loaders
+    m.add_class::<CsvLoader>()?;
+    #[cfg(feature = "parquet")]
+    m.add_class::<ParquetLoader>()?;
 
     // Preprocessing
     m.add_class::<StandardScaler>()?;

@@ -64,31 +64,49 @@ impl SurvivalPrediction {
 /// Concordance index (C-index): measures discrimination of survival model.
 /// C = P(risk_i > risk_j | T_i < T_j) for comparable pairs.
 /// Range [0, 1], 0.5 = random, 1.0 = perfect.
+///
+/// Each unordered pair `{i, j}` is visited exactly once (`i < j`). A
+/// previous implementation looped `i, j` over all ordered pairs with `i`
+/// restricted to events, which double-counted every pair where both `i` and
+/// `j` had an event at the exact same time (nothing skipped either
+/// direction), inflating `total` without inflating `concordant` to match —
+/// dragging the score toward 0.5 whenever tied event times were common.
 pub fn concordance_index(predictions: &[SurvivalPrediction], events: &[SurvivalEvent]) -> f64 {
     let n = events.len();
     let mut concordant = 0.0;
     let mut total = 0.0;
 
     for i in 0..n {
-        if !events[i].event {
-            continue;
-        } // skip censored as reference
-        for j in 0..n {
-            if i == j {
-                continue;
-            }
-            if events[j].time < events[i].time {
-                continue;
-            } // j must survive longer
-            if events[j].time == events[i].time && !events[j].event {
+        for j in (i + 1)..n {
+            let (ti, ei) = (events[i].time, events[i].event);
+            let (tj, ej) = (events[j].time, events[j].event);
+
+            if ti == tj {
+                if !ei || !ej {
+                    // Both censored, or one censored exactly at the other's
+                    // event time: no way to establish which failed first.
+                    continue;
+                }
+                // Both had the event at the exact same time: comparable,
+                // but time alone gives no order to check risk against —
+                // credit as a tie rather than picking a direction
+                // arbitrarily by array index.
+                total += 1.0;
+                concordant += 0.5;
                 continue;
             }
 
+            let (earlier, later) = if ti < tj { (i, j) } else { (j, i) };
+            if !events[earlier].event {
+                continue; // the earlier observation must be an event, not a censor
+            }
+
             total += 1.0;
-            if predictions[i].risk_score > predictions[j].risk_score {
+            let diff = predictions[earlier].risk_score - predictions[later].risk_score;
+            if diff.abs() < 1e-10 {
+                concordant += 0.5;
+            } else if diff > 0.0 {
                 concordant += 1.0;
-            } else if (predictions[i].risk_score - predictions[j].risk_score).abs() < 1e-10 {
-                concordant += 0.5; // tie
             }
         }
     }
@@ -656,5 +674,72 @@ mod tests {
                 b.risk_score
             );
         }
+    }
+
+    fn prediction_with_risk(risk_score: f64) -> SurvivalPrediction {
+        SurvivalPrediction {
+            times: vec![],
+            survival: vec![],
+            cumulative_hazard: vec![],
+            risk_score,
+        }
+    }
+
+    #[test]
+    fn concordance_index_no_ties_perfect_discrimination() {
+        let events = vec![
+            SurvivalEvent { time: 1.0, event: true },
+            SurvivalEvent { time: 5.0, event: true },
+            SurvivalEvent { time: 10.0, event: true },
+            SurvivalEvent { time: 20.0, event: true },
+        ];
+        // Risk strictly decreasing as time increases -> perfect discrimination.
+        let predictions: Vec<_> = [4.0, 3.0, 2.0, 1.0].into_iter().map(prediction_with_risk).collect();
+        let c = concordance_index(&predictions, &events);
+        assert!((c - 1.0).abs() < 1e-12, "expected perfect C-index 1.0, got {c}");
+    }
+
+    /// Regression test for N11 (docs/auditoria_motor_2026-07-05.md, Fase F):
+    /// two subjects with the exact same event time (idx 2, 3) used to be
+    /// visited in both `(i, j)` orders by the old "loop i over events, loop
+    /// j over everyone" implementation -- neither direction's skip
+    /// conditions fired for a tied-event/tied-event pair, so it counted
+    /// twice (`total += 2`) instead of once. That double weight (relative
+    /// to every other, correctly single-counted pair) drags the aggregate
+    /// C-index toward 0.5 whenever tied event times are common.
+    #[test]
+    fn concordance_index_does_not_double_count_tied_event_times() {
+        let events = vec![
+            SurvivalEvent { time: 1.0, event: true },
+            SurvivalEvent { time: 10.0, event: true },
+            SurvivalEvent { time: 5.0, event: true }, // tied with idx 3
+            SurvivalEvent { time: 5.0, event: true }, // tied with idx 2
+        ];
+        let predictions: Vec<_> = [1.0, 0.0, 0.9, 0.1].into_iter().map(prediction_with_risk).collect();
+
+        let c = concordance_index(&predictions, &events);
+        // 6 unordered pairs total: 5 strictly concordant (risk fully
+        // consistent with time order) + the tied-time pair (2, 3) credited
+        // 0.5 (time alone can't order it) = 5.5 / 6. The old implementation
+        // gave 6/7 ~= 0.857 on this same data (pair (2, 3) contributed
+        // total += 2 instead of 1, since neither traversal direction was
+        // skipped).
+        assert!((c - 5.5 / 6.0).abs() < 1e-12, "expected 5.5/6 = 0.91666..., got {c}");
+    }
+
+    #[test]
+    fn concordance_index_ignores_censored_ties_and_mixed_censoring() {
+        // Two subjects censored at the same time contribute nothing (no
+        // event to anchor an order on); a censored subject tied with an
+        // event at the same time is also not comparable (unknown whether
+        // the censored one would have failed before or after).
+        let events = vec![
+            SurvivalEvent { time: 5.0, event: false },
+            SurvivalEvent { time: 5.0, event: false },
+            SurvivalEvent { time: 5.0, event: true },
+        ];
+        let predictions: Vec<_> = [0.5, 0.5, 0.5].into_iter().map(prediction_with_risk).collect();
+        // No comparable pairs at all -> falls back to the 0.5 default.
+        assert_eq!(concordance_index(&predictions, &events), 0.5);
     }
 }

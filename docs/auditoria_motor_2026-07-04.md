@@ -237,9 +237,16 @@ probado end-to-end con cada fix.
    Confirmado con test de regresión (`stacking_classif_survives_fold_missing_a_class`):
    sin el fix, panic exacto `index out of bounds: the len is 2 but the index
    is 2`; con el fix, entrena sin error.
-   ⏸️ CV loop de `benchmark.rs` (propagar metadatos categóricos) y LightGBM
-   `subsample` se resolvieron ya en el ítem 11/Fase A — ver arriba, no
-   quedaban pendientes para Fase B.
+   ⏸️ CV loop de `benchmark.rs` (propagar metadatos categóricos) se resolvió
+   ya en el ítem 11/Fase A — ver arriba, no quedaba pendiente para Fase B.
+   **Corrección post-hoc (2026-07-05)**: LightGBM `subsample` NO se resolvió
+   en absoluto en el ítem 11/Fase A pese a lo declarado aquí — el builder
+   seguía aceptando y descartando el valor sin usarlo en el entrenamiento
+   (confirmado por sonda: `subsample=1.0` vs `0.05` daban predicciones bit a
+   bit idénticas). La 3ª auditoría (`docs/auditoria_motor_2026-07-05.md`,
+   HIGH-1) lo detectó y `learner::lightgbm::LightGBM::sample_rows` lo
+   corrigió ese mismo día. Este párrafo se deja sin editar arriba como
+   registro del error de proceso.
 8. ✅ **GIL 2ª mitad**: `predict`/`predict_proba` (los 28 wrappers, vía
    `common.rs`), `predict_spatial` (GeoXGBoost + KrigingHybrid),
    `conformal_predict`, `Smote`/`SpatialSmote.balance`, los 10 filtros de

@@ -26,13 +26,42 @@ use rand::seq::SliceRandom;
 pub struct SpatialBlockCV {
     n_folds: usize,
     coords: Vec<(f64, f64)>,
+    /// When set, grid cells have this fixed side length instead of being
+    /// derived from `n_folds` — decouples block size from fold count (see
+    /// `with_block_size`).
+    block_size: Option<f64>,
 }
 
 impl SpatialBlockCV {
     /// Create a spatial block CV splitting `coords` into `n_folds` grid
-    /// cells.
+    /// cells, with the grid resolution (`ceil(sqrt(n_folds))` per side)
+    /// derived from `n_folds` itself.
+    ///
+    /// This couples block size to fold count: requesting many folds over a
+    /// large extent implies small cells, and vice versa. To pick a physical
+    /// block size (e.g. "2 km blocks") independently of how many folds it's
+    /// split into, use [`Self::with_block_size`] instead.
     pub fn new(n_folds: usize, coords: Vec<(f64, f64)>) -> Self {
-        Self { n_folds, coords }
+        Self {
+            n_folds,
+            coords,
+            block_size: None,
+        }
+    }
+
+    /// Create a spatial block CV with a fixed cell side length
+    /// (`block_size`, in the same units as `coords`), independent of
+    /// `n_folds`. Cells are grouped into `n_folds` folds by cell id modulo
+    /// `n_folds` — matching the common "fixed block size, then distribute
+    /// blocks across folds" workflow (e.g. blockCV-style spatial CV), where
+    /// block size and fold count are separate, independently chosen
+    /// parameters.
+    pub fn with_block_size(n_folds: usize, coords: Vec<(f64, f64)>, block_size: f64) -> Self {
+        Self {
+            n_folds,
+            coords,
+            block_size: Some(block_size),
+        }
     }
 }
 
@@ -49,6 +78,13 @@ impl Resample for SpatialBlockCV {
                 "SpatialBlockCV requires at least 1 fold".into(),
             ));
         }
+        if let Some(bs) = self.block_size {
+            if bs <= 0.0 {
+                return Err(SmeltError::InvalidParameter(format!(
+                    "SpatialBlockCV block_size must be positive, got {bs}"
+                )));
+            }
+        }
 
         // Compute bounding box
         let (mut min_x, mut min_y) = (f64::INFINITY, f64::INFINITY);
@@ -60,10 +96,20 @@ impl Resample for SpatialBlockCV {
             max_y = max_y.max(y);
         }
 
-        // Grid dimensions: ceil(sqrt(n_folds)) × ceil(sqrt(n_folds))
-        let grid_size = (self.n_folds as f64).sqrt().ceil() as usize;
-        let cell_w = (max_x - min_x + f64::EPSILON) / grid_size as f64;
-        let cell_h = (max_y - min_y + f64::EPSILON) / grid_size as f64;
+        // Grid dimensions: either a fixed cell size (block_size) or
+        // ceil(sqrt(n_folds)) × ceil(sqrt(n_folds)) derived from n_folds.
+        let (cell_w, cell_h, grid_cols) = match self.block_size {
+            Some(bs) => {
+                let cols = (((max_x - min_x + f64::EPSILON) / bs).ceil() as usize).max(1);
+                (bs, bs, cols)
+            }
+            None => {
+                let grid_size = (self.n_folds as f64).sqrt().ceil() as usize;
+                let cw = (max_x - min_x + f64::EPSILON) / grid_size as f64;
+                let ch = (max_y - min_y + f64::EPSILON) / grid_size as f64;
+                (cw, ch, grid_size)
+            }
+        };
 
         // Assign each sample to a cell, then cell to fold
         let cell_assignments: Vec<usize> = self
@@ -72,7 +118,7 @@ impl Resample for SpatialBlockCV {
             .map(|&(x, y)| {
                 let col = ((x - min_x) / cell_w).floor() as usize;
                 let row = ((y - min_y) / cell_h).floor() as usize;
-                let cell_id = row * grid_size + col;
+                let cell_id = row * grid_cols + col;
                 cell_id % self.n_folds
             })
             .collect();

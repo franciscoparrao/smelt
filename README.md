@@ -7,13 +7,13 @@ A machine learning framework for Rust, inspired by [mlr3](https://mlr3.mlr-org.c
 
 The name refers to smelting — refining raw data into useful models.
 
-**26 supervised learners** | **Clustering** | **Causal Inference** | **XGBoost/LightGBM/CatBoost from scratch** | **Spatial ML** | **Conformal Prediction** | **4 tuning methods** | **300+ tests**
+**33 supervised learners** | **Clustering** | **Causal Inference (5 meta-learners + Causal Forest)** | **XGBoost/LightGBM/CatBoost from scratch** | **Spatial ML** | **Conformal Prediction** | **4 tuning methods** | **570+ tests**
 
 ## Quick Start
 
 ```toml
 [dependencies]
-smelt-ml = "1.3"
+smelt-ml = "2.0"
 ndarray = "0.16"
 ```
 
@@ -234,13 +234,14 @@ let task = CsvLoader::from_path("data.csv")
 | K-Nearest Neighbors | x | x | Euclidean distance |
 | Linear Regression | | x | Normal equation (OLS) |
 | Logistic Regression | x | | Auto-scaling, SGD |
-| Random Forest | x | x | Parallel (rayon), soft voting |
+| Random Forest | x | x | Parallel (rayon), soft voting, all-features regression default |
 | Gradient Boosting | x | x | MSE/log-loss, multiclass softmax |
 | Extra Trees | x | x | Random thresholds, no bootstrap |
 | **XGBoost** | x | x | Newton, histogram, NaN, early stopping |
-| **LightGBM** | x | x | GOSS sampling, histogram splits |
+| **LightGBM** | x | x | GOSS sampling, row/column subsampling, histogram splits |
 | **CatBoost** | x | x | Ordered target statistics for categoricals |
 | **Geographical-XGBoost** | | x | Spatial kernel, local+global ensemble |
+| **Kriging-ML Hybrid** | | x | Regression-kriging residual correction |
 | **Oblique Tree** | x | x | Sparse projection splits |
 | **Oblique Forest (SPORF)** | x | x | Ensemble of oblique trees, parallel |
 | Gaussian Naive Bayes | x | | Probabilistic, fast baseline |
@@ -250,8 +251,14 @@ let task = CsvLoader::from_path("data.csv")
 | AdaBoost | x | | SAMME with weighted stumps |
 | Linear SVM | x | | SGD + hinge loss, OVR multiclass |
 | Hoeffding Tree | x | | Incremental / streaming induction |
+| **Adaptive Random Forest** | x | | Streaming ensemble, ADWIN concept-drift detection |
+| **Mondrian Tree** | x | x | Online Mondrian process, batch=online consistency |
+| **Mondrian Forest** | x | x | Ensemble of Mondrian trees, streaming-native |
+| **Extreme Learning Machine** | x | x | Fixed random hidden layer, closed-form ridge solve |
 | **Stacking (Super Learner)** | x | x | Meta-ensemble, out-of-fold |
-| **Dynamic Ensemble (KNORA-E)** | x | | Per-instance competence selection |
+| **Dynamic Ensemble (KNORA-E)** | x | | Per-instance competence selection, train/DSEL split |
+| **Deep Forest (gcForest)** | x | | Cascade forest, out-of-fold layer stacking |
+| **Cost-Sensitive Classifier** | x | | Bayes-risk decision rule over any probabilistic base |
 | **Quantile GB** | | x | Pinball loss, prediction intervals |
 | **Quantile Forest** | | x | Full conditional distribution per leaf |
 | **EBM** | x | x | Interpretable GAM, shape functions |
@@ -261,14 +268,16 @@ let task = CsvLoader::from_path("data.csv")
 
 | Algorithm | Key Feature |
 |-----------|-------------|
-| **K-Means** | Lloyd's algorithm, silhouette score |
+| **K-Means** | k-means++ init, best-of-`n_init`, silhouette score |
 | **DBSCAN** | Density-based, noise detection |
+| **Isolation Forest** | Anomaly detection, golden-tested against scikit-learn |
 
 ## Causal Inference
 
 | Algorithm | Key Feature |
 |-----------|-------------|
 | **Causal Forest** | Honest splitting, CATE, ATE, confidence intervals |
+| **T/S/X/R/DR-Learner** | Meta-learners composing any `Learner` as the base model |
 
 ## Metrics
 
@@ -334,7 +343,10 @@ let task = CsvLoader::from_path("data.csv")
 - **CSV loading** — with auto label encoding
 - **Input validation** — dimension checks, NaN detection
 - **Model registry** — `learner_from_id("xgboost")` constructs any of the
-  21 non-ensemble learners by name, for data-driven experiment loops
+  27 self-contained learners by name, for data-driven experiment loops
+  (excludes learners needing a base-learner factory or external
+  coordinates: Bagging, Stacking, DynamicEnsemble, CostSensitiveClassifier,
+  KrigingHybrid, GeoXGBoost)
 
 ## Architecture
 

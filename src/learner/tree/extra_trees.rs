@@ -81,6 +81,15 @@ impl ExtraTrees {
         self.min_samples_leaf = n;
         self
     }
+    /// Forces the classic `sqrt(n_features)` candidate-feature heuristic for
+    /// both classification and regression (the default already uses this for
+    /// classification; use this to also apply it to regression, overriding
+    /// the task-appropriate default of considering all features). Mirrors
+    /// [`RandomForest::with_max_features_sqrt`](super::RandomForest::with_max_features_sqrt).
+    pub fn with_max_features_sqrt(mut self) -> Self {
+        self.max_features = MaxFeatures::Sqrt;
+        self
+    }
     /// Sets an explicit fraction of features considered at each split
     /// (applies to both classification and regression, overriding the
     /// task-appropriate default -- see [`MaxFeatures`]).
@@ -96,7 +105,7 @@ impl ExtraTrees {
 }
 
 /// A trained Extra Trees ensemble, ready to predict.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedExtraTrees {
     pub(crate) trees: Vec<Node>,
     pub(crate) feature_names: Vec<String>,
@@ -173,6 +182,12 @@ impl TrainedModel for TrainedExtraTrees {
                 .map(|(name, &imp)| (name.clone(), imp / total))
                 .collect(),
         )
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::ExtraTrees(
+            self.clone(),
+        ))
     }
 }
 

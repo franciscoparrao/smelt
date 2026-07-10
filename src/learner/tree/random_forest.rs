@@ -111,7 +111,7 @@ impl RandomForest {
 use serde::{Deserialize, Serialize};
 
 /// A trained Random Forest ensemble, ready to predict.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrainedRandomForest {
     pub(crate) trees: Vec<Node>,
     pub(crate) feature_names: Vec<String>,
@@ -201,6 +201,12 @@ impl TrainedModel for TrainedRandomForest {
                 .map(|(name, &imp)| (name.clone(), imp / total))
                 .collect(),
         )
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::RandomForest(
+            self.clone(),
+        ))
     }
 }
 

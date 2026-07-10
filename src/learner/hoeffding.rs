@@ -14,6 +14,7 @@ use crate::prediction::Prediction;
 use crate::Result;
 use crate::task::{ClassificationTask, Task};
 use ndarray::Array2;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Hoeffding Tree for online/streaming classification.
@@ -44,6 +45,7 @@ use std::collections::HashMap;
 /// let mut ht2 = HoeffdingTree::new();
 /// let model = ht2.train_classif(&task).unwrap();
 /// ```
+#[derive(Clone, Serialize, Deserialize)]
 pub struct HoeffdingTree {
     /// Confidence parameter: lower = more conservative splits.
     delta: f64,
@@ -55,6 +57,15 @@ pub struct HoeffdingTree {
     root: Option<HNode>,
     n_classes: usize,
     n_features: usize,
+    /// Restricts split candidates to these feature indices when set (audit
+    /// issue N6: used by [`AdaptiveRandomForest`] to give each member tree
+    /// its own random feature subspace, the way `RandomForest`/`ExtraTrees`
+    /// already do via `MaxFeatures` -- a plain `HoeffdingTree` considers
+    /// every feature, matching VFDT's original (non-ensemble) design.
+    /// `serde(default)` so models serialized before this field existed
+    /// still load (`None` keeps the old "every feature" behavior).
+    #[serde(default)]
+    feature_subset: Option<Vec<usize>>,
 }
 
 impl Default for HoeffdingTree {
@@ -66,6 +77,7 @@ impl Default for HoeffdingTree {
             root: None,
             n_classes: 0,
             n_features: 0,
+            feature_subset: None,
         }
     }
 }
@@ -91,6 +103,14 @@ impl HoeffdingTree {
         self
     }
 
+    /// Restricts split candidates to `subset` (audit issue N6): lets an
+    /// ensemble like [`AdaptiveRandomForest`] give this tree its own random
+    /// feature subspace, instead of every tree considering every feature.
+    pub fn with_feature_subset(mut self, subset: Vec<usize>) -> Self {
+        self.feature_subset = Some(subset);
+        self
+    }
+
     /// Online update: train on a single sample.
     pub fn partial_fit(&mut self, features: &[f64], label: usize, n_classes: usize) {
         self.n_features = features.len();
@@ -104,6 +124,7 @@ impl HoeffdingTree {
         let grace = self.grace_period;
         let max_depth = self.max_depth;
         let n_classes_local = self.n_classes;
+        let feature_subset = self.feature_subset.as_deref();
 
         if let Some(root) = &mut self.root {
             Self::update_node(
@@ -114,6 +135,7 @@ impl HoeffdingTree {
                 grace,
                 max_depth,
                 n_classes_local,
+                feature_subset,
             );
         }
     }
@@ -135,6 +157,7 @@ impl HoeffdingTree {
         grace: usize,
         max_depth: Option<usize>,
         n_classes: usize,
+        feature_subset: Option<&[usize]>,
     ) {
         match node {
             HNode::Leaf {
@@ -149,8 +172,15 @@ impl HoeffdingTree {
                 }
                 *n_seen += 1;
 
-                // Update per-feature statistics
+                // Update per-feature statistics -- restricted to
+                // `feature_subset` when set (audit issue N6), so
+                // `find_best_split` below (which only ever sees features
+                // present in `feature_stats`) only considers this tree's
+                // own random feature subspace.
                 for (j, &val) in features.iter().enumerate() {
+                    if feature_subset.is_some_and(|s| !s.contains(&j)) {
+                        continue;
+                    }
                     let stats = feature_stats
                         .entry(j)
                         .or_insert_with(|| FeatureStats::new(n_classes));
@@ -166,11 +196,28 @@ impl HoeffdingTree {
                     let (best_feat, best_gain, second_gain) =
                         find_best_split(feature_stats, counts, *n_seen, n_classes);
 
-                    // Hoeffding bound
-                    let r = (n_classes as f64).log2(); // range of information gain
+                    // Hoeffding bound. R is the range of the information-gain
+                    // random variable being bounded: max entropy for
+                    // n_classes outcomes. `entropy`/`entropy_weighted` below
+                    // use natural log (nats), so R must too (audit issue N4:
+                    // this used `log2(n_classes)` -- bits -- while the gain
+                    // itself is in nats, making epsilon ~1/ln(2) ~= 1.44x too
+                    // large and needlessly delaying splits).
+                    let r = (n_classes as f64).ln();
                     let epsilon = (r * r * (1.0 / delta).ln() / (2.0 * *n_seen as f64)).sqrt();
 
-                    if best_gain - second_gain > epsilon || epsilon < 0.01 {
+                    // Tie-breaking (Domingos & Hulten 2000): once epsilon is
+                    // small enough that two close-but-distinct candidates may
+                    // never separate, force a split on the current best
+                    // rather than wait forever. This must still require
+                    // best_gain > 0 (audit issue N5): without that guard, a
+                    // leaf that has simply seen enough samples for epsilon to
+                    // fall below the tie threshold will force a split even
+                    // when every feature has zero information gain (pure
+                    // noise), growing the tree without bound purely from
+                    // sample count once n_seen is large enough (~80k/leaf
+                    // with this crate's default delta).
+                    if best_gain > 0.0 && (best_gain - second_gain > epsilon || epsilon < 0.01) {
                         // Split!
                         let threshold = feature_stats
                             .get(&best_feat)
@@ -189,7 +236,14 @@ impl HoeffdingTree {
 
                         // Route current sample
                         Self::update_node(
-                            node, features, label, delta, grace, max_depth, n_classes,
+                            node,
+                            features,
+                            label,
+                            delta,
+                            grace,
+                            max_depth,
+                            n_classes,
+                            feature_subset,
                         );
                     }
                 }
@@ -201,9 +255,13 @@ impl HoeffdingTree {
                 right,
             } => {
                 if features[*feature] <= *threshold {
-                    Self::update_node(left, features, label, delta, grace, max_depth, n_classes);
+                    Self::update_node(
+                        left, features, label, delta, grace, max_depth, n_classes, feature_subset,
+                    );
                 } else {
-                    Self::update_node(right, features, label, delta, grace, max_depth, n_classes);
+                    Self::update_node(
+                        right, features, label, delta, grace, max_depth, n_classes, feature_subset,
+                    );
                 }
             }
         }
@@ -212,6 +270,7 @@ impl HoeffdingTree {
 
 // ── Hoeffding Tree Node ─────────────────────────────────────────────
 
+#[derive(Clone, Serialize, Deserialize)]
 enum HNode {
     Leaf {
         counts: Vec<usize>, // class counts
@@ -272,6 +331,7 @@ impl HNode {
 
 // ── Feature statistics for split finding ────────────────────────────
 
+#[derive(Clone, Serialize, Deserialize)]
 struct FeatureStats {
     /// For each class, store (sum, sum_sq, count) of feature values.
     class_stats: Vec<(f64, f64, usize)>, // (sum, sum_sq, count) per class
@@ -472,7 +532,9 @@ impl Learner for HoeffdingTree {
     }
 }
 
-struct TrainedHoeffdingTree {
+/// A trained (batch-constructed) Hoeffding tree snapshot.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TrainedHoeffdingTree {
     root: HNode,
     n_features: usize,
     #[allow(dead_code)]
@@ -498,6 +560,12 @@ impl TrainedModel for TrainedHoeffdingTree {
             truth: None,
             probabilities: Some(probabilities),
         })
+    }
+
+    fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
+        Some(crate::serialize::SerializableModel::HoeffdingTree(
+            self.clone(),
+        ))
     }
 }
 
@@ -580,6 +648,41 @@ mod tests {
             .count();
         let acc = correct as f64 / predicted.len() as f64;
         assert!(acc > 0.85, "batch train_classif should fit this simple rule well, got {acc}");
+    }
+
+    fn count_nodes(node: &HNode) -> usize {
+        match node {
+            HNode::Leaf { .. } => 1,
+            HNode::Split { left, right, .. } => 1 + count_nodes(left) + count_nodes(right),
+        }
+    }
+
+    /// Regression test for N5 (docs/auditoria_motor_2026-07-05.md, Fase F):
+    /// the tie-breaking fallback (`epsilon < 0.01`) used to force a split
+    /// even when `best_gain == 0.0` (every feature carries zero information
+    /// about the label). Once a leaf sees enough samples for delta's
+    /// default epsilon to fall under 0.01 (~80k, per the audit's estimate),
+    /// this grew the tree without bound. Constant (zero-variance) features
+    /// give a *deterministic* gain of exactly 0.0 (both classes' running
+    /// Gaussians are identical, not just "small" from finite-sample noise
+    /// the way genuinely random features would be) -- with 150k samples,
+    /// well past that threshold, the tree must stay a single leaf.
+    #[test]
+    fn zero_variance_features_do_not_force_splits_once_epsilon_is_small() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut tree = HoeffdingTree::new().with_grace_period(200);
+
+        for _ in 0..150_000 {
+            let y = rng.random_range(0..2); // label independent of every feature
+            tree.partial_fit(&[5.0, -3.0], y, 2); // constant features: zero gain, exactly
+        }
+
+        let n_nodes = tree.root.as_ref().map(count_nodes).unwrap_or(1);
+        assert_eq!(
+            n_nodes, 1,
+            "zero-information (constant) features should never split, even \
+             with enough samples for epsilon < 0.01, got {n_nodes} nodes"
+        );
     }
 
     #[test]
