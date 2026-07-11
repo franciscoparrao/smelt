@@ -129,6 +129,12 @@ impl CausalForest {
         self.honesty_fraction = f;
         self
     }
+    /// Sets the fraction of the training set subsampled (without
+    /// replacement) for each tree.
+    pub fn with_subsample_fraction(mut self, f: f64) -> Self {
+        self.subsample_fraction = f;
+        self
+    }
     /// Sets the RNG seed controlling subsampling and the honest train/estimation split.
     pub fn with_seed(mut self, s: u64) -> Self {
         self.seed = s;
@@ -156,6 +162,21 @@ impl CausalForest {
                 expected: n_samples,
                 got: treatment.len().min(outcome.len()),
             });
+        }
+        // Fractions outside (0, 1) panicked deep inside rayon (a negative
+        // honesty_fraction made split_point exceed the subsample length ->
+        // slice range panic) or degenerated silently (audit M-6).
+        if !(self.honesty_fraction > 0.0 && self.honesty_fraction < 1.0) {
+            return Err(SmeltError::InvalidParameter(format!(
+                "honesty_fraction must be in (0, 1), got {}",
+                self.honesty_fraction
+            )));
+        }
+        if !(self.subsample_fraction > 0.0 && self.subsample_fraction <= 1.0) {
+            return Err(SmeltError::InvalidParameter(format!(
+                "subsample_fraction must be in (0, 1], got {}",
+                self.subsample_fraction
+            )));
         }
 
         // Train forest: each tree produces a tau estimate per observation,
@@ -627,6 +648,26 @@ fn build_node(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression test (4th audit, M-6): honesty_fraction outside (0,1)
+    /// used to panic inside rayon (range end out of slice bounds) or
+    /// silently train on an empty split; both are clean errors now.
+    #[test]
+    fn invalid_fractions_are_rejected_not_panics() {
+        let features = Array2::from_shape_fn((10, 2), |(i, j)| (i + j) as f64);
+        let treatment: Vec<usize> = (0..10).map(|i| i % 2).collect();
+        let outcome: Vec<f64> = (0..10).map(|i| i as f64).collect();
+        let names = vec!["a".to_string(), "b".to_string()];
+
+        for bad in [-0.5, 0.0, 1.0, 1.5] {
+            let cf = CausalForest::new().with_n_estimators(3).with_honesty_fraction(bad);
+            assert!(cf.estimate(&features, &treatment, &outcome, &names).is_err());
+        }
+        for bad in [-0.1, 0.0, 1.5] {
+            let cf = CausalForest::new().with_n_estimators(3).with_subsample_fraction(bad);
+            assert!(cf.estimate(&features, &treatment, &outcome, &names).is_err());
+        }
+    }
     use ndarray::array;
 
     /// Regression test for the honest-splitting bug: `populate_leaf_tau` was
