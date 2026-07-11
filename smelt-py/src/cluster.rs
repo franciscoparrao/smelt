@@ -23,8 +23,16 @@ pub(crate) struct KMeans {
 impl KMeans {
     #[new]
     #[pyo3(signature = (k, max_iter=300, n_init=10, seed=42))]
-    fn new(k: usize, max_iter: usize, n_init: usize, seed: u64) -> Self {
-        Self { k, max_iter, n_init, seed }
+    fn new(k: usize, max_iter: usize, n_init: usize, seed: u64) -> PyResult<Self> {
+        // k=0 used to surface as a PanicException from an ndarray index
+        // assert deep inside fit (audit M-17); k > n_samples is validated
+        // by the core at fit time, but k=0 never reached that check.
+        if k == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "k must be at least 1",
+            ));
+        }
+        Ok(Self { k, max_iter, n_init, seed })
     }
 
     /// Fit and return `(labels, centroids)`. `labels[i]` is the cluster
@@ -52,15 +60,31 @@ impl KMeans {
 
     /// Silhouette score of a clustering (range [-1, 1], higher is better).
     /// `labels` is a previous `fit_predict` result's first element.
-    fn silhouette_score(&self, x: PyReadonlyArray2<'_, f64>, labels: Vec<i32>) -> PyResult<f64> {
+    fn silhouette_score(
+        &self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        labels: Vec<i32>,
+    ) -> PyResult<f64> {
         let features = to_array2(x);
+        // A labels/rows length mismatch used to panic with a raw
+        // index-out-of-bounds inside the O(n²) loop (audit M-17).
+        if labels.len() != features.nrows() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "labels has {} entries but x has {} rows -- pass the labels fit_predict \
+                 returned for this same x",
+                labels.len(),
+                features.nrows()
+            )));
+        }
         let n_clusters = labels.iter().filter(|&&l| l >= 0).map(|&l| l as usize).max().map_or(0, |m| m + 1);
         let result = smelt_ml::prelude::ClusterResult {
             labels,
             n_clusters,
             centroids: None,
         };
-        Ok(result.silhouette_score(&features))
+        // O(n²) pairwise distances: release the GIL like the other fits here.
+        Ok(py.allow_threads(|| result.silhouette_score(&features)))
     }
 }
 
