@@ -55,6 +55,23 @@ pub(crate) fn is_integer(y: &Bound<'_, PyAny>) -> bool {
 /// (e.g. the SVM convention `y = [-1, 1]` would otherwise become
 /// `18446744073709551615`, silently corrupting the class count downstream).
 pub(crate) fn extract_class_labels(y: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
+    // numpy bool targets (`y = X[:, 0] > threshold`, the typical binary-
+    // susceptibility target) are accepted by `is_integer` (dtype kind 'b')
+    // but used to fail the i64 extraction below with a cryptic
+    // "'numpy.bool' object cannot be interpreted as an integer" naming
+    // neither `y` nor a fix (audit M-18) -- cast them to int64 first.
+    let y_cast;
+    let y = if y
+        .getattr("dtype")
+        .and_then(|d| d.getattr("kind"))
+        .and_then(|k| k.extract::<String>())
+        .is_ok_and(|k| k == "b")
+    {
+        y_cast = y.call_method1("astype", ("int64",))?;
+        &y_cast
+    } else {
+        y
+    };
     let target: Vec<i64> = y.extract()?;
     target
         .into_iter()
