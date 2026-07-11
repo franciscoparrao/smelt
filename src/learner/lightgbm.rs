@@ -84,8 +84,13 @@ impl Default for LightGBM {
             max_depth: None,
             lambda: 0.0,
             min_child_weight: 1.0,
-            top_rate: 0.2,
-            other_rate: 0.1,
+            // GOSS is OPT-IN, matching the official implementation (whose
+            // default is plain GBDT; GOSS requires boosting=goss). top_rate
+            // 1.0 / other_rate 0.0 degenerate goss_sample to "keep every row
+            // at weight 1". Earlier releases (<3.0) defaulted to the paper's
+            // 0.2/0.1, silently training every tree on ~30% of the rows.
+            top_rate: 1.0,
+            other_rate: 0.0,
             n_bins: 255,
             subsample: 1.0,
             colsample_bytree: 1.0,
@@ -134,6 +139,8 @@ impl LightGBM {
         self
     }
     /// Sets the GOSS fraction of top-gradient samples always kept.
+    /// Setting this below 1.0 enables GOSS; the paper's values are
+    /// `top_rate=0.2, other_rate=0.1` (Ke et al. 2017).
     pub fn with_top_rate(mut self, r: f64) -> Self {
         self.top_rate = r;
         self
@@ -146,10 +153,11 @@ impl LightGBM {
     }
     /// Sets the fraction of rows randomly subsampled for each tree, applied
     /// *before* GOSS sampling: GOSS's own top/other-rate selection then runs
-    /// on this row population instead of the full training set, exactly as
-    /// the official implementation restricts `bagging_fraction` to operate
-    /// alongside (not instead of) GOSS. With the default `1.0`, this is a
-    /// no-op and GOSS sees the full training set, matching prior behavior.
+    /// on this row population instead of the full training set. NOTE: this
+    /// composition is a deliberate divergence from the official
+    /// implementation, which makes bagging and GOSS mutually exclusive
+    /// ("Cannot use bagging in GOSS"); here they compound. With the default
+    /// `1.0` this is a no-op.
     pub fn with_subsample(mut self, s: f64) -> Self {
         self.subsample = s;
         self
@@ -281,7 +289,9 @@ impl LGBNode {
 /// typically the output of [`LightGBM::sample_rows`] row bagging -- the
 /// full `0..grads.len()` range when `subsample=1.0`). `top_rate`/
 /// `other_rate` apply to `candidates.len()`, not the full training set, so
-/// row bagging and GOSS compound rather than conflict.
+/// row bagging and GOSS compound here -- unlike the official
+/// implementation, which forbids the combination ("Cannot use bagging in
+/// GOSS"); a documented, deliberate divergence.
 fn goss_sample(
     grads: &[f64],
     _hess: &[f64],

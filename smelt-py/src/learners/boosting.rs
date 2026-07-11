@@ -269,16 +269,43 @@ pub(crate) struct LightGBM {
     n_estimators: usize,
     num_leaves: usize,
     learning_rate: f64,
-    max_depth: usize,
+    max_depth: Option<usize>,
+    top_rate: f64,
+    other_rate: f64,
     seed: u64,
 }
 
 #[pymethods]
 impl LightGBM {
+    /// `max_depth=None` (the default) grows leaf-wise with no depth cap,
+    /// matching the Rust crate and the official LightGBM; earlier releases
+    /// forced `max_depth=6` here, silently training a different model than
+    /// the same code called from Rust. `top_rate`/`other_rate` enable GOSS
+    /// when `top_rate < 1.0` (the paper's values are 0.2/0.1); the default
+    /// is plain GBDT, and earlier releases had GOSS always on with no way
+    /// to disable it from Python.
     #[new]
-    #[pyo3(signature = (n_estimators=100, num_leaves=31, learning_rate=0.1, max_depth=6, seed=42))]
-    fn new(n_estimators: usize, num_leaves: usize, learning_rate: f64, max_depth: usize, seed: u64) -> Self {
-        Self { trained: None, is_classif: false, n_estimators, num_leaves, learning_rate, max_depth, seed }
+    #[pyo3(signature = (n_estimators=100, num_leaves=31, learning_rate=0.1, max_depth=None, top_rate=1.0, other_rate=0.0, seed=42))]
+    fn new(
+        n_estimators: usize,
+        num_leaves: usize,
+        learning_rate: f64,
+        max_depth: Option<usize>,
+        top_rate: f64,
+        other_rate: f64,
+        seed: u64,
+    ) -> Self {
+        Self {
+            trained: None,
+            is_classif: false,
+            n_estimators,
+            num_leaves,
+            learning_rate,
+            max_depth,
+            top_rate,
+            other_rate,
+            seed,
+        }
     }
 
     /// `cat_features`: column indices to treat as categorical (native Fisher
@@ -298,8 +325,12 @@ impl LightGBM {
             .with_n_estimators(self.n_estimators)
             .with_num_leaves(self.num_leaves)
             .with_learning_rate(self.learning_rate)
-            .with_max_depth(self.max_depth)
+            .with_top_rate(self.top_rate)
+            .with_other_rate(self.other_rate)
             .with_seed(self.seed);
+        if let Some(d) = self.max_depth {
+            learner = learner.with_max_depth(d);
+        }
         if let Some(rounds) = early_stopping_rounds {
             learner = learner.with_early_stopping_rounds(rounds);
         }
@@ -800,6 +831,8 @@ declare_params!(LightGBM, {
     num_leaves => "num_leaves",
     learning_rate => "learning_rate",
     max_depth => "max_depth",
+    top_rate => "top_rate",
+    other_rate => "other_rate",
     seed => "seed",
 });
 
