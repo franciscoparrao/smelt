@@ -121,6 +121,16 @@ impl SpatialSmote {
                 got: coords.len(),
             });
         }
+        // Same guard as Smote/Adasyn (audit M-5): NaN poisons the k-NN
+        // distances and gets interpolated into the synthetic rows silently.
+        crate::validate::check_no_nan(features).map_err(|_| {
+            SmeltError::InvalidParameter(
+                "resampling requires NaN-free features -- impute missing values before \
+                 SpatialSmote (its neighbour search and interpolation cannot handle NaN)"
+                    .into(),
+            )
+        })?;
+        crate::validate::check_coords_finite(coords)?;
 
         let mut class_counts = vec![0usize; n_classes];
         for &t in target {

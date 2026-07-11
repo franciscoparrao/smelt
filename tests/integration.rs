@@ -1442,6 +1442,23 @@ fn resamplers_preserve_task_metadata() {
     assert_eq!(balanced.n_classes(), 3);
 }
 
+/// Regression test (4th audit, M-5): SMOTE/ADASYN interpolated between
+/// k-NN neighbours with NaN features — arbitrary neighbour order and NaN
+/// synthetic rows, all silently. Must be a clear error pointing at
+/// imputation order instead.
+#[test]
+fn resamplers_reject_nan_features() {
+    let mut features = Array2::from_shape_fn((8, 2), |(i, j)| (i * 2 + j) as f64);
+    features[[1, 0]] = f64::NAN;
+    let target = vec![0, 0, 0, 0, 0, 1, 1, 1];
+    let task = ClassificationTask::new("nan", features, target).unwrap();
+
+    let err = Smote::new().with_k_neighbors(2).balance(&task).unwrap_err();
+    assert!(format!("{err}").contains("impute"), "got: {err}");
+    let err = Adasyn::new().with_k_neighbors(2).balance(&task).unwrap_err();
+    assert!(format!("{err}").contains("impute"), "got: {err}");
+}
+
 #[test]
 fn pipeline_passthrough() {
     let features = array![[0.0], [1.0], [2.0], [3.0]];

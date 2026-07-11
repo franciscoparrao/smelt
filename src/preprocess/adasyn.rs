@@ -73,6 +73,21 @@ impl Adasyn {
         let target = task.target();
         let n_classes = task.n_classes();
         let n_features = task.n_features();
+        // NaN features poison the k-NN distances (arbitrary neighbour order
+        // via partial_cmp -> Equal) and get interpolated INTO the synthetic
+        // rows -- all silently (audit M-5). In a Pipeline the resampler runs
+        // BEFORE any Imputer stage by design, so this must be an error, not
+        // a footgun: impute before resampling.
+        crate::validate::check_no_nan(features).map_err(|_| {
+            crate::SmeltError::InvalidParameter(
+                "resampling requires NaN-free features: SMOTE/ADASYN interpolate between \
+                 k-nearest neighbours, and NaN corrupts both the distances and the synthetic \
+                 samples -- impute missing values BEFORE resampling (note: a Pipeline's \
+                 resampler stage runs before its transformers, so put the Imputer in its \
+                 own earlier step)"
+                    .into(),
+            )
+        })?;
         let n_samples = task.n_samples();
 
         let mut class_counts = vec![0usize; n_classes];
