@@ -12,7 +12,19 @@ repository = "https://github.com/franciscoparrao/smelt"
 keywords = ["machine-learning", "gradient-boosting", "spatial", "conformal-prediction", "xgboost"]
 categories = ["science", "algorithms"]
 readme = "README.md"
-exclude = ["docs/WOS/", "tests/xgboost_*.py", "tests/real_benchmark.py", "paper/", "/data/"]
+# Also excluded: paper-workflow strays that live in the repo root/docs but
+# have no place inside the published crate (spreadsheets, LaTeX logs, PDFs).
+exclude = [
+    "docs/WOS/",
+    "docs/*.pdf",
+    "tests/xgboost_*.py",
+    "tests/real_benchmark.py",
+    "paper/",
+    "/data/",
+    "*.xlsx",
+    "*.log",
+    "Predict_results.csv",
+]
 
 [dependencies]
 ndarray = { version = "0.16", features = ["serde"] }
