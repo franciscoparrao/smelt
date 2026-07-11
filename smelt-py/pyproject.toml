@@ -4,7 +4,9 @@ build-backend = "maturin"
 
 [project]
 name = "smelt-ml"
-version = "0.5.1"
+# Version is SINGLE-SOURCED from smelt-py/Cargo.toml (maturin reads it
+# when `dynamic` lists "version") -- don't add a static version here.
+dynamic = ["version"]
 description = "Python bindings for smelt-ml: spatial ML + conformal prediction + fast gradient boosting"
 requires-python = ">=3.8"
 license = "MIT"

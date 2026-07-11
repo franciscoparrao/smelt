@@ -116,7 +116,16 @@ try:
 except ImportError:
     _HAS_PARQUET = False
 
-__version__ = "0.5.1"
+# Single-sourced from smelt-py/Cargo.toml via the installed package
+# metadata (maturin stamps it at build time; pyproject declares
+# `dynamic = ["version"]`). The triple hand-synced copy this replaces
+# drifted more than once (audit M20).
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+try:
+    __version__ = _pkg_version("smelt-ml")
+except PackageNotFoundError:  # running from a source tree without install
+    __version__ = "0+unknown"
 __all__ = [
     "XGBoost", "CatBoost", "LightGBM",
     "RandomForest", "ExtraTrees", "DecisionTree",

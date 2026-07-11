@@ -4,13 +4,18 @@ All notable changes to `smelt-ml` (Rust crate, crates.io) and `smelt-py`
 (Python bindings, published as `smelt-ml` on PyPI) are documented here.
 Versions are tracked independently per this workspace's existing
 convention: the Rust crate follows its own semver, the Python bindings
-follow their own (currently a minor/patch cadence).
+follow their own (currently a minor/patch cadence). Convention: a change
+that alters numerical results or a training default ships in a MAJOR or
+MINOR release with an explicit changelog entry -- never silently in a
+patch (established after 2.0.1 changed the RF/ET regression default in a
+patch; defensible as a bug fix, not a precedent to repeat).
 
-## [Unreleased]
+## [smelt-ml 3.0.0] / [smelt-py 0.6.0] - 2026-07-10
 
-Accumulates everything on master since 2.0.1/0.5.1: the Fase F closures
-of the 3rd audit (2026-07-05 → 2026-07-09) and the Fase G remediation of
-the 4th audit (`docs/auditoria_motor_2026-07-10.md`).
+Everything on master since 2.0.1/0.5.1: the Fase F closures of the 3rd
+audit (2026-07-05 → 2026-07-09), the Fase G remediation of the 4th audit
+(`docs/auditoria_motor_2026-07-10.md`), its Tier 1/Tier 2 MEDIUM fixes,
+and the PM2.5 case-study additions (TimeSeriesCV, SplitConformal).
 
 ### Breaking changes (Rust crate — next release must be smelt-ml 3.0)
 
@@ -39,6 +44,12 @@ the 4th audit (`docs/auditoria_motor_2026-07-10.md`).
 - `survival::concordance_index`: unordered pairs counted once; tied event
   times with both events contribute 0.5. Previously ties were counted in
   both directions, dragging the C-index toward 0.5.
+- LightGBM defaults to plain GBDT: GOSS is now opt-in
+  (`top_rate`/`other_rate`, paper values 0.2/0.1), matching the official
+  implementation. Previously every tree trained on ~30% of the rows by
+  default — and Python had no way to disable it. The Python wrapper also
+  stops forcing `max_depth=6` (now uncapped by default, like Rust and
+  the official implementation) and exposes the GOSS rates.
 - `DecisionTree`/`RandomForest` regression: split search now centers its
   running sums on the node mean. Targets carrying a large additive offset
   (UTM northing ~7e6, timestamps) degraded up to ~40× in RMSE under the
@@ -75,6 +86,16 @@ the 4th audit (`docs/auditoria_motor_2026-07-10.md`).
 
 ### Fixed
 
+- SMOTE/ADASYN/SpatialSmote reject NaN features (they interpolated NaN
+  into synthetic rows silently); CausalForest validates
+  honesty_fraction/subsample_fraction instead of panicking inside rayon
+  (and gains `with_subsample_fraction`); smelt-py `KMeans(k=0)` and
+  mismatched silhouette labels raise ValueError instead of
+  PanicException; numpy bool targets are accepted; tuner `best_params`
+  reports the truncated integer value the winning model actually used.
+- smelt-py version is single-sourced from `smelt-py/Cargo.toml`
+  (`dynamic = ["version"]` + `importlib.metadata`) — the triple
+  hand-synced copy drifted more than once.
 - CSV loaders reject missing ("NaN"/"NA"/empty) and non-finite target
   values with an error naming the row, instead of silently training on
   f64::NAN (regression) or label-encoding "NA" as a class

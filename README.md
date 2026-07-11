@@ -7,13 +7,13 @@ A machine learning framework for Rust, inspired by [mlr3](https://mlr3.mlr-org.c
 
 The name refers to smelting — refining raw data into useful models.
 
-**33 supervised learners** | **Clustering** | **Causal Inference (5 meta-learners + Causal Forest)** | **XGBoost/LightGBM/CatBoost from scratch** | **Spatial ML** | **Conformal Prediction** | **4 tuning methods** | **570+ tests**
+**33 supervised learners** | **Clustering** | **Causal Inference (5 meta-learners + Causal Forest)** | **XGBoost/LightGBM/CatBoost from scratch** | **Spatial ML** | **Conformal Prediction** | **4 tuning methods** | **600+ tests**
 
 ## Quick Start
 
 ```toml
 [dependencies]
-smelt-ml = "2.0"
+smelt-ml = "3.0"
 ndarray = "0.16"
 ```
 
