@@ -304,7 +304,12 @@ pub(crate) fn set_param(
         ParamValue::Str(v) => dict.set_item(name, v),
         ParamValue::Float(v) => {
             if is_integer_param(name) {
-                dict.set_item(name, v.round() as i64)
+                // TRUNCATE, matching the factory's `get(...) as usize`: the
+                // reported best_params must be the value the winning model
+                // was actually trained and scored with. Rounding here while
+                // the factory truncated meant a Uniform draw of e.g. 3.7
+                // trained max_depth=3 but reported max_depth=4 (audit M-12).
+                dict.set_item(name, v.trunc() as i64)
             } else {
                 dict.set_item(name, v)
             }
