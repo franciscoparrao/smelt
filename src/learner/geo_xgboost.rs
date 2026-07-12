@@ -61,6 +61,18 @@ pub struct GeoXGBoost {
     alpha: Option<f64>,
 }
 
+/// Minimum recommended adaptive bandwidth (number of nearest neighbours).
+///
+/// Per Grekousis (author correspondence, 2026-07-11): geographically
+/// weighted models are unreliable below ~30 units around each location, so
+/// [`GeoXGBoost::select_bandwidth`] rejects smaller candidates outright.
+/// `with_bandwidth` still accepts smaller values as an explicit override
+/// (toy datasets, quick tests) -- documented there. If a fixed-DISTANCE
+/// bandwidth is ever added (only KNN-adaptive exists today), it needs the
+/// companion check: count how many locations end up with fewer than this
+/// many neighbours at that distance, and advise raising it.
+pub const MIN_BANDWIDTH: usize = 30;
+
 impl GeoXGBoost {
     /// Creates a `GeoXGBoost` learner from spatial unit coordinates, with
     /// default hyperparameters and adaptive alpha weighting.
@@ -79,6 +91,14 @@ impl GeoXGBoost {
 
     /// Sets the number of nearest neighbors used by the bi-square spatial
     /// kernel; use `select_bandwidth` to pick this via leave-one-out CV.
+    ///
+    /// Convention (aligned with Grekousis's reference implementation): `bw`
+    /// counts neighbours AROUND the central point, which is not included;
+    /// the kernel distance `d_h` is the distance to the `bw`-th neighbour,
+    /// which therefore itself receives bi-square weight 0. Values below
+    /// [`MIN_BANDWIDTH`] are accepted here as an explicit override, but
+    /// geographically weighted fits are unreliable that small --
+    /// `select_bandwidth` refuses them.
     pub fn with_bandwidth(mut self, bw: usize) -> Self {
         self.bandwidth = bw;
         self
@@ -164,6 +184,14 @@ impl GeoXGBoost {
                 "select_bandwidth requires at least one candidate bandwidth".into(),
             ));
         }
+        if let Some(&bad) = candidates.iter().find(|&&c| c < MIN_BANDWIDTH) {
+            return Err(SmeltError::InvalidParameter(format!(
+                "candidate bandwidth {bad} is below the minimum of {MIN_BANDWIDTH} neighbours: \
+                 geographically weighted models are unreliable with fewer than ~30 units per \
+                 neighbourhood (Grekousis). Use with_bandwidth() directly if you really need a \
+                 smaller value on toy data"
+            )));
+        }
 
         let mut scores: Vec<(usize, f64)> = Vec::with_capacity(candidates.len());
         for &bw in candidates {
@@ -192,8 +220,12 @@ impl GeoXGBoost {
 
         // Each location's leave-one-out fit is independent -> compute in parallel.
         // Each returns Some(squared error) or None where the neighbourhood was
-        // too small to fit a local model (that point is skipped, penalising tiny
-        // bandwidths).
+        // too small to fit a local model. NOTE: skipping a location makes the
+        // candidate look BETTER, not worse (the skipped ones are exactly the
+        // hard, sparse-neighbourhood locations) -- the old comment claimed the
+        // opposite. With MIN_BANDWIDTH enforced by select_bandwidth this path
+        // only triggers on degenerate geometry (e.g. massively duplicated
+        // coordinates), where a local fit is meaningless anyway.
         let per_point: Vec<Result<Option<f64>>> = (0..n)
             .into_par_iter()
             .map(|i| -> Result<Option<f64>> {
@@ -274,6 +306,13 @@ fn bisquare(d: f64, bandwidth: f64) -> f64 {
 }
 
 /// Compute spatial weights for point i using adaptive bandwidth (N nearest neighbors).
+///
+/// Convention (confirmed against Grekousis's reference implementation,
+/// author correspondence 2026-07-11): the center sits at sorted position 0,
+/// so `dists[n_neighbors]` is the n_neighbors-th NEIGHBOUR (center
+/// excluded) -- his "rank 51 when 1 is the central unit" for h=50. That
+/// neighbour defines `d_h` and thus gets bi-square weight 0 itself; the
+/// center's weight is also zeroed (leave-one-out).
 fn spatial_weights(coords: &[(f64, f64)], center: usize, n_neighbors: usize) -> Vec<f64> {
     let n = coords.len();
     let ci = coords[center];
@@ -768,7 +807,7 @@ mod tests {
     fn select_bandwidth_returns_a_candidate() {
         let (task, coords) = toy_task(8); // 64 points
         let gxgb = GeoXGBoost::new(coords).with_n_estimators(20);
-        let candidates = [5usize, 10, 20, 40];
+        let candidates = [30usize, 40, 50];
         let sel = gxgb.select_bandwidth(&task, &candidates).unwrap();
         assert!(candidates.contains(&sel.best));
         assert_eq!(sel.scores.len(), candidates.len());
@@ -803,6 +842,21 @@ mod tests {
         };
 
         assert_eq!(via_trait_vals, global_vals, "predict() must equal the global model alone");
+    }
+
+    /// Per Grekousis (2026-07-11): neighbourhoods below ~30 units make
+    /// geographically weighted fits unreliable, so bandwidth SELECTION
+    /// refuses them outright; `with_bandwidth` stays available as the
+    /// explicit toy-data override.
+    #[test]
+    fn select_bandwidth_rejects_candidates_below_minimum() {
+        let (task, coords) = toy_task(8); // 64 points
+        let gxgb = GeoXGBoost::new(coords).with_n_estimators(20);
+        let Err(err) = gxgb.select_bandwidth(&task, &[10, 40]) else {
+            panic!("candidate below MIN_BANDWIDTH must be rejected")
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("30") && msg.contains("10"), "got: {msg}");
     }
 
     #[test]
