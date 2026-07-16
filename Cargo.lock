@@ -3004,7 +3004,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "smelt-ml"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "criterion",
  "csv",
@@ -3020,7 +3020,7 @@ dependencies = [
 
 [[package]]
 name = "smelt-py"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "ndarray",
  "numpy",

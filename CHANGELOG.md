@@ -10,7 +10,13 @@ MINOR release with an explicit changelog entry -- never silently in a
 patch (established after 2.0.1 changed the RF/ET regression default in a
 patch; defensible as a bug fix, not a precedent to repeat).
 
-## [Unreleased]
+## [smelt-ml 3.1.0] / [smelt-py 0.7.0] - 2026-07-16
+
+Closes Tier 3 of the 4th engine audit (M-3, M-7, M-13, M-19). Ships as a
+MINOR, not a patch, per the convention above: M-3's incremental split
+sweep can flip exact ties between equal-gain candidate splits
+(floating-point-rounding-level differences), and M-7 changes ANOVA
+degrees of freedom when a class is absent from a fold.
 
 ### Fixed (M-19, 4th audit Tier 3 — Python bindings)
 

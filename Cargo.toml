@@ -3,7 +3,7 @@ members = [".", "smelt-py"]
 
 [package]
 name = "smelt-ml"
-version = "3.0.0"
+version = "3.1.0"
 edition = "2024"
 authors = ["Francisco Parra <francisco.parra.o@usach.cl>"]
 description = "Machine learning framework with spatial modeling, conformal prediction, and gradient boosting competitive with C++"
