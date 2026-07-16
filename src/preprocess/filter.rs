@@ -212,6 +212,55 @@ impl FilterSelector {
     }
 }
 
+/// Validates that `target` holds discrete class labels — finite,
+/// non-negative integers — as required by the classification-only filters
+/// (`anova_f`, `information_gain`).
+///
+/// Those filters group samples by class; fed a continuous regression
+/// target instead, (nearly) every value forms its own singleton group and
+/// the scores degenerate (ANOVA F → ∞ for every feature, i.e. de-facto
+/// random selection). [`FilterSelector::fit_supervised`] calls this
+/// automatically; callers invoking [`AnovaFFilter`]/
+/// [`InformationGainFilter`] `score()` directly (which cannot return an
+/// error) should validate with this first. For continuous targets use
+/// `correlation`, `mutual_info`, or `relief` instead.
+pub fn validate_class_target(target: &[f64]) -> Result<()> {
+    for (i, &t) in target.iter().enumerate() {
+        if !t.is_finite() || t < 0.0 || t.fract() != 0.0 {
+            return Err(SmeltError::InvalidParameter(format!(
+                "this filter scores features against a discrete class target, but target[{i}] \
+                 = {t} is not a non-negative integer class label; for a continuous target use \
+                 the correlation, mutual_info, or relief filter instead"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Maps target values to dense class ids `0..n_classes` by distinct value
+/// (first-occurrence order), so the classification filters' per-class
+/// buffers are sized by the number of *distinct* labels actually present —
+/// never `max_label + 1`, which for a stray continuous or large-valued
+/// target (house prices ~1e9 as "labels") meant allocating gigabytes.
+/// Grouping by value present also matches scikit-learn's `f_classif`,
+/// which computes ANOVA degrees of freedom from the groups in the data,
+/// not from `max + 1` assumed-contiguous labels.
+fn encode_classes(target: &[f64]) -> (Vec<usize>, usize) {
+    let mut ids: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
+    let classes: Vec<usize> = target
+        .iter()
+        .map(|&t| {
+            // `as i64` saturates NaN/±inf and truncates fractions; exact for
+            // the validated integer-label path, harmless bucketing for
+            // direct `score()` callers who skipped validate_class_target.
+            let next = ids.len();
+            *ids.entry(t as i64).or_insert(next)
+        })
+        .collect();
+    let n_classes = ids.len();
+    (classes, n_classes)
+}
+
 impl Transformer for FilterSelector {
     fn id(&self) -> &str {
         "filter_selector"
@@ -244,6 +293,16 @@ impl Transformer for FilterSelector {
     }
 
     fn fit_supervised(&mut self, features: &Array2<f64>, target: &[f64]) -> Result<()> {
+        // anova_f/information_gain group samples by class; a continuous
+        // target silently degenerates them (every value its own group,
+        // F → ∞ for all features — de-facto random selection), so reject
+        // it here with a clear error instead.
+        if matches!(
+            self.filter.inner,
+            FilterType::AnovaF | FilterType::InformationGain
+        ) {
+            validate_class_target(target)?;
+        }
         let scores = self.filter.score(features, target);
 
         let mut ranked: Vec<(usize, f64)> = scores.into_iter().enumerate().collect();
@@ -341,7 +400,9 @@ impl Filter for CorrelationFilter {
 }
 
 /// ANOVA F-test filter: score = between-group variance / within-group variance.
-/// Works for classification targets (target as f64 class labels).
+/// Classification-only: the target must hold discrete class labels (as f64) —
+/// see [`validate_class_target`], which [`FilterSelector::fit_supervised`]
+/// applies automatically before scoring.
 pub struct AnovaFFilter;
 
 impl Filter for AnovaFFilter {
@@ -351,8 +412,7 @@ impl Filter for AnovaFFilter {
 
     fn score(&self, features: &Array2<f64>, target: &[f64]) -> Vec<f64> {
         let n = features.nrows();
-        let classes: Vec<usize> = target.iter().map(|&t| t as usize).collect();
-        let n_classes = classes.iter().max().map_or(0, |&m| m + 1);
+        let (classes, n_classes) = encode_classes(target);
         if n_classes < 2 {
             return vec![0.0; features.ncols()];
         }
@@ -403,7 +463,10 @@ impl Filter for AnovaFFilter {
 }
 
 /// Information Gain filter: score = entropy(target) - conditional_entropy(target | feature).
-/// Discretizes continuous features into bins.
+/// Discretizes continuous features into bins. Classification-only: the target
+/// must hold discrete class labels (as f64) — see [`validate_class_target`],
+/// which [`FilterSelector::fit_supervised`] applies automatically before
+/// scoring.
 pub struct InformationGainFilter;
 
 impl Filter for InformationGainFilter {
@@ -413,8 +476,7 @@ impl Filter for InformationGainFilter {
 
     fn score(&self, features: &Array2<f64>, target: &[f64]) -> Vec<f64> {
         let n = features.nrows() as f64;
-        let classes: Vec<usize> = target.iter().map(|&t| t as usize).collect();
-        let n_classes = classes.iter().max().map_or(0, |&m| m + 1);
+        let (classes, n_classes) = encode_classes(target);
 
         // Target entropy H(Y)
         let mut class_counts = vec![0usize; n_classes];
@@ -774,6 +836,101 @@ impl Filter for ReliefFilter {
                 pos_term - neg_term
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod class_target_tests {
+    use super::*;
+    use ndarray::array;
+
+    fn class_fixture() -> Array2<f64> {
+        array![
+            [0.0, 42.0],
+            [0.1, 13.0],
+            [0.2, 99.0],
+            [1.0, 42.0],
+            [1.1, 13.0],
+            [1.2, 99.0],
+        ]
+    }
+
+    /// Regression test for M-7 (4th audit): the classification-only filters
+    /// used to accept a continuous regression target silently — `t as usize`
+    /// made (nearly) every value its own class, `ss_within ≈ 0` drove the
+    /// ANOVA F to ∞ for *every* feature (de-facto random selection), and
+    /// `n_classes = max + 1` allocated memory proportional to the label
+    /// magnitude (~8 GB for house-price-like targets ~1e9). Now
+    /// `fit_supervised` must reject the target with a clear error.
+    #[test]
+    fn classif_filters_reject_continuous_target() {
+        let features = class_fixture();
+        let continuous = vec![1.5, 2.7, 3.1, 4.9, 5.2, 6.8];
+
+        for selector in [FilterSelector::anova_f(1), FilterSelector::information_gain(1)] {
+            let mut selector = selector;
+            let err = selector
+                .fit_supervised(&features, &continuous)
+                .expect_err("a continuous target must be rejected");
+            assert!(
+                matches!(err, SmeltError::InvalidParameter(_)),
+                "expected InvalidParameter, got {err:?}"
+            );
+        }
+
+        // Filters designed for continuous targets keep accepting them.
+        for selector in [
+            FilterSelector::correlation(1),
+            FilterSelector::mutual_info(1),
+            FilterSelector::relief(1),
+        ] {
+            let mut selector = selector;
+            selector
+                .fit_supervised(&features, &continuous)
+                .expect("continuous-target filters must still accept a continuous target");
+        }
+    }
+
+    /// The per-class buffers must be sized by the number of *distinct*
+    /// labels, not `max + 1`: valid-but-huge integer labels (e.g. two
+    /// classes encoded as 0 and 1e12) previously attempted a ~8 TB
+    /// allocation. They must also score identically to the same grouping
+    /// relabeled as {0, 1} — the scores depend on the grouping, not on the
+    /// label values.
+    #[test]
+    fn scores_depend_on_grouping_not_label_magnitude() {
+        let features = class_fixture();
+        let huge = vec![0.0, 0.0, 0.0, 1e12, 1e12, 1e12];
+        let dense = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+
+        assert_eq!(
+            AnovaFFilter.score(&features, &huge),
+            AnovaFFilter.score(&features, &dense),
+            "ANOVA F must be invariant to relabeling {{0, 1e12}} → {{0, 1}}"
+        );
+        assert_eq!(
+            InformationGainFilter.score(&features, &huge),
+            InformationGainFilter.score(&features, &dense),
+            "information gain must be invariant to relabeling {{0, 1e12}} → {{0, 1}}"
+        );
+    }
+
+    /// Non-contiguous labels (a CV fold can miss a class entirely): ANOVA
+    /// degrees of freedom must come from the groups actually present —
+    /// matching scikit-learn's `f_classif` — not from `max + 1`
+    /// assumed-contiguous classes, which deflated F for every feature via
+    /// a phantom empty group.
+    #[test]
+    fn non_contiguous_labels_match_their_dense_relabeling() {
+        let features = class_fixture();
+        let gappy = vec![0.0, 0.0, 0.0, 2.0, 2.0, 2.0]; // class 1 absent
+        let dense = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+
+        assert_eq!(
+            AnovaFFilter.score(&features, &gappy),
+            AnovaFFilter.score(&features, &dense),
+            "a missing intermediate class must not deflate the F statistic"
+        );
     }
 }
 

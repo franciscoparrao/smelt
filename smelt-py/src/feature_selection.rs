@@ -96,6 +96,15 @@ fn run_filter(
         return Err(PyRuntimeError::new_err(format!("Unknown filter: {method}")));
     }
 
+    // anova_f/information_gain score features against a *class* target;
+    // fed a continuous regression target they degenerate silently (every
+    // value its own group, ANOVA F → inf for all features). Reject with a
+    // clear ValueError instead — same validation FilterSelector applies on
+    // the Rust side.
+    if matches!(method, "anova_f" | "information_gain") {
+        smelt_ml::preprocess::filter::validate_class_target(&target).map_err(smelt_err)?;
+    }
+
     // Get raw per-feature scores (higher = better). Relief is O(n^2) and the
     // rest scan every feature-target pair, so release the GIL for the
     // computation (validated `method` above, so the wildcard is unreachable).

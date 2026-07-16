@@ -12,6 +12,23 @@ patch; defensible as a bug fix, not a precedent to repeat).
 
 ## [Unreleased]
 
+### Fixed (M-7, 4th audit Tier 3)
+
+- `FilterSelector::anova_f`/`information_gain` (and the Python
+  `filter_anova_f`/`filter_information_gain` functions) now reject a
+  continuous target with a clear `InvalidParameter`/`ValueError` instead
+  of silently degenerating: `t as usize` used to make (nearly) every
+  value its own class, driving the ANOVA F to ∞ for every feature —
+  de-facto random selection — and `n_classes = max + 1` allocated memory
+  proportional to the label magnitude (~8 GB for targets ~1e9). Both
+  filters now also size their per-class buffers by the *distinct* labels
+  present (never `max + 1`), and ANOVA degrees of freedom come from the
+  groups actually in the data — matching scikit-learn's `f_classif` when
+  a CV fold is missing a class entirely (previously a phantom empty
+  group deflated F). Filters designed for continuous targets
+  (`correlation`, `mutual_info`, `relief`, mRMR/JMI/JMIM/CMIM) are
+  unaffected.
+
 ### Changed — performance (M-3, 4th audit Tier 3)
 
 - `ObliqueTree`/`ObliqueForest`, `QuantileForest`, and `AdaBoost` split
