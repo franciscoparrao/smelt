@@ -12,6 +12,22 @@ patch; defensible as a bug fix, not a precedent to repeat).
 
 ## [Unreleased]
 
+### Fixed (M-13, 4th audit Tier 3 — Python bindings)
+
+- `BayesianOptimizer.optimize` now validates every `param_space` name
+  against the exact set its learner factory reads, raising a `ValueError`
+  that lists the tunable parameters. Previously a typo'd or unwired name
+  (e.g. `{"objectve": [...]}`, or `min_samples_split` for xgboost) was
+  "tuned" silently: every trial trained the identical model and
+  `best_params` was meaningless.
+- `objective` (and `huber_delta`) are now actually tunable for
+  `learner_type="xgboost"` — the string-choice use case the 3.0.0 typed
+  `ParamSet` was built for was a silent no-op end-to-end. Objective
+  choice values are validated eagerly, before any training.
+- `XGBoost` with an invalid `objective` now raises `ValueError` from
+  `fit` instead of `RuntimeError`, matching the invalid-parameter
+  convention used everywhere else in the bindings.
+
 ### Fixed (M-7, 4th audit Tier 3)
 
 - `FilterSelector::anova_f`/`information_gain` (and the Python

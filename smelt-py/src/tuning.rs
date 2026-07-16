@@ -33,7 +33,7 @@ pub(crate) fn make_learner_factory(
 
     match learner_type {
         "xgboost" => Ok(Box::new(|p: &PS| -> L {
-            Box::new(XGBoost::new()
+            let mut xgb = XGBoost::new()
                 .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
                 .with_max_depth(get(p, "max_depth", 6.0) as usize)
                 .with_learning_rate(get(p, "learning_rate", 0.3))
@@ -41,7 +41,24 @@ pub(crate) fn make_learner_factory(
                 .with_alpha(get(p, "alpha", 0.0))
                 .with_gamma(get(p, "gamma", 0.0))
                 .with_subsample(get(p, "subsample", 1.0))
-                .with_colsample_bytree(get(p, "colsample_bytree", 1.0)))
+                .with_colsample_bytree(get(p, "colsample_bytree", 1.0));
+            // The M10 string-choice use case, now actually wired (audit
+            // M-13: tuning `objective` used to be a silent no-op). Choice
+            // values are validated eagerly in `optimize`, so these panics
+            // are unreachable from the Python entry point; they guard
+            // direct Rust callers of the factory.
+            if let Some(v) = p.get("objective") {
+                let name = v
+                    .as_str()
+                    .unwrap_or_else(|e| panic!("invalid value for parameter 'objective': {e}"));
+                let obj = crate::learners::boosting::resolve_objective(
+                    name,
+                    get(p, "huber_delta", 1.0),
+                )
+                .unwrap_or_else(|e| panic!("invalid value for parameter 'objective': {e}"));
+                xgb = xgb.with_objective(obj);
+            }
+            Box::new(xgb)
         })),
         "catboost" => Ok(Box::new(|p: &PS| -> L {
             Box::new(CatBoost::new()
@@ -79,6 +96,75 @@ pub(crate) fn make_learner_factory(
         })),
         _ => Err(PyRuntimeError::new_err(format!("Unknown learner type: {learner_type}"))),
     }
+}
+
+/// The exact parameter names each `make_learner_factory` closure reads.
+/// `optimize` validates the user's `param_space` against this list, because
+/// the factory looks params up by name with a default fallback: a name it
+/// never reads (a typo, or a parameter this binding doesn't wire) would
+/// otherwise be "tuned" silently — every trial trains the identical model
+/// and `best_params` is meaningless (audit M-13). Keep in sync with the
+/// factory arms above.
+pub(crate) fn factory_param_names(learner_type: &str) -> &'static [&'static str] {
+    match learner_type {
+        "xgboost" => &[
+            "n_estimators",
+            "max_depth",
+            "learning_rate",
+            "lambda",
+            "alpha",
+            "gamma",
+            "subsample",
+            "colsample_bytree",
+            "objective",
+            "huber_delta",
+        ],
+        "catboost" => &["n_estimators", "depth", "learning_rate", "lambda"],
+        "lightgbm" => &["n_estimators", "num_leaves", "learning_rate", "max_depth"],
+        "random_forest" | "rf" | "extra_trees" | "et" => &["n_estimators", "max_depth"],
+        "decision_tree" | "dt" => &["max_depth"],
+        "ridge" => &["alpha"],
+        "knn" => &["k"],
+        _ => &[],
+    }
+}
+
+/// Rejects param-space entries the factory would silently ignore, and
+/// eagerly validates `objective` choice values (so a bad objective fails
+/// with a `ValueError` before any training, instead of a panic mid-tune).
+fn validate_param_space(
+    learner_type: &str,
+    space: &smelt_ml::tuning::ParamSpace,
+) -> PyResult<()> {
+    use pyo3::exceptions::PyValueError;
+    use smelt_ml::tuning::ParamDistribution;
+
+    let allowed = factory_param_names(learner_type);
+    let mut names: Vec<&str> = space.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    for name in names {
+        if !allowed.contains(&name) {
+            return Err(PyValueError::new_err(format!(
+                "parameter '{name}' is not tunable for learner '{learner_type}'; tunable \
+                 parameters are: {}",
+                allowed.join(", ")
+            )));
+        }
+    }
+
+    if let Some(dist) = space.get("objective") {
+        let ParamDistribution::Choice(values) = dist else {
+            return Err(PyValueError::new_err(
+                "'objective' must be a choice list of strings, e.g. [\"squared_error\", \"huber\"]",
+            ));
+        };
+        for v in values {
+            let name = v.as_str().map_err(smelt_err)?;
+            crate::learners::boosting::resolve_objective(name, 1.0)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Convert one Python value to a `ParamValue`, preserving its actual type
@@ -198,6 +284,10 @@ impl PyBayesianOptimizer {
     ///         - (low, high) → uniform distribution
     ///         - [v1, v2, v3] → choice
     ///         - {"type": "uniform"/"log_uniform"/"choice", "low": ..., "high": ..., "values": [...]}
+    ///         Param names are validated against the learner's tunable set;
+    ///         an unknown name raises ValueError listing the valid ones.
+    ///         For "xgboost", `objective` (["squared_error", "huber",
+    ///         "poisson"]) and `huber_delta` are tunable too.
     ///     x, y: training data
     ///     metric: "rmse", "r2", "accuracy", etc.
     ///     n_folds: cross-validation folds
@@ -216,6 +306,7 @@ impl PyBayesianOptimizer {
     ) -> PyResult<PyObject> {
         let factory = make_learner_factory(learner_type)?;
         let space = build_param_space(param_space)?;
+        validate_param_space(learner_type, &space)?;
         let measure = resolve_measure(metric)?;
         let cv = smelt_ml::resample::CrossValidation::new(n_folds).with_seed(cv_seed);
 

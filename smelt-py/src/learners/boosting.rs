@@ -33,13 +33,15 @@ fn resolve_variogram_model(name: &str) -> PyResult<smelt_ml::prelude::VariogramM
 /// every gradient/hessian evaluation, the same cost/complexity trade-off
 /// that keeps `Bagging`/`Stacking` on learner-id strings instead of Python
 /// learner objects (see `ensemble.rs`).
-fn resolve_objective(objective: &str, huber_delta: f64) -> PyResult<smelt_ml::prelude::Objective> {
+pub(crate) fn resolve_objective(objective: &str, huber_delta: f64) -> PyResult<smelt_ml::prelude::Objective> {
     use smelt_ml::prelude::Objective;
     match objective {
         "squared_error" => Ok(Objective::SquaredError),
         "huber" => Ok(Objective::Huber { delta: huber_delta }),
         "poisson" => Ok(Objective::Poisson),
-        other => Err(PyRuntimeError::new_err(format!(
+        // ValueError, not RuntimeError: an invalid parameter value, same
+        // mapping smelt_err applies to SmeltError::InvalidParameter.
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "unknown objective '{other}'; expected one of: squared_error, huber, poisson"
         ))),
     }
