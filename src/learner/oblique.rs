@@ -8,6 +8,7 @@
 //! JMLR 21(104):1-39.
 
 use crate::Result;
+use crate::learner::tree::{gini_from_counts, mse_from_sums};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
@@ -215,22 +216,39 @@ impl ObliqueTreeBuilder {
                 .collect();
             projected.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
-            // Try all split points
+            // Try all split points: sweep left-to-right maintaining running
+            // per-class counts, so gini(left)/gini(right) at each candidate
+            // threshold is O(n_classes) instead of a full O(n) rescan (which,
+            // combined with materializing left/right Vecs per candidate, made
+            // this loop O(n²) per projection — audit M-3, same fix as
+            // TreeBuilder::best_split_classif). Left/right index Vecs are now
+            // only materialized when a candidate improves on the best gain.
+            let mut left_counts = vec![0usize; n_classes];
+            let mut right_counts = vec![0usize; n_classes];
+            for &(idx, _) in &projected {
+                right_counts[target[idx]] += 1;
+            }
+
             for s in 1..projected.len() {
+                let moved_class = target[projected[s - 1].0];
+                left_counts[moved_class] += 1;
+                right_counts[moved_class] -= 1;
+
                 if (projected[s].1 - projected[s - 1].1).abs() < f64::EPSILON {
                     continue;
                 }
 
-                let left_idx: Vec<usize> = projected[..s].iter().map(|(i, _)| *i).collect();
-                let right_idx: Vec<usize> = projected[s..].iter().map(|(i, _)| *i).collect();
-
+                let n_left = s as f64;
+                let n_right = n - n_left;
                 let gain = parent_gini
-                    - (left_idx.len() as f64 / n) * gini(target, &left_idx, n_classes)
-                    - (right_idx.len() as f64 / n) * gini(target, &right_idx, n_classes);
+                    - (n_left / n) * gini_from_counts(&left_counts, n_left)
+                    - (n_right / n) * gini_from_counts(&right_counts, n_right);
 
                 if gain > best_gain {
                     best_gain = gain;
                     let threshold = (projected[s - 1].1 + projected[s].1) / 2.0;
+                    let left_idx: Vec<usize> = projected[..s].iter().map(|(i, _)| *i).collect();
+                    let right_idx: Vec<usize> = projected[s..].iter().map(|(i, _)| *i).collect();
                     best = Some((proj.clone(), threshold, left_idx, right_idx, gain));
                 }
             }
@@ -248,6 +266,11 @@ impl ObliqueTreeBuilder {
     ) -> Option<(Projection, f64, Vec<usize>, Vec<usize>, f64)> {
         let parent_mse = mse(target, indices);
         let n = indices.len() as f64;
+        // Center the running sums on the node mean — same catastrophic-
+        // cancellation guard as TreeBuilder::best_split_regress: E[y²]−E[y]²
+        // on raw targets with a large additive offset (UTM coordinates,
+        // timestamps) turns split gains into rounding noise.
+        let shift = indices.iter().map(|&i| target[i]).sum::<f64>() / n;
         let mut best_gain = 0.0;
         let mut best = None;
 
@@ -260,21 +283,41 @@ impl ObliqueTreeBuilder {
                 .collect();
             projected.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
+            // Sweep with running sum/sum-of-squares so mse(left)/mse(right)
+            // is O(1) per candidate instead of an O(n) rescan (audit M-3,
+            // same fix as TreeBuilder::best_split_regress).
+            let mut left_sum = 0.0;
+            let mut left_sq = 0.0;
+            let mut right_sum = 0.0;
+            let mut right_sq = 0.0;
+            for &(idx, _) in &projected {
+                let y = target[idx] - shift;
+                right_sum += y;
+                right_sq += y * y;
+            }
+
             for s in 1..projected.len() {
+                let y = target[projected[s - 1].0] - shift;
+                left_sum += y;
+                left_sq += y * y;
+                right_sum -= y;
+                right_sq -= y * y;
+
                 if (projected[s].1 - projected[s - 1].1).abs() < f64::EPSILON {
                     continue;
                 }
 
-                let left_idx: Vec<usize> = projected[..s].iter().map(|(i, _)| *i).collect();
-                let right_idx: Vec<usize> = projected[s..].iter().map(|(i, _)| *i).collect();
-
+                let n_left = s as f64;
+                let n_right = n - n_left;
                 let gain = parent_mse
-                    - (left_idx.len() as f64 / n) * mse(target, &left_idx)
-                    - (right_idx.len() as f64 / n) * mse(target, &right_idx);
+                    - (n_left / n) * mse_from_sums(left_sum, left_sq, n_left)
+                    - (n_right / n) * mse_from_sums(right_sum, right_sq, n_right);
 
                 if gain > best_gain {
                     best_gain = gain;
                     let threshold = (projected[s - 1].1 + projected[s].1) / 2.0;
+                    let left_idx: Vec<usize> = projected[..s].iter().map(|(i, _)| *i).collect();
+                    let right_idx: Vec<usize> = projected[s..].iter().map(|(i, _)| *i).collect();
                     best = Some((proj.clone(), threshold, left_idx, right_idx, gain));
                 }
             }
@@ -859,5 +902,103 @@ mod tests {
             panic!("expected classification with probabilities");
         };
         assert_eq!(probs2[0].len(), 2, "probability rows must be n_classes wide, not n_features wide");
+    }
+
+    fn test_builder(n_features: usize) -> ObliqueTreeBuilder {
+        ObliqueTreeBuilder {
+            max_depth: None,
+            min_samples_split: 2,
+            min_samples_leaf: 1,
+            n_projections: 4,
+            features_per_proj: 1,
+            n_features,
+            feature_importances: vec![0.0; n_features],
+        }
+    }
+
+    /// Golden test for the M-3 O(n²) fix (incremental sweep replacing the
+    /// per-candidate gini rescan): with a single feature every projection is
+    /// ±x, so the obviously separable step data must be split at ±2.5 (the
+    /// midpoint between x=2 and x=3, negated when the projection weight is
+    /// −1) with perfect (gini=0) children — same golden shape as
+    /// `best_split_classif_finds_the_hand_computed_optimal_split` in
+    /// `tree/mod.rs`.
+    #[test]
+    fn oblique_classif_sweep_finds_the_hand_computed_optimal_split() {
+        use ndarray::array;
+        use rand::rngs::StdRng;
+
+        let features = array![[1.0], [2.0], [2.0], [3.0], [4.0], [4.0]];
+        let target = vec![0usize, 0, 0, 1, 1, 1];
+        let indices: Vec<usize> = (0..6).collect();
+        let builder = test_builder(1);
+        let mut rng = StdRng::seed_from_u64(0);
+
+        let (proj, threshold, left, right, gain) = builder
+            .best_oblique_split_classif(&features, &target, &indices, 2, &mut rng)
+            .expect("an obviously separable dataset must find a split");
+
+        let w = proj.0[0].1;
+        assert!(
+            (threshold - w * 2.5).abs() < 1e-9,
+            "expected the (possibly negated) midpoint between x=2 and x=3, got {threshold} (w={w})"
+        );
+        assert_eq!(left.len(), 3);
+        assert_eq!(right.len(), 3);
+        assert!(gain > 0.49, "a perfect split should recover ~all of the parent's gini: {gain}");
+    }
+
+    /// Regression test for the M-3 regression-path sweep inheriting the
+    /// HIGH-1 guard: accumulating E[y²]−E[y]² on raw targets with a large
+    /// additive offset (UTM northing ~7e6, timestamps ~1e9) cancels
+    /// catastrophically, so the sums must be centered on the node mean and
+    /// the found split must be independent of the offset. The projection
+    /// stream only consumes RNG on features, so with a fixed seed the same
+    /// projections are tried for every offset and the thresholds must match
+    /// exactly.
+    #[test]
+    fn oblique_regress_sweep_is_invariant_to_large_target_offsets() {
+        use rand::rngs::StdRng;
+
+        let n = 200;
+        let features = Array2::from_shape_fn((n, 1), |(i, _)| i as f64 / n as f64 * 10.0);
+        let base: Vec<f64> = (0..n)
+            .map(|i| {
+                let x = features[[i, 0]];
+                let step = if x < 5.0 { 0.0 } else { 4.0 };
+                step + 0.3 * ((i as f64 * 12.9898).sin())
+            })
+            .collect();
+        let indices: Vec<usize> = (0..n).collect();
+        let builder = test_builder(1);
+
+        // The +x and −x projections find mirror-image splits with equal gain
+        // (same partition, negated threshold), and which of the two exact
+        // ties wins can flip with the offset's last-ulp noise — so compare
+        // the offset-invariant quantities: |threshold| and the induced
+        // partition (as an unordered pair of index sets).
+        let mut splits = Vec::new();
+        for offset in [0.0, 1e6, 1e8] {
+            let target: Vec<f64> = base.iter().map(|y| y + offset).collect();
+            let mut rng = StdRng::seed_from_u64(0);
+            let (_, threshold, left, right, _) = builder
+                .best_oblique_split_regress(&features, &target, &indices, &mut rng)
+                .expect("an obvious step function must find a split");
+            let mut left = left;
+            let mut right = right;
+            left.sort_unstable();
+            right.sort_unstable();
+            let mut partition = [left, right];
+            partition.sort();
+            splits.push((threshold.abs(), partition));
+        }
+        assert_eq!(
+            splits[0], splits[1],
+            "offset 1e6 changed the chosen split (|threshold| or partition)"
+        );
+        assert_eq!(
+            splits[0], splits[2],
+            "offset 1e8 changed the chosen split (|threshold| or partition)"
+        );
     }
 }

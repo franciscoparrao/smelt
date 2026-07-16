@@ -102,6 +102,15 @@ fn train_stump(
         right_class: 0,
     };
 
+    // Per-class weighted totals over the whole node, computed once: the
+    // sweep below derives right-side counts as total − left, so it never
+    // subtracts from a running right-side accumulator.
+    let mut total_counts = vec![0.0; n_classes];
+    for idx in 0..n {
+        total_counts[target[idx]] += weights[idx];
+    }
+    let total_weight: f64 = total_counts.iter().sum();
+
     for feat in 0..p {
         let mut sorted: Vec<usize> = (0..n).collect();
         sorted.sort_by(|&a, &b| {
@@ -110,7 +119,20 @@ fn train_stump(
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
+        // Sweep left-to-right maintaining running weighted per-class counts,
+        // so the majority class and weighted error per candidate threshold
+        // are O(n_classes) instead of three full O(n) rescans (audit M-3,
+        // same fix as TreeBuilder::best_split_classif). The error of
+        // predicting the majority class on each side is that side's total
+        // weight minus its majority class's weight.
+        let mut left_counts = vec![0.0; n_classes];
+        let mut left_total = 0.0;
+
         for i in 1..n {
+            let moved = sorted[i - 1];
+            left_counts[target[moved]] += weights[moved];
+            left_total += weights[moved];
+
             if (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs() < f64::EPSILON
             {
                 continue;
@@ -118,41 +140,25 @@ fn train_stump(
 
             let threshold = (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
 
-            // Weighted majority class for left and right
-            let mut left_counts = vec![0.0; n_classes];
-            let mut right_counts = vec![0.0; n_classes];
-            for &idx in &sorted[..i] {
-                left_counts[target[idx]] += weights[idx];
-            }
-            for &idx in &sorted[i..] {
-                right_counts[target[idx]] += weights[idx];
-            }
-
-            let left_class = left_counts
-                .iter()
-                .enumerate()
-                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap()
-                .0;
-            let right_class = right_counts
-                .iter()
-                .enumerate()
-                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap()
-                .0;
-
-            // Weighted error
-            let mut err = 0.0;
-            for idx in 0..n {
-                let pred = if features[[idx, feat]] <= threshold {
-                    left_class
-                } else {
-                    right_class
-                };
-                if pred != target[idx] {
-                    err += weights[idx];
+            // `>=` so ties pick the highest class index, matching the
+            // last-max tie-breaking of the `Iterator::max_by` this replaces.
+            let mut left_class = 0;
+            let mut left_best = f64::NEG_INFINITY;
+            let mut right_class = 0;
+            let mut right_best = f64::NEG_INFINITY;
+            for c in 0..n_classes {
+                if left_counts[c] >= left_best {
+                    left_best = left_counts[c];
+                    left_class = c;
+                }
+                let right_c = total_counts[c] - left_counts[c];
+                if right_c >= right_best {
+                    right_best = right_c;
+                    right_class = c;
                 }
             }
+
+            let err = (left_total - left_best) + ((total_weight - left_total) - right_best);
 
             if err < best_err {
                 best_err = err;
@@ -363,6 +369,110 @@ mod tests {
             "learning_rate=0.0 should scale the entire SAMME alpha to exactly 0.0 \
              and reject every stump immediately, got {} stumps",
             model.stumps.len()
+        );
+    }
+
+    /// Regression test for the M-3 O(n²) fix: `train_stump`'s incremental
+    /// sweep (running weighted per-class counts, right side derived as
+    /// total − left) must pick the same stump, with the same weighted error,
+    /// as the brute-force reference it replaced (recompute both sides' counts
+    /// and rescan all samples for the error, at every candidate threshold).
+    /// Non-uniform weights and 3 classes exercise the weighted-majority and
+    /// error bookkeeping beyond what uniform binary data can.
+    #[test]
+    fn train_stump_matches_the_brute_force_reference() {
+        let n = 60;
+        let p = 3;
+        let mut feats = Vec::with_capacity(n * p);
+        let mut target = Vec::with_capacity(n);
+        let mut weights = Vec::with_capacity(n);
+        for i in 0..n {
+            // Deterministic pseudo-random features on an integer grid, so
+            // candidate thresholds are exact midpoints (x.5) and the old
+            // code's `<= threshold` rescan partitions exactly like the
+            // sweep's sorted prefix.
+            for j in 0..p {
+                feats.push(((i * 7 + j * 13) % 10) as f64);
+            }
+            // Class loosely tied to feature 1, with deliberate impurity.
+            target.push(if i % 11 == 0 { 2 } else { ((i * 7 + 13) % 10) / 5 });
+            weights.push(1.0 + 0.01 * ((i as f64 * 3.7).sin()));
+        }
+        let features = Array2::from_shape_vec((n, p), feats).unwrap();
+        let n_classes = 3;
+
+        let (stump, err) = train_stump(&features, &target, &weights, n_classes);
+
+        // Brute-force reference: the exact pre-M-3 algorithm.
+        let mut best_err = f64::INFINITY;
+        let mut best = (0usize, 0.0f64, 0usize, 0usize);
+        for feat in 0..p {
+            let mut sorted: Vec<usize> = (0..n).collect();
+            sorted.sort_by(|&a, &b| {
+                features[[a, feat]]
+                    .partial_cmp(&features[[b, feat]])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            for i in 1..n {
+                if (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs()
+                    < f64::EPSILON
+                {
+                    continue;
+                }
+                let threshold =
+                    (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
+                let mut left_counts = vec![0.0; n_classes];
+                let mut right_counts = vec![0.0; n_classes];
+                for &idx in &sorted[..i] {
+                    left_counts[target[idx]] += weights[idx];
+                }
+                for &idx in &sorted[i..] {
+                    right_counts[target[idx]] += weights[idx];
+                }
+                let argmax = |counts: &[f64]| {
+                    counts
+                        .iter()
+                        .enumerate()
+                        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap()
+                        .0
+                };
+                let (lc, rc) = (argmax(&left_counts), argmax(&right_counts));
+                let mut e = 0.0;
+                for idx in 0..n {
+                    let pred = if features[[idx, feat]] <= threshold { lc } else { rc };
+                    if pred != target[idx] {
+                        e += weights[idx];
+                    }
+                }
+                if e < best_err {
+                    best_err = e;
+                    best = (feat, threshold, lc, rc);
+                }
+            }
+        }
+
+        assert!(
+            (err - best_err).abs() < 1e-9,
+            "sweep err={err}, brute-force err={best_err}"
+        );
+        let preds_sweep: Vec<usize> = (0..n)
+            .map(|i| stump.predict_one(features.row(i).to_vec().as_slice()))
+            .collect();
+        let ref_stump = TrainedStump {
+            feature: best.0,
+            threshold: best.1,
+            left_class: best.2,
+            right_class: best.3,
+        };
+        let preds_ref: Vec<usize> = (0..n)
+            .map(|i| ref_stump.predict_one(features.row(i).to_vec().as_slice()))
+            .collect();
+        assert_eq!(
+            preds_sweep, preds_ref,
+            "sweep stump (feat={}, thr={}) predicts differently from brute-force \
+             stump (feat={}, thr={})",
+            stump.feature, stump.threshold, best.0, best.1
         );
     }
 }

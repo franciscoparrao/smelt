@@ -5,7 +5,7 @@
 //!
 //! Reference: Meinshausen, N. (2006). Quantile Regression Forests. JMLR 7, 983-999.
 
-use crate::learner::tree::MaxFeatures;
+use crate::learner::tree::{MaxFeatures, mse_from_sums};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
@@ -179,6 +179,11 @@ fn build_qrf_tree(
 
     // MSE-based splitting
     let parent_mse = mse_indices(target, indices);
+    // Center the running sums on the node mean — same catastrophic-
+    // cancellation guard as TreeBuilder::best_split_regress: E[y²]−E[y]²
+    // on raw targets with a large additive offset (UTM coordinates,
+    // timestamps) turns split gains into rounding noise.
+    let shift = indices.iter().map(|&i| target[i]).sum::<f64>() / n as f64;
 
     for &feat in &feat_indices[..n_try] {
         let mut sorted: Vec<usize> = indices.to_vec();
@@ -188,22 +193,49 @@ fn build_qrf_tree(
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        for s in min_samples_leaf..(n.saturating_sub(min_samples_leaf)) {
+        // Sweep with running sum/sum-of-squares so mse(left)/mse(right) is
+        // O(1) per candidate instead of an O(n) rescan (audit M-3, same fix
+        // as TreeBuilder::best_split_regress — especially hot here since the
+        // default considers *all* features per split). Candidates outside
+        // the [min_samples_leaf, n - min_samples_leaf) window still feed the
+        // running sums; they're just never evaluated, exactly like the old
+        // loop bounds.
+        let mut left_sum = 0.0;
+        let mut left_sq = 0.0;
+        let mut right_sum = 0.0;
+        let mut right_sq = 0.0;
+        for &idx in &sorted {
+            let y = target[idx] - shift;
+            right_sum += y;
+            right_sq += y * y;
+        }
+
+        for s in 1..n {
+            let y = target[sorted[s - 1]] - shift;
+            left_sum += y;
+            left_sq += y * y;
+            right_sum -= y;
+            right_sq -= y * y;
+
+            if s < min_samples_leaf || s >= n.saturating_sub(min_samples_leaf) {
+                continue;
+            }
             if (features[[sorted[s], feat]] - features[[sorted[s - 1], feat]]).abs() < f64::EPSILON
             {
                 continue;
             }
-            let left = &sorted[..s];
-            let right = &sorted[s..];
+
+            let n_left = s as f64;
+            let n_right = (n - s) as f64;
             let gain = parent_mse
-                - (left.len() as f64 / n as f64) * mse_indices(target, left)
-                - (right.len() as f64 / n as f64) * mse_indices(target, right);
+                - (n_left / n as f64) * mse_from_sums(left_sum, left_sq, n_left)
+                - (n_right / n as f64) * mse_from_sums(right_sum, right_sq, n_right);
 
             if gain > best_gain {
                 best_gain = gain;
                 let threshold =
                     (features[[sorted[s - 1], feat]] + features[[sorted[s], feat]]) / 2.0;
-                best_split = Some((feat, threshold, left.to_vec(), right.to_vec()));
+                best_split = Some((feat, threshold, sorted[..s].to_vec(), sorted[s..].to_vec()));
             }
         }
     }
@@ -409,6 +441,53 @@ mod tests {
             default_rmse < sqrt_rmse,
             "all-features default (RMSE={default_rmse}) should beat sqrt(p) \
              heuristic (RMSE={sqrt_rmse}) when only 3/{p} features carry signal"
+        );
+    }
+
+    /// Regression test for the M-3 O(n²) fix (incremental sweep replacing
+    /// the per-candidate `mse_indices` rescan) inheriting the HIGH-1 guard:
+    /// the sums must be centered on the node mean, so the split found for a
+    /// step signal must be independent of a large additive target offset
+    /// (UTM northing ~7e6, timestamps ~1e9). `build_qrf_tree` only consumes
+    /// RNG for the feature shuffle, so with a fixed seed the root split must
+    /// be identical (and at the step) for every offset.
+    #[test]
+    fn qrf_root_split_is_invariant_to_large_target_offsets() {
+        let n = 200;
+        let features = Array2::from_shape_fn((n, 1), |(i, _)| i as f64 / n as f64 * 10.0);
+        let base: Vec<f64> = (0..n)
+            .map(|i| {
+                let x = features[[i, 0]];
+                let step = if x < 5.0 { 0.0 } else { 4.0 };
+                step + 0.3 * ((i as f64 * 12.9898).sin())
+            })
+            .collect();
+        let indices: Vec<usize> = (0..n).collect();
+
+        let mut thresholds = Vec::new();
+        for offset in [0.0, 1e6, 1e8] {
+            let target: Vec<f64> = base.iter().map(|y| y + offset).collect();
+            let mut rng = StdRng::seed_from_u64(0);
+            let root = build_qrf_tree(&features, &target, &indices, None, 1, 1, None, 0, &mut rng);
+            let QRFNode::Split { threshold, .. } = root else {
+                panic!("a step signal must produce a root split, got a leaf at offset {offset}");
+            };
+            thresholds.push(threshold);
+        }
+        assert!(
+            (thresholds[0] - 5.0).abs() < 0.2,
+            "root split should land at the step (~5.0), got {}",
+            thresholds[0]
+        );
+        assert_eq!(
+            thresholds[0], thresholds[1],
+            "offset 1e6 changed the root split: {} vs {}",
+            thresholds[0], thresholds[1]
+        );
+        assert_eq!(
+            thresholds[0], thresholds[2],
+            "offset 1e8 changed the root split: {} vs {}",
+            thresholds[0], thresholds[2]
         );
     }
 

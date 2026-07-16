@@ -494,8 +494,9 @@ pub(crate) fn mse(target: &[f64], indices: &[usize]) -> f64 {
 
 /// Gini impurity from pre-aggregated per-class counts, for `n` samples --
 /// equivalent to `gini(target, indices, n_classes)` but O(n_classes) instead
-/// of O(n), used by [`TreeBuilder::best_split_classif`]'s incremental sweep.
-fn gini_from_counts(counts: &[usize], n: f64) -> f64 {
+/// of O(n), used by [`TreeBuilder::best_split_classif`]'s incremental sweep
+/// (and by `ObliqueTreeBuilder`'s, which shares the same rescan-free sweep).
+pub(crate) fn gini_from_counts(counts: &[usize], n: f64) -> f64 {
     if n <= 0.0 {
         return 0.0;
     }
@@ -507,14 +508,15 @@ fn gini_from_counts(counts: &[usize], n: f64) -> f64 {
 
 /// MSE (variance) from a running sum and sum-of-squares over `n` samples --
 /// equivalent to `mse(target, indices)` but O(1) instead of O(n), used by
-/// [`TreeBuilder::best_split_regress`]'s incremental sweep. The standard
+/// [`TreeBuilder::best_split_regress`]'s incremental sweep (and by the
+/// ObliqueTree/QuantileForest sweeps, which share it). The standard
 /// CART/scikit-learn formula (`E[y²] - E[y]²`); `.max(0.0)` guards against a
 /// tiny negative value from floating-point cancellation when the true
 /// variance is at or near zero. The caller must accumulate `sum`/`sum_sq`
 /// over targets centered on the node mean: on raw values this formula
 /// cancels catastrophically once `mean² · f64::EPSILON` approaches the true
 /// variance (offsets ≳1e6 for unit-scale spread).
-fn mse_from_sums(sum: f64, sum_sq: f64, n: f64) -> f64 {
+pub(crate) fn mse_from_sums(sum: f64, sum_sq: f64, n: f64) -> f64 {
     if n <= 0.0 {
         return 0.0;
     }

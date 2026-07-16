@@ -10,6 +10,24 @@ MINOR release with an explicit changelog entry -- never silently in a
 patch (established after 2.0.1 changed the RF/ET regression default in a
 patch; defensible as a bug fix, not a precedent to repeat).
 
+## [Unreleased]
+
+### Changed — performance (M-3, 4th audit Tier 3)
+
+- `ObliqueTree`/`ObliqueForest`, `QuantileForest`, and `AdaBoost` split
+  search rewritten from a per-candidate O(n) rescan to the same
+  incremental sweep `TreeBuilder` got in 3.0.0, including the centered
+  running sums that guard the regression paths against catastrophic
+  cancellation on targets with large additive offsets (UTM coordinates,
+  timestamps). Measured on n=4000, p=12: QuantileForest ~20× faster
+  (951 ms → 49 ms), ObliqueTree ~80× (2.31 s → 29 ms), AdaBoost ~460×
+  (23.7 s → 51 ms). Classification splits are computed from the exact
+  same per-class counts as before (bit-identical); regression gains and
+  AdaBoost's weighted error agree with the old rescan to floating-point
+  rounding, which can flip exact ties between equal-gain candidate
+  splits — hence this ships in a minor, not a patch, per this
+  changelog's convention.
+
 ## [smelt-ml 3.0.0] / [smelt-py 0.6.0] - 2026-07-10
 
 Everything on master since 2.0.1/0.5.1: the Fase F closures of the 3rd
