@@ -59,7 +59,7 @@ pub use mondrian::{MondrianForest, MondrianTree};
 pub use naive_bayes::GaussianNB;
 pub use oblique::{ObliqueForest, ObliqueTree};
 pub use quantile::QuantileGB;
-pub use quantile_forest::QuantileForest;
+pub use quantile_forest::{QuantileForest, TrainedQuantileForest};
 pub use regularized::{ElasticNet, Lasso, Ridge};
 pub use registry::{learner_from_id, registered_learner_ids};
 pub use stacking::Stacking;

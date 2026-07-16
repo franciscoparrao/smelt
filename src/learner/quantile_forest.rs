@@ -8,7 +8,7 @@
 use crate::learner::tree::{MaxFeatures, mse_from_sums};
 use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
+use crate::{Result, SmeltError};
 use crate::task::{RegressionTask, Task};
 use ndarray::Array2;
 use rand::Rng;
@@ -298,8 +298,13 @@ pub struct TrainedQuantileForest {
 }
 
 impl TrainedQuantileForest {
-    /// Predict a specific quantile for each sample.
+    /// Predict a specific quantile (in `[0, 1]`) for each sample.
     pub fn predict_quantile(&self, features: &Array2<f64>, quantile: f64) -> Result<Vec<f64>> {
+        if !(0.0..=1.0).contains(&quantile) {
+            return Err(SmeltError::InvalidParameter(format!(
+                "quantile must be in [0, 1], got {quantile}"
+            )));
+        }
         crate::validate::check_n_features(features, self.n_features)?;
 
         Ok(features
@@ -321,8 +326,15 @@ impl TrainedQuantileForest {
             .collect())
     }
 
-    /// Predict interval [lower, upper] for each sample.
+    /// Predict interval [lower, upper] for each sample, at miscoverage level
+    /// `alpha` in `(0, 1)` — the interval spans the `alpha/2` and
+    /// `1 - alpha/2` quantiles (e.g. `alpha = 0.1` → 90% interval).
     pub fn predict_interval(&self, features: &Array2<f64>, alpha: f64) -> Result<Vec<(f64, f64)>> {
+        if !(alpha > 0.0 && alpha < 1.0) {
+            return Err(SmeltError::InvalidParameter(format!(
+                "alpha must be in (0, 1), got {alpha}"
+            )));
+        }
         let lower = self.predict_quantile(features, alpha / 2.0)?;
         let upper = self.predict_quantile(features, 1.0 - alpha / 2.0)?;
         Ok(lower.into_iter().zip(upper).collect())
@@ -345,12 +357,13 @@ impl TrainedModel for TrainedQuantileForest {
 
 // ── Learner impl ────────────────────────────────────────────────────
 
-impl Learner for QuantileForest {
-    fn id(&self) -> &str {
-        "quantile_forest"
-    }
-
-    fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+impl QuantileForest {
+    /// Train and return the concrete [`TrainedQuantileForest`], whose
+    /// inherent `predict_quantile`/`predict_interval` go beyond the
+    /// `TrainedModel` trait — same "concrete type carries more than the
+    /// trait" shape as `DeepForest::fit`/`GeoXGBoost::train_geo`.
+    /// [`Learner::train_regress`] just boxes this.
+    pub fn fit(&mut self, task: &RegressionTask) -> Result<TrainedQuantileForest> {
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
@@ -380,7 +393,17 @@ impl Learner for QuantileForest {
             })
             .collect();
 
-        Ok(Box::new(TrainedQuantileForest { trees, n_features }))
+        Ok(TrainedQuantileForest { trees, n_features })
+    }
+}
+
+impl Learner for QuantileForest {
+    fn id(&self) -> &str {
+        "quantile_forest"
+    }
+
+    fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        Ok(Box::new(self.fit(task)?))
     }
 }
 
@@ -489,6 +512,61 @@ mod tests {
             "offset 1e8 changed the root split: {} vs {}",
             thresholds[0], thresholds[2]
         );
+    }
+
+    /// M-19 support: the concrete `fit` (which the Python binding stores to
+    /// reach `predict_quantile`/`predict_interval`) must produce coherent
+    /// quantiles — ordered across q, median matching the trait `predict`,
+    /// and out-of-range `quantile`/`alpha` rejected instead of silently
+    /// clamped.
+    #[test]
+    fn concrete_fit_exposes_ordered_validated_quantiles() {
+        let n = 200;
+        let features = Array2::from_shape_fn((n, 1), |(i, _)| i as f64 / n as f64 * 10.0);
+        let target: Vec<f64> = (0..n)
+            .map(|i| features[[i, 0]] * 2.0 + 3.0 * ((i as f64 * 12.9898).sin()))
+            .collect();
+        let task = RegressionTask::new("qrf_quantiles", features.clone(), target).unwrap();
+
+        let model = QuantileForest::new()
+            .with_n_estimators(30)
+            .with_seed(7)
+            .fit(&task)
+            .unwrap();
+
+        let q10 = model.predict_quantile(&features, 0.1).unwrap();
+        let q50 = model.predict_quantile(&features, 0.5).unwrap();
+        let q90 = model.predict_quantile(&features, 0.9).unwrap();
+        for i in 0..n {
+            assert!(
+                q10[i] <= q50[i] && q50[i] <= q90[i],
+                "quantiles must be ordered at sample {i}: q10={} q50={} q90={}",
+                q10[i], q50[i], q90[i]
+            );
+        }
+
+        let Prediction::Regression { predicted, .. } = model.predict(&features).unwrap() else {
+            panic!("expected regression");
+        };
+        assert_eq!(predicted, q50, "trait predict must be the median");
+
+        let intervals = model.predict_interval(&features, 0.2).unwrap();
+        for (i, &(lo, hi)) in intervals.iter().enumerate() {
+            assert!((lo, hi) == (q10[i], q90[i]), "alpha=0.2 interval must span q10..q90");
+        }
+
+        for bad_q in [-0.1, 1.5, f64::NAN] {
+            assert!(
+                model.predict_quantile(&features, bad_q).is_err(),
+                "quantile {bad_q} must be rejected"
+            );
+        }
+        for bad_alpha in [0.0, 1.0, -0.5] {
+            assert!(
+                model.predict_interval(&features, bad_alpha).is_err(),
+                "alpha {bad_alpha} must be rejected"
+            );
+        }
     }
 
     #[test]

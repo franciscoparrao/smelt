@@ -145,17 +145,214 @@ define_learner! {
     serial_as = "EBM",
 }
 
-define_learner! {
-    name = QuantileForest,
-    params = { n_estimators: usize = 100, max_depth: usize = 10, min_samples_leaf: usize = 5, seed: u64 = 42 },
-    ctor = |slf| smelt_ml::prelude::QuantileForest::default()
-        .with_n_estimators(slf.n_estimators)
-        .with_max_depth(slf.max_depth)
-        .with_min_samples_leaf(slf.min_samples_leaf)
-        .with_seed(slf.seed),
-    proba = false,
-    serial_as = "QuantileForest",
+// ── QuantileForest ──────────────────────────────────────────────────────
+// Hand-written rather than via `define_learner!` (audit M-19): the macro
+// stores `Box<dyn TrainedModel>`, which loses the concrete
+// `TrainedQuantileForest` and with it `predict_quantile`/`predict_interval`
+// — the whole reason to use a QRF over a plain RandomForest. Same
+// concrete-storage shape as GeoXGBoost/KrigingHybrid in `boosting.rs`, but
+// unlike those two this model IS in `SerializableModel`, so `save`/`load`
+// are kept (hand-written, recovering the concrete type on load).
+#[pyclass]
+pub(crate) struct QuantileForest {
+    trained: Option<smelt_ml::prelude::TrainedQuantileForest>,
+    n_estimators: usize,
+    max_depth: usize,
+    min_samples_leaf: usize,
+    seed: u64,
 }
+
+#[pymethods]
+impl QuantileForest {
+    /// Quantile Regression Forest (Meinshausen, 2006): a random forest whose
+    /// leaves keep every training target that lands in them, so any quantile
+    /// or prediction interval can be computed at prediction time.
+    /// Regression-only.
+    #[new]
+    #[pyo3(signature = (n_estimators=100, max_depth=10, min_samples_leaf=5, seed=42))]
+    fn new(n_estimators: usize, max_depth: usize, min_samples_leaf: usize, seed: u64) -> Self {
+        Self {
+            trained: None,
+            n_estimators,
+            max_depth,
+            min_samples_leaf,
+            seed,
+        }
+    }
+
+    /// Train on regression data.
+    fn fit(&mut self, py: Python<'_>, x: PyReadonlyArray2<'_, f64>, y: Vec<f64>) -> PyResult<()> {
+        let features = to_array2(x);
+        let task = smelt_ml::task::RegressionTask::new("qrf", features, y)
+            .map_err(crate::common::smelt_err)?;
+        let mut learner = smelt_ml::prelude::QuantileForest::default()
+            .with_n_estimators(self.n_estimators)
+            .with_max_depth(self.max_depth)
+            .with_min_samples_leaf(self.min_samples_leaf)
+            .with_seed(self.seed);
+        let trained = py
+            .allow_threads(|| learner.fit(&task))
+            .map_err(crate::common::smelt_err)?;
+        self.trained = Some(trained);
+        Ok(())
+    }
+
+    /// Predict the median (quantile 0.5) for each sample — same as the
+    /// generic `predict` any learner exposes.
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        self.predict_quantile(py, x, 0.5)
+    }
+
+    /// Predict an arbitrary quantile (0 <= quantile <= 1) for each sample.
+    fn predict_quantile<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+        quantile: f64,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let features = to_array2(x);
+        let values = py
+            .allow_threads(|| model.predict_quantile(&features, quantile))
+            .map_err(crate::common::smelt_err)?;
+        Ok(PyArray1::from_vec(py, values))
+    }
+
+    /// Per-sample prediction interval spanning the `alpha/2` and
+    /// `1 - alpha/2` quantiles (default alpha=0.1 → 90% interval).
+    ///
+    /// Returns dict with "predictions" (median), "lower", "upper" (numpy
+    /// arrays) and "alpha" — same shape as `conformal_predict`, but from the
+    /// forest's own conditional distribution instead of a calibration set.
+    #[pyo3(signature = (x, alpha=0.1))]
+    fn predict_interval<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+        alpha: f64,
+    ) -> PyResult<PyObject> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let features = to_array2(x);
+        let (intervals, median) = py
+            .allow_threads(|| {
+                let intervals = model.predict_interval(&features, alpha)?;
+                let median = model.predict_quantile(&features, 0.5)?;
+                Ok::<_, smelt_ml::SmeltError>((intervals, median))
+            })
+            .map_err(crate::common::smelt_err)?;
+        let (lower, upper): (Vec<f64>, Vec<f64>) = intervals.into_iter().unzip();
+
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("predictions", PyArray1::from_vec(py, median))?;
+        dict.set_item("lower", PyArray1::from_vec(py, lower))?;
+        dict.set_item("upper", PyArray1::from_vec(py, upper))?;
+        dict.set_item("alpha", alpha)?;
+        Ok(dict.into())
+    }
+
+    #[getter]
+    fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
+        Ok(self
+            .trained
+            .as_ref()
+            .ok_or_else(not_fitted)?
+            .feature_importance())
+    }
+
+    /// Save the fitted model to a JSON file.
+    fn save(&self, path: &str) -> PyResult<()> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let serializable = model
+            .to_serializable()
+            .expect("TrainedQuantileForest always has a SerializableModel variant");
+        smelt_ml::serialize::save_json(&serializable, path).map_err(crate::common::smelt_err)
+    }
+
+    /// Load a previously saved model from a JSON file. `is_classif` is
+    /// accepted for API compatibility with the other learners but must be
+    /// False — QuantileForest is regression-only. Hyperparameters reset to
+    /// the CONSTRUCTOR defaults (the file doesn't store them); call
+    /// `set_params` first to restore yours before refitting.
+    #[staticmethod]
+    #[pyo3(signature = (path, is_classif=false))]
+    fn load(path: &str, is_classif: bool) -> PyResult<Self> {
+        if is_classif {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "QuantileForest is regression-only; is_classif must be False",
+            ));
+        }
+        match smelt_ml::serialize::load_json(path).map_err(crate::common::smelt_err)? {
+            smelt_ml::serialize::SerializableModel::QuantileForest(model) => {
+                let mut inst = Self::new(100, 10, 5, 42);
+                inst.trained = Some(model);
+                Ok(inst)
+            }
+            other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "expected a 'QuantileForest' model in {path}, found '{}'",
+                other.type_name()
+            ))),
+        }
+    }
+
+    /// Compute SHAP values for each sample.
+    #[pyo3(signature = (x, y, n_background=50, feature_names=None))]
+    fn shap_values<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+        n_background: usize,
+        feature_names: Option<Vec<String>>,
+    ) -> PyResult<PyObject> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        crate::common::shap_impl(py, model, false, x, y, n_background, feature_names, 0)
+    }
+
+    /// Compute permutation importance.
+    #[pyo3(signature = (x, y, metric="rmse", n_repeats=5, seed=42, feature_names=None))]
+    fn permutation_importance<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+        metric: &str,
+        n_repeats: usize,
+        seed: u64,
+        feature_names: Option<Vec<String>>,
+    ) -> PyResult<PyObject> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        crate::common::perm_importance_impl(
+            py, model, false, x, y, metric, n_repeats, seed, feature_names,
+        )
+    }
+
+    /// Split conformal prediction intervals with guaranteed (1-alpha)
+    /// coverage from a held-out calibration set — distribution-free, unlike
+    /// `predict_interval`'s forest-native quantiles.
+    #[pyo3(signature = (x_cal, y_cal, x_test, alpha=0.1))]
+    fn conformal_predict<'py>(
+        &self,
+        py: Python<'py>,
+        x_cal: PyReadonlyArray2<'_, f64>,
+        y_cal: Vec<f64>,
+        x_test: PyReadonlyArray2<'_, f64>,
+        alpha: f64,
+    ) -> PyResult<PyObject> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        crate::common::conformal_predict_impl(py, model, x_cal, y_cal, x_test, alpha)
+    }
+}
+
+declare_params!(QuantileForest, {
+    n_estimators => "n_estimators",
+    max_depth => "max_depth",
+    min_samples_leaf => "min_samples_leaf",
+    seed => "seed",
+});
 
 define_learner! {
     name = QuantileGB,
@@ -256,7 +453,10 @@ impl ExtremeLearningMachine {
     }
 }
 
-add_explain_methods!(KNearestNeighbors, GaussianNB, AdaBoost, EBM, QuantileForest, QuantileGB, ExtremeLearningMachine);
+// QuantileForest is excluded: it stores its model as a concrete
+// `Option<TrainedQuantileForest>` (not `Option<Box<dyn TrainedModel>>`),
+// so its explain methods are hand-written above.
+add_explain_methods!(KNearestNeighbors, GaussianNB, AdaBoost, EBM, QuantileGB, ExtremeLearningMachine);
 
 declare_support!(KNearestNeighbors, classif = true,  regress = true);
 declare_support!(GaussianNB,        classif = true,  regress = false);

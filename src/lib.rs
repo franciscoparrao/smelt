@@ -93,7 +93,8 @@ pub mod prelude {
         GradientBoosting, HoeffdingTree, KNearestNeighbors, KrigingHybrid, Lasso, Learner,
         TrainedDeepForest, TrainedGeoXGBoost, TrainedKrigingHybrid, LightGBM, LinearRegression,
         LinearSVM, LogisticRegression, MondrianForest, MondrianTree, ObliqueForest, ObliqueTree,
-        Objective, QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, VariogramFit,
+        Objective, QuantileForest, QuantileGB, RandomForest, Ridge, Stacking,
+        TrainedQuantileForest, VariogramFit,
         VariogramModel, XGBoost, learner_from_id, registered_learner_ids,
     };
     pub use crate::measure::{

@@ -12,6 +12,23 @@ patch; defensible as a bug fix, not a precedent to repeat).
 
 ## [Unreleased]
 
+### Fixed (M-19, 4th audit Tier 3 — Python bindings)
+
+- `QuantileForest` in Python now exposes `predict_quantile(x, q)` and
+  `predict_interval(x, alpha=0.1)` (dict with `predictions`/`lower`/
+  `upper`/`alpha`, same shape as `conformal_predict`) — its entire reason
+  to exist; previously the binding stored the model behind the generic
+  `TrainedModel` trait and only the median was reachable, making it a
+  worse `RandomForest`. The wrapper now holds the concrete
+  `TrainedQuantileForest` (GeoXGBoost/KrigingHybrid pattern) with the
+  full previous surface preserved (`fit`/`predict`/`get_params`/
+  `set_params`/`save`/`load`/explain methods). Rust gains the matching
+  concrete `QuantileForest::fit` (the `DeepForest::fit` shape) plus
+  `TrainedQuantileForest` in the prelude, and `predict_quantile`/
+  `predict_interval` now reject out-of-range `quantile`/`alpha` with
+  `InvalidParameter` instead of silently clamping to the nearest leaf
+  value.
+
 ### Fixed (M-13, 4th audit Tier 3 — Python bindings)
 
 - `BayesianOptimizer.optimize` now validates every `param_space` name
