@@ -4,7 +4,7 @@
 //! `fit(x, y)` already expects exactly this shape.
 
 use crate::common::smelt_err;
-use numpy::PyArray2;
+use numpy::{PyArray1, PyArray2};
 use pyo3::prelude::*;
 use smelt_ml::task::Task;
 
@@ -48,11 +48,15 @@ impl CsvLoader {
     fn load_classif<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Vec<usize>, Vec<String>)> {
-        let task = self.build().load_classif().map_err(smelt_err)?;
+    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Bound<'py, PyArray1<i64>>, Vec<String>)> {
+        // File I/O + parsing can take seconds on large files: release the GIL.
+        let task = py
+            .allow_threads(|| self.build().load_classif())
+            .map_err(smelt_err)?;
+        let y: Vec<i64> = task.target().iter().map(|&v| v as i64).collect();
         Ok((
             PyArray2::from_owned_array(py, task.features().clone()),
-            task.target().to_vec(),
+            PyArray1::from_vec(py, y),
             task.feature_names().to_vec(),
         ))
     }
@@ -62,11 +66,14 @@ impl CsvLoader {
     fn load_regress<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Vec<f64>, Vec<String>)> {
-        let task = self.build().load_regress().map_err(smelt_err)?;
+    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Bound<'py, PyArray1<f64>>, Vec<String>)> {
+        // File I/O + parsing can take seconds on large files: release the GIL.
+        let task = py
+            .allow_threads(|| self.build().load_regress())
+            .map_err(smelt_err)?;
         Ok((
             PyArray2::from_owned_array(py, task.features().clone()),
-            task.target().to_vec(),
+            PyArray1::from_vec(py, task.target().to_vec()),
             task.feature_names().to_vec(),
         ))
     }
@@ -114,11 +121,15 @@ impl ParquetLoader {
     fn load_classif<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Vec<usize>, Vec<String>)> {
-        let task = self.build().load_classif().map_err(smelt_err)?;
+    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Bound<'py, PyArray1<i64>>, Vec<String>)> {
+        // File I/O + parsing can take seconds on large files: release the GIL.
+        let task = py
+            .allow_threads(|| self.build().load_classif())
+            .map_err(smelt_err)?;
+        let y: Vec<i64> = task.target().iter().map(|&v| v as i64).collect();
         Ok((
             PyArray2::from_owned_array(py, task.features().clone()),
-            task.target().to_vec(),
+            PyArray1::from_vec(py, y),
             task.feature_names().to_vec(),
         ))
     }
@@ -128,11 +139,14 @@ impl ParquetLoader {
     fn load_regress<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Vec<f64>, Vec<String>)> {
-        let task = self.build().load_regress().map_err(smelt_err)?;
+    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Bound<'py, PyArray1<f64>>, Vec<String>)> {
+        // File I/O + parsing can take seconds on large files: release the GIL.
+        let task = py
+            .allow_threads(|| self.build().load_regress())
+            .map_err(smelt_err)?;
         Ok((
             PyArray2::from_owned_array(py, task.features().clone()),
-            task.target().to_vec(),
+            PyArray1::from_vec(py, task.target().to_vec()),
             task.feature_names().to_vec(),
         ))
     }

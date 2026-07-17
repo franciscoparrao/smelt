@@ -264,6 +264,11 @@ pub struct ObliviousTree {
     nan_left: Vec<bool>,
     /// Leaf weights: 2^depth values.
     leaf_weights: Vec<f64>,
+    /// Per-level split gain, index-aligned with `splits`. `#[serde(default)]`
+    /// so models serialized before this field existed still load; when empty,
+    /// `feature_importance` falls back to counting splits (weight 1/level).
+    #[serde(default)]
+    gains: Vec<f64>,
 }
 
 impl ObliviousTree {
@@ -352,6 +357,7 @@ fn build_oblivious_tree(
 ) -> ObliviousTree {
     let mut splits = Vec::with_capacity(depth);
     let mut nan_lefts = Vec::with_capacity(depth);
+    let mut gains = Vec::with_capacity(depth);
     let mut partitions: Vec<Vec<usize>> = vec![indices.to_vec()];
 
     // Histogram cache: cache[partition_idx][feature_idx] = FeatHist
@@ -449,6 +455,7 @@ fn build_oblivious_tree(
         let threshold = bins.boundaries[best_feat][best_bin];
         splits.push((best_feat, threshold));
         nan_lefts.push(best_nan_left);
+        gains.push(best_gain);
 
         // Split all partitions + update histogram cache via subtraction
         let mut new_partitions = Vec::with_capacity(partitions.len() * 2);
@@ -525,6 +532,7 @@ fn build_oblivious_tree(
         splits,
         nan_left: nan_lefts,
         leaf_weights,
+        gains,
     }
 }
 
@@ -640,6 +648,30 @@ impl TrainedCatBoost {
 }
 
 impl TrainedModel for TrainedCatBoost {
+    /// Gain-based importance summed over every level of every oblivious
+    /// tree, normalized to sum to 1 (same convention as XGBoost/LightGBM in
+    /// this crate). Models serialized before per-level gains existed load
+    /// with empty `gains` and fall back to split counting (weight 1/level).
+    fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
+        let mut importances = vec![0.0; self.feature_names.len()];
+        for tree in &self.trees {
+            for (level, &(feat, _)) in tree.splits.iter().enumerate() {
+                importances[feat] += tree.gains.get(level).copied().unwrap_or(1.0);
+            }
+        }
+        let total: f64 = importances.iter().sum();
+        if total == 0.0 {
+            return None;
+        }
+        Some(
+            self.feature_names
+                .iter()
+                .zip(&importances)
+                .map(|(n, &i)| (n.clone(), i / total))
+                .collect(),
+        )
+    }
+
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
         crate::validate::check_n_features(features, self.feature_names.len())?;
 

@@ -8,6 +8,25 @@ use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
 use smelt_ml::learner::TrainedModel;
 
+/// `max_depth` for RF/ET/DT: `None` means unlimited depth (the Rust
+/// builders' own default), and `0` is rejected -- a depth-0 tree is a
+/// single constant leaf, which used to train "successfully" and predict
+/// at chance level with no hint of why.
+fn apply_max_depth<L>(
+    learner: L,
+    max_depth: Option<usize>,
+    with: impl FnOnce(L, usize) -> L,
+) -> PyResult<L> {
+    match max_depth {
+        Some(0) => Err(pyo3::exceptions::PyValueError::new_err(
+            "max_depth=0 would build a constant (root-only) tree; use max_depth=None for \
+             unlimited depth or a positive integer",
+        )),
+        Some(d) => Ok(with(learner, d)),
+        None => Ok(learner),
+    }
+}
+
 // ── RandomForest ───────────────────────────────────────────────────────
 
 #[pyclass]
@@ -16,7 +35,7 @@ pub(crate) struct RandomForest {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
     n_estimators: usize,
-    max_depth: usize,
+    max_depth: Option<usize>,
     seed: u64,
 }
 
@@ -24,7 +43,7 @@ pub(crate) struct RandomForest {
 impl RandomForest {
     #[new]
     #[pyo3(signature = (n_estimators=100, max_depth=10, seed=42))]
-    fn new(n_estimators: usize, max_depth: usize, seed: u64) -> Self {
+    fn new(n_estimators: usize, max_depth: Option<usize>, seed: u64) -> Self {
         Self {
             trained: None,
             is_classif: false,
@@ -42,8 +61,8 @@ impl RandomForest {
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::RandomForest::new()
             .with_n_estimators(self.n_estimators)
-            .with_max_depth(self.max_depth)
             .with_seed(self.seed);
+        learner = apply_max_depth(learner, self.max_depth, |l, d| l.with_max_depth(d))?;
         let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
@@ -81,7 +100,7 @@ pub(crate) struct ExtraTrees {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
     n_estimators: usize,
-    max_depth: usize,
+    max_depth: Option<usize>,
     seed: u64,
 }
 
@@ -89,7 +108,7 @@ pub(crate) struct ExtraTrees {
 impl ExtraTrees {
     #[new]
     #[pyo3(signature = (n_estimators=100, max_depth=10, seed=42))]
-    fn new(n_estimators: usize, max_depth: usize, seed: u64) -> Self {
+    fn new(n_estimators: usize, max_depth: Option<usize>, seed: u64) -> Self {
         Self { trained: None, is_classif: false, n_estimators, max_depth, seed }
     }
 
@@ -101,8 +120,8 @@ impl ExtraTrees {
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::ExtraTrees::new()
             .with_n_estimators(self.n_estimators)
-            .with_max_depth(self.max_depth)
             .with_seed(self.seed);
+        learner = apply_max_depth(learner, self.max_depth, |l, d| l.with_max_depth(d))?;
         let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
@@ -122,14 +141,14 @@ impl ExtraTrees {
 pub(crate) struct DecisionTree {
     trained: Option<Box<dyn TrainedModel>>,
     is_classif: bool,
-    max_depth: usize,
+    max_depth: Option<usize>,
 }
 
 #[pymethods]
 impl DecisionTree {
     #[new]
     #[pyo3(signature = (max_depth=10))]
-    fn new(max_depth: usize) -> Self {
+    fn new(max_depth: Option<usize>) -> Self {
         Self {
             trained: None,
             is_classif: false,
@@ -143,8 +162,11 @@ impl DecisionTree {
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        let mut learner =
-            smelt_ml::prelude::DecisionTree::default().with_max_depth(self.max_depth);
+        let mut learner = apply_max_depth(
+            smelt_ml::prelude::DecisionTree::default(),
+            self.max_depth,
+            |l, d| l.with_max_depth(d),
+        )?;
         let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
         self.trained = Some(model);
         self.is_classif = is_classif;

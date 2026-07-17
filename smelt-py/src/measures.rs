@@ -1,7 +1,7 @@
 //! Standalone measure/scoring functions exposed to Python.
 
 use crate::common::smelt_err;
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use smelt_ml::measure::Measure;
 use smelt_ml::prediction::Prediction;
@@ -19,7 +19,7 @@ fn to_class_labels(y_pred: &[f64]) -> PyResult<Vec<usize>> {
             if v.is_finite() && v >= 0.0 && v.fract() == 0.0 {
                 Ok(v as usize)
             } else {
-                Err(PyRuntimeError::new_err(format!(
+                Err(PyValueError::new_err(format!(
                     "y_pred must contain non-negative integer class labels, got {v}"
                 )))
             }
@@ -50,6 +50,47 @@ pub(crate) fn r2_score(y_true: Vec<f64>, y_pred: Vec<f64>) -> PyResult<f64> {
 pub(crate) fn mae_score(y_true: Vec<f64>, y_pred: Vec<f64>) -> PyResult<f64> {
     let pred = Prediction::regression_with_truth(y_pred, y_true);
     smelt_ml::prelude::Mae.score(&pred).map_err(smelt_err)
+}
+
+/// Mean Absolute Percentage Error (lower is better). Zero-valued actuals
+/// are skipped, matching the Rust `Mape` measure. Listed in
+/// `tuning._MINIMIZE_METRIC_NAMES` since 0.4.x but only actually bound now.
+#[pyfunction]
+pub(crate) fn mape_score(y_true: Vec<f64>, y_pred: Vec<f64>) -> PyResult<f64> {
+    let pred = Prediction::regression_with_truth(y_pred, y_true);
+    smelt_ml::measure::Mape.score(&pred).map_err(smelt_err)
+}
+
+/// Logarithmic loss (lower is better) from per-class probabilities
+/// (`[[p0, p1, ...], ...]`). Probabilities are clamped to [1e-15, 1-1e-15]
+/// before the log, matching the Rust `LogLoss` measure. Listed in
+/// `tuning._MINIMIZE_METRIC_NAMES` since 0.4.x but only actually bound now.
+#[pyfunction]
+pub(crate) fn logloss_score(y_true: Vec<usize>, y_proba: Vec<Vec<f64>>) -> PyResult<f64> {
+    for (i, (&t, row)) in y_true.iter().zip(&y_proba).enumerate() {
+        if t >= row.len() {
+            return Err(PyValueError::new_err(format!(
+                "y_true[{i}] = {t} but y_proba rows only cover {} classes",
+                row.len()
+            )));
+        }
+    }
+    let pred_class: Vec<usize> = y_proba
+        .iter()
+        .map(|p| {
+            p.iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(idx, _)| idx)
+                .ok_or_else(|| PyValueError::new_err("y_proba contains an empty row"))
+        })
+        .collect::<PyResult<Vec<usize>>>()?;
+    let pred = Prediction::Classification {
+        predicted: pred_class,
+        truth: Some(y_true),
+        probabilities: Some(y_proba),
+    };
+    smelt_ml::measure::LogLoss.score(&pred).map_err(smelt_err)
 }
 
 #[pyfunction]
@@ -106,7 +147,7 @@ pub(crate) fn brier_score(y_true: Vec<usize>, y_proba: Vec<Vec<f64>>) -> PyResul
                 .enumerate()
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(idx, _)| idx)
-                .ok_or_else(|| PyRuntimeError::new_err("y_proba contains an empty row"))
+                .ok_or_else(|| PyValueError::new_err("y_proba contains an empty row"))
         })
         .collect::<PyResult<Vec<usize>>>()?;
     let pred = Prediction::Classification {
@@ -129,7 +170,7 @@ pub(crate) fn auc_roc_score(y_true: Vec<usize>, y_proba: &Bound<'_, PyAny>) -> P
         // Convert 1D (sklearn format) to 2D: p1 → [1-p1, p1]
         v1d.iter().map(|&p| vec![1.0 - p, p]).collect()
     } else {
-        return Err(PyRuntimeError::new_err(
+        return Err(PyValueError::new_err(
             "y_proba must be 1D (sklearn format: [p_positive, ...]) or 2D ([[p0, p1], ...])",
         ));
     };
@@ -141,7 +182,7 @@ pub(crate) fn auc_roc_score(y_true: Vec<usize>, y_proba: &Bound<'_, PyAny>) -> P
                 .enumerate()
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(idx, _)| idx)
-                .ok_or_else(|| PyRuntimeError::new_err("y_proba contains an empty row"))
+                .ok_or_else(|| PyValueError::new_err("y_proba contains an empty row"))
         })
         .collect::<PyResult<Vec<usize>>>()?;
     let pred = Prediction::Classification {

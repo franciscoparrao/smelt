@@ -21,7 +21,7 @@ fn resolve_variogram_model(name: &str) -> PyResult<smelt_ml::prelude::VariogramM
         "spherical" => Ok(VariogramModel::Spherical),
         "exponential" => Ok(VariogramModel::Exponential),
         "gaussian" => Ok(VariogramModel::Gaussian),
-        other => Err(PyRuntimeError::new_err(format!(
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "unknown variogram_model '{other}'; expected one of: spherical, exponential, gaussian"
         ))),
     }
@@ -259,6 +259,18 @@ impl CatBoost {
     ) -> PyResult<Bound<'py, PyArray2<f64>>> {
         predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
+
+    /// Gain-based importance (normalized to sum to 1), like XGBoost's and
+    /// LightGBM's -- previously absent because `TrainedCatBoost` didn't
+    /// implement `feature_importance()` on the Rust side either.
+    #[getter]
+    fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
+        Ok(self
+            .trained
+            .as_ref()
+            .ok_or_else(not_fitted)?
+            .feature_importance())
+    }
 }
 
 // ── LightGBM ───────────────────────────────────────────────────────────
@@ -423,7 +435,7 @@ impl GeoXGBoost {
         let parsed = parse_coords(coords)?;
         let features = to_array2(x);
         if parsed.len() != features.nrows() {
-            return Err(PyRuntimeError::new_err(format!(
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "coords length ({}) must match number of samples ({})",
                 parsed.len(),
                 features.nrows()
@@ -479,7 +491,7 @@ impl GeoXGBoost {
         let features = to_array2(x);
         let n = features.nrows();
         if parsed.len() != n {
-            return Err(PyRuntimeError::new_err(format!(
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "coords length ({}) must match number of samples ({})",
                 parsed.len(),
                 n
@@ -534,7 +546,7 @@ impl GeoXGBoost {
         let new_coords = coords.map(parse_coords).transpose()?;
         if let Some(c) = &new_coords {
             if c.len() != features.nrows() {
-                return Err(PyRuntimeError::new_err(format!(
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "coords length ({}) must match number of samples ({})",
                     c.len(),
                     features.nrows()
@@ -688,6 +700,9 @@ impl KrigingHybrid {
     #[pyo3(signature = (base, variogram_model="spherical".to_string(), n_lags=15, n_neighbors=20))]
     fn new(base: String, variogram_model: String, n_lags: usize, n_neighbors: usize) -> PyResult<Self> {
         validate_learner_id(&base)?;
+        // Same eager validation as `base`: a typo'd variogram_model used to
+        // surface only at fit() time.
+        resolve_variogram_model(&variogram_model)?;
         Ok(Self {
             trained: None,
             base,
@@ -708,7 +723,7 @@ impl KrigingHybrid {
         let parsed = parse_coords(coords)?;
         let features = to_array2(x);
         if parsed.len() != features.nrows() {
-            return Err(PyRuntimeError::new_err(format!(
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "coords length ({}) must match number of samples ({})",
                 parsed.len(),
                 features.nrows()
@@ -748,7 +763,7 @@ impl KrigingHybrid {
         let new_coords = coords.map(parse_coords).transpose()?;
         if let Some(c) = &new_coords {
             if c.len() != features.nrows() {
-                return Err(PyRuntimeError::new_err(format!(
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "coords length ({}) must match number of samples ({})",
                     c.len(),
                     features.nrows()
@@ -904,4 +919,44 @@ impl KrigingHybrid {
         }
         Ok(())
     }
+
+    /// Persistence is deliberately unsupported -- fail with an explanation
+    /// instead of the bare AttributeError users used to hit.
+    #[pyo3(signature = (_path))]
+    fn save(&self, _path: &str) -> PyResult<()> {
+        Err(unsupported_persistence("KrigingHybrid"))
+    }
+    #[staticmethod]
+    #[pyo3(signature = (_path))]
+    fn load(_path: &str) -> PyResult<Self> {
+        Err(unsupported_persistence("KrigingHybrid"))
+    }
+}
+
+#[pymethods]
+impl GeoXGBoost {
+    /// Persistence is deliberately unsupported -- fail with an explanation
+    /// instead of the bare AttributeError users used to hit.
+    #[pyo3(signature = (_path))]
+    fn save(&self, _path: &str) -> PyResult<()> {
+        Err(unsupported_persistence("GeoXGBoost"))
+    }
+    #[staticmethod]
+    #[pyo3(signature = (_path))]
+    fn load(_path: &str) -> PyResult<Self> {
+        Err(unsupported_persistence("GeoXGBoost"))
+    }
+}
+
+/// Shared NotImplementedError for the two spatial learners excluded from
+/// `SerializableModel` (they hold a `Box<dyn TrainedModel>` internally,
+/// which has no serializable variant).
+fn unsupported_persistence(name: &str) -> PyErr {
+    pyo3::exceptions::PyNotImplementedError::new_err(format!(
+        "{name} does not support save()/load(): it wraps another trained model \
+         internally and smelt's serialization format has no variant for composite \
+         models. Re-train it from the original data instead (fit is the expensive \
+         part you'd want to skip; for {name} the wrapped base model dominates that \
+         cost, so persist your training data/pipeline configuration)"
+    ))
 }

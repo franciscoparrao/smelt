@@ -130,7 +130,7 @@ impl SpatialSmote {
         let features = to_array2(x);
         let parsed_coords = parse_coords(coords)?;
         if parsed_coords.len() != features.nrows() {
-            return Err(PyRuntimeError::new_err(format!(
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "coords length ({}) must match number of samples ({})",
                 parsed_coords.len(),
                 features.nrows()

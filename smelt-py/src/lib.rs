@@ -38,7 +38,8 @@ use learners::trees::{
 };
 use measures::{
     accuracy_score, auc_roc_score, balanced_accuracy_score, brier_score, cohens_kappa_score,
-    f1_score, mae_score, mcc_score, precision_score, r2_score, recall_score, rmse_score,
+    f1_score, logloss_score, mae_score, mape_score, mcc_score, precision_score, r2_score,
+    recall_score, rmse_score,
 };
 use preprocess::{Smote, SpatialSmote, StandardScaler};
 use py_stats::{bootstrap_ci, sign_test, wilcoxon_signed_rank};
@@ -125,6 +126,8 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(cohens_kappa_score, m)?)?;
     m.add_function(wrap_pyfunction!(mcc_score, m)?)?;
     m.add_function(wrap_pyfunction!(brier_score, m)?)?;
+    m.add_function(wrap_pyfunction!(mape_score, m)?)?;
+    m.add_function(wrap_pyfunction!(logloss_score, m)?)?;
 
     // Stats
     m.add_function(wrap_pyfunction!(wilcoxon_signed_rank, m)?)?;

@@ -2,7 +2,7 @@
 
 use crate::common::{extract_class_labels, is_integer, resolve_measure, smelt_err, to_array2};
 use numpy::PyReadonlyArray2;
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 // ── BayesianOptimizer ──────────────────────────────────────────────────
@@ -94,7 +94,7 @@ pub(crate) fn make_learner_factory(
         "knn" => Ok(Box::new(|p: &PS| -> L {
             Box::new(KNearestNeighbors::new(get(p, "k", 5.0) as usize))
         })),
-        _ => Err(PyRuntimeError::new_err(format!("Unknown learner type: {learner_type}"))),
+        _ => Err(PyValueError::new_err(format!("Unknown learner type: {learner_type}"))),
     }
 }
 
@@ -185,7 +185,7 @@ fn py_to_param_value(v: &Bound<'_, PyAny>) -> PyResult<smelt_ml::tuning::ParamVa
     } else if let Ok(s) = v.extract::<String>() {
         Ok(ParamValue::Str(s))
     } else {
-        Err(PyRuntimeError::new_err(
+        Err(PyValueError::new_err(
             "choice values must be bool, int, float, or str",
         ))
     }
@@ -195,7 +195,7 @@ pub(crate) fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::t
     use smelt_ml::tuning::{ParamDistribution, ParamSpace};
 
     let py_dict: &Bound<'_, pyo3::types::PyDict> = dict.downcast()
-        .map_err(|_| PyRuntimeError::new_err("param_space must be a dict"))?;
+        .map_err(|_| PyValueError::new_err("param_space must be a dict"))?;
 
     let mut space = ParamSpace::new();
 
@@ -207,13 +207,13 @@ pub(crate) fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::t
         // Or list format: [1, 2, 3] → choice
         if let Ok(inner_dict) = val.downcast::<pyo3::types::PyDict>() {
             let dtype: String = inner_dict.get_item("type")?
-                .ok_or_else(|| PyRuntimeError::new_err(format!("Missing 'type' for param '{name}'")))?
+                .ok_or_else(|| PyValueError::new_err(format!("Missing 'type' for param '{name}'")))?
                 .extract()?;
             let required = |field: &str| -> PyResult<Bound<'_, PyAny>> {
                 inner_dict
                     .get_item(field)?
                     .ok_or_else(|| {
-                        PyRuntimeError::new_err(format!(
+                        PyValueError::new_err(format!(
                             "param '{name}' of type '{dtype}' requires '{field}'"
                         ))
                     })
@@ -238,7 +238,7 @@ pub(crate) fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::t
                         .collect::<PyResult<Vec<_>>>()?;
                     space.insert(name, ParamDistribution::Choice(choices));
                 }
-                _ => return Err(PyRuntimeError::new_err(format!("Unknown param type: {dtype}"))),
+                _ => return Err(PyValueError::new_err(format!("Unknown param type: {dtype}"))),
             }
         } else if let Ok(tup) = val.extract::<(f64, f64)>() {
             // Shorthand: (low, high) → uniform
@@ -251,7 +251,7 @@ pub(crate) fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::t
                 .collect::<PyResult<Vec<_>>>()?;
             space.insert(name, ParamDistribution::Choice(choices));
         } else {
-            return Err(PyRuntimeError::new_err(
+            return Err(PyValueError::new_err(
                 format!("Invalid param spec for '{name}'. Use dict, tuple (low, high), or list [choices]"),
             ));
         }

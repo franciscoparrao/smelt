@@ -5,7 +5,7 @@ use crate::common::{define_learner, add_explain_methods, add_persistence_methods
 use crate::common::{load_model_checked, save_model};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
-use pyo3::exceptions::PyRuntimeError;
+
 use pyo3::prelude::*;
 use smelt_ml::learner::TrainedModel;
 
@@ -16,7 +16,7 @@ fn resolve_activation(activation: &str) -> PyResult<smelt_ml::prelude::Activatio
         "sigmoid" => Ok(Activation::Sigmoid),
         "tanh" => Ok(Activation::Tanh),
         "relu" => Ok(Activation::Relu),
-        other => Err(PyRuntimeError::new_err(format!(
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "unknown activation '{other}'; expected one of: sigmoid, tanh, relu"
         ))),
     }

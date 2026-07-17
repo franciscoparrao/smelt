@@ -24,7 +24,7 @@ use smelt_ml::learner::TrainedModel;
 
 pub(crate) fn validate_learner_id(id: &str) -> PyResult<()> {
     smelt_ml::prelude::learner_from_id(id).map(|_| ()).map_err(|_| {
-        PyRuntimeError::new_err(format!(
+        pyo3::exceptions::PyValueError::new_err(format!(
             "unknown base learner id \"{id}\"; valid ids: {}",
             smelt_ml::prelude::registered_learner_ids().join(", ")
         ))

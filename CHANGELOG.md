@@ -54,6 +54,32 @@ this section ships in a MINOR, not a patch.
   hardcoded at 64 (official `border_count` default is 254 -- documented
   divergence); default unchanged.
 - `TrainedModel::feature_importance` documents its column-order contract.
+- `TrainedCatBoost` implements `feature_importance()` (gain-based, summed
+  over oblivious-tree levels, normalized like XGBoost/LightGBM here);
+  `ObliviousTree` stores per-level gains (`serde(default)` -- models
+  serialized before this load fine and fall back to split counting).
+
+### smelt-py (4th audit LOWs)
+
+- `RandomForest`/`ExtraTrees`/`DecisionTree` accept `max_depth=None`
+  (unlimited, the Rust default) and reject `max_depth=0`, which used to
+  train a root-only constant tree that predicted at chance silently.
+- `CatBoost` exposes `feature_importances_` like XGBoost/LightGBM.
+- Invalid-input errors now raise `ValueError` instead of `RuntimeError`
+  across the bindings: unknown learner id / metric / activation /
+  variogram model / objective, malformed or unknown `param_space`
+  entries, non-integer class labels in `y_pred`, bad `coords` shape or
+  length, non-finite coords. `KrigingHybrid` validates `variogram_model`
+  eagerly in the constructor (it only surfaced at `fit`).
+- `mape_score` and `logloss_score` exist now -- both were listed in
+  `tuning._MINIMIZE_METRIC_NAMES` since 0.4.x but never actually bound,
+  so using them as a tuning metric was an immediate NameError.
+- `GeoXGBoost`/`KrigingHybrid` `save()`/`load()` raise a clear
+  `NotImplementedError` explaining the composite-model limitation
+  instead of a bare AttributeError.
+- CSV/Parquet loaders return `y` as a numpy array (was a Python list,
+  inconsistent with `x`) and release the GIL during file parsing;
+  `save`/`load` release it during JSON (de)serialization.
 
 ## [smelt-ml 3.1.0] / [smelt-py 0.7.0] - 2026-07-16
 

@@ -249,7 +249,11 @@ pub(crate) fn save_model(trained: &Option<Box<dyn TrainedModel>>, path: &str) ->
              variant for it",
         )
     })?;
-    smelt_ml::serialize::save_json(&serializable, path).map_err(smelt_err)
+    // Multi-MB JSON serialization + file write: release the GIL. We're
+    // called from #[pymethods] (GIL held) without a `py` token, so re-enter
+    // via with_gil -- cheap when already attached.
+    Python::with_gil(|py| py.allow_threads(|| smelt_ml::serialize::save_json(&serializable, path)))
+        .map_err(smelt_err)
 }
 
 /// Load a model from a JSON file, checking its `model_type` tag against
@@ -257,7 +261,9 @@ pub(crate) fn save_model(trained: &Option<Box<dyn TrainedModel>>, path: &str) ->
 /// clearly instead of silently wrapping the wrong learner's predictions
 /// under the `RandomForest` class name.
 pub(crate) fn load_model_checked(path: &str, expected: &str) -> PyResult<Box<dyn TrainedModel>> {
-    let serializable = smelt_ml::serialize::load_json(path).map_err(smelt_err)?;
+    let serializable =
+        Python::with_gil(|py| py.allow_threads(|| smelt_ml::serialize::load_json(path)))
+            .map_err(smelt_err)?;
     let actual = serializable.type_name();
     if actual != expected {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
@@ -272,7 +278,7 @@ pub(crate) fn parse_coords(coords: &Bound<'_, PyAny>) -> PyResult<Vec<(f64, f64)
     let parsed = parse_coords_unchecked(coords)?;
     for (i, &(x, y)) in parsed.iter().enumerate() {
         if !x.is_finite() || !y.is_finite() {
-            return Err(PyRuntimeError::new_err(format!(
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "coords[{i}] = ({x}, {y}) must be finite (no NaN/inf) — \
                  non-finite coordinates silently corrupt spatial distance calculations"
             )));
@@ -286,7 +292,7 @@ fn parse_coords_unchecked(coords: &Bound<'_, PyAny>) -> PyResult<Vec<(f64, f64)>
     if let Ok(arr) = coords.extract::<PyReadonlyArray2<'_, f64>>() {
         let a = arr.as_array();
         if a.ncols() != 2 {
-            return Err(PyRuntimeError::new_err(format!(
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "coords array must have 2 columns (X, Y), got {}",
                 a.ncols()
             )));
@@ -302,7 +308,7 @@ fn parse_coords_unchecked(coords: &Bound<'_, PyAny>) -> PyResult<Vec<(f64, f64)>
         let mut out = Vec::with_capacity(lists.len());
         for (i, v) in lists.iter().enumerate() {
             if v.len() != 2 {
-                return Err(PyRuntimeError::new_err(format!(
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "coords[{i}] must have 2 elements, got {}",
                     v.len()
                 )));
@@ -311,7 +317,7 @@ fn parse_coords_unchecked(coords: &Bound<'_, PyAny>) -> PyResult<Vec<(f64, f64)>
         }
         return Ok(out);
     }
-    Err(PyRuntimeError::new_err(
+    Err(pyo3::exceptions::PyValueError::new_err(
         "coords must be a numpy array (Nx2), list of (x, y) tuples, or list of [x, y] lists",
     ))
 }
@@ -337,7 +343,7 @@ pub(crate) fn resolve_measure(metric: &str) -> PyResult<Box<dyn Measure>> {
         "kappa" => Ok(Box::new(CohensKappa)),
         "mcc" => Ok(Box::new(Mcc)),
         "brier" => Ok(Box::new(Brier)),
-        _ => Err(PyRuntimeError::new_err(format!("Unknown metric: {metric}"))),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!("Unknown metric: {metric}"))),
     }
 }
 
