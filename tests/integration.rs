@@ -1823,6 +1823,37 @@ fn random_search_classif() {
     assert!(result.best_score >= 0.5);
 }
 
+/// 4th-audit LOW: an inverted `Uniform` used to panic inside
+/// `rng.random_range` mid-tuning; invalid `eta` made Hyperband's bracket
+/// math divide by zero or overflow. Both must fail fast with a clean error.
+#[test]
+fn tuners_reject_invalid_param_space_and_eta_up_front() {
+    use smelt_ml::tuning::{Hyperband, ParamSpace};
+
+    let features = array![[0.0, 0.0], [0.1, 0.1], [1.0, 1.0], [1.1, 0.9]];
+    let target = vec![0, 0, 1, 1];
+    let task = ClassificationTask::new("bad_space", features, target).unwrap();
+    let factory = |_params: &smelt_ml::tuning::ParamSet| {
+        Box::new(DecisionTree::new()) as Box<dyn smelt_ml::learner::Learner>
+    };
+
+    let mut inverted = ParamSpace::new();
+    inverted.insert("lr".into(), ParamDistribution::Uniform(1.0, 0.1));
+    let cv = CrossValidation::new(2).with_seed(42);
+    let err = RandomSearch::new(factory, inverted.clone())
+        .tune_classif(&task, &cv, &Accuracy)
+        .unwrap_err();
+    assert!(err.to_string().contains("lr"), "got: {err}");
+
+    let mut valid = ParamSpace::new();
+    valid.insert("lr".into(), ParamDistribution::Uniform(0.1, 1.0));
+    let err = Hyperband::new(factory, valid)
+        .with_eta(1)
+        .tune_classif(&task, &Accuracy)
+        .unwrap_err();
+    assert!(err.to_string().contains("eta"), "got: {err}");
+}
+
 #[test]
 fn random_search_uniform() {
     use smelt_ml::tuning::ParamSpace;
@@ -2104,6 +2135,38 @@ fn spatial_block_with_block_size_rejects_non_positive_block_size() {
     let coords = vec![(0.0, 0.0), (1.0, 0.0)];
     let cv = SpatialBlockCV::with_block_size(2, coords, 0.0);
     assert!(cv.splits(2).is_err());
+}
+
+/// 4th-audit LOW: folds whose grid cells received no samples used to be
+/// emitted with an empty test side, so measures over them produced
+/// 0/0 = NaN and poisoned `mean_scores` for the whole resample run.
+#[test]
+fn spatial_block_drops_folds_with_empty_test_side() {
+    // Two tight clusters and a huge block_size: only 2 grid cells are
+    // populated, but 4 folds are requested -- folds 2 and 3 get no cells.
+    let mut coords = Vec::new();
+    for i in 0..5 {
+        coords.push((i as f64 * 0.01, 0.0));
+        coords.push((100.0 + i as f64 * 0.01, 0.0));
+    }
+    let cv = SpatialBlockCV::with_block_size(4, coords, 50.0);
+    let splits = cv.splits(10).unwrap();
+
+    assert_eq!(splits.len(), 2, "the two unpopulated folds must be dropped");
+    for (train, test) in &splits {
+        assert!(!train.is_empty());
+        assert!(!test.is_empty());
+    }
+}
+
+#[test]
+fn spatial_block_errors_when_no_usable_fold_remains() {
+    // Every sample in one tight cluster inside a single huge cell: the only
+    // populated fold has an empty train side, so no usable fold remains.
+    let coords: Vec<(f64, f64)> = (0..8).map(|i| (i as f64 * 0.01, 0.0)).collect();
+    let cv = SpatialBlockCV::with_block_size(3, coords, 1000.0);
+    let err = cv.splits(8).unwrap_err();
+    assert!(err.to_string().contains("no usable folds"), "got: {err}");
 }
 
 #[test]

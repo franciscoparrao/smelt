@@ -4,7 +4,7 @@
 //! discards the worst, and allocates more resources to the best.
 
 use super::{ParamSet, ParamSpace, TuneResult};
-use crate::Result;
+use crate::{Result, SmeltError};
 use crate::benchmark;
 use crate::learner::Learner;
 use crate::measure::Measure;
@@ -94,12 +94,26 @@ impl Hyperband {
         super::sample_param_space(&self.param_space, rng)
     }
 
+    /// Shared entry-point validation: `eta < 2` breaks the bracket math
+    /// (`eta=1` makes the config count overflow, `eta=0` feeds `log(0)`),
+    /// and an invalid distribution would otherwise panic mid-loop.
+    fn validate(&self) -> Result<()> {
+        if self.eta < 2 {
+            return Err(SmeltError::InvalidParameter(format!(
+                "Hyperband eta must be >= 2, got {}",
+                self.eta
+            )));
+        }
+        super::validate_param_space(&self.param_space)
+    }
+
     /// Tune for classification using successive halving.
     pub fn tune_classif(
         &self,
         task: &ClassificationTask,
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
+        self.validate()?;
         let maximize = measure.maximize();
         let mut rng = StdRng::seed_from_u64(self.seed);
 
@@ -160,6 +174,7 @@ impl Hyperband {
 
     /// Tune for regression using successive halving.
     pub fn tune_regress(&self, task: &RegressionTask, measure: &dyn Measure) -> Result<TuneResult> {
+        self.validate()?;
         let maximize = measure.maximize();
         let mut rng = StdRng::seed_from_u64(self.seed);
 

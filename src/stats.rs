@@ -327,6 +327,11 @@ pub fn friedman_test(scores: &[&[f64]]) -> Result<FriedmanResult> {
         )));
     }
     let n = scores[0].len(); // number of folds/datasets
+    if n == 0 {
+        return Err(SmeltError::InvalidParameter(
+            "friedman_test requires at least 1 score per model, got 0".into(),
+        ));
+    }
     if !scores.iter().all(|s| s.len() == n) {
         return Err(SmeltError::InvalidParameter(
             "friedman_test: all models must have the same number of scores".into(),
@@ -897,6 +902,15 @@ mod tests {
         );
         // XGBoost should have the best (lowest) average rank
         assert!(result.avg_ranks[2] < result.avg_ranks[0]);
+    }
+
+    /// 4th-audit LOW: zero folds used to pass validation and silently
+    /// produce NaN average ranks (0/0) instead of an error.
+    #[test]
+    fn friedman_rejects_empty_scores() {
+        let empty: Vec<f64> = vec![];
+        let err = friedman_test(&[&empty, &empty, &empty]).unwrap_err();
+        assert!(err.to_string().contains("at least 1 score"));
     }
 
     /// Golden vs scipy 1.16 `friedmanchisquare` (4th audit, M-9): tied

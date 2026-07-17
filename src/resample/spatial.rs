@@ -12,6 +12,11 @@ use rand::seq::SliceRandom;
 /// ensuring spatial separation between train and test sets. Prevents spatial
 /// autocorrelation leakage.
 ///
+/// Folds that end up with an empty train or test side (possible when
+/// `n_folds` exceeds the number of populated grid cells) are dropped, so
+/// `splits()` can return fewer than `n_folds` splits; it errors if no
+/// usable fold remains.
+///
 /// # Examples
 ///
 /// ```
@@ -122,7 +127,12 @@ impl Resample for SpatialBlockCV {
             })
             .collect();
 
-        Ok((0..self.n_folds)
+        // A fold whose cells received no samples would yield an empty test
+        // set, and measures over it produce 0/0 = NaN that poisons
+        // `mean_scores` for the whole run -- drop such folds instead of
+        // emitting them. Realistic whenever n_folds exceeds the number of
+        // populated grid cells (clustered points, coarse block_size).
+        let splits: Vec<(Vec<usize>, Vec<usize>)> = (0..self.n_folds)
             .map(|fold| {
                 let test: Vec<usize> = (0..n_samples)
                     .filter(|&i| cell_assignments[i] == fold)
@@ -132,7 +142,17 @@ impl Resample for SpatialBlockCV {
                     .collect();
                 (train, test)
             })
-            .collect())
+            .filter(|(train, test)| !train.is_empty() && !test.is_empty())
+            .collect();
+        if splits.is_empty() {
+            return Err(SmeltError::InvalidParameter(format!(
+                "SpatialBlockCV produced no usable folds ({} requested): every fold had an \
+                 empty train or test side -- all samples fall in a single grid cell? Use more \
+                 samples, a smaller block_size, or fewer folds",
+                self.n_folds
+            )));
+        }
+        Ok(splits)
     }
 }
 

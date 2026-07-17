@@ -91,6 +91,7 @@ impl RandomSearch {
         resampling: &dyn Resample,
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
+        super::validate_param_space(&self.param_space)?;
         // Sampling stays sequential (it's cheap and depends on shared &mut
         // rng state, so the sequence -- and hence reproducibility for a
         // given seed -- is unaffected); only the expensive train+evaluate
@@ -118,6 +119,7 @@ impl RandomSearch {
         resampling: &dyn Resample,
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
+        super::validate_param_space(&self.param_space)?;
         let mut rng = StdRng::seed_from_u64(self.seed);
         let param_sets: Vec<ParamSet> = (0..self.n_iter).map(|_| self.sample_params(&mut rng)).collect();
 

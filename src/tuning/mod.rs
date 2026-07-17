@@ -170,6 +170,40 @@ pub(crate) fn sample_param_space(space: &ParamSpace, rng: &mut impl Rng) -> Para
         .collect()
 }
 
+/// Validate every distribution in `space` before any sampling happens --
+/// shared by `RandomSearch`, `BayesianOptimizer`, and `Hyperband`. Without
+/// this, `Uniform(lo > hi)` panics inside `rng.random_range` and
+/// `LogUniform(<= 0)` produces NaN bounds, both deep in a tuning loop
+/// instead of at the entry point.
+pub(crate) fn validate_param_space(space: &ParamSpace) -> Result<()> {
+    for (name, dist) in space {
+        match dist {
+            ParamDistribution::Uniform(lo, hi) => {
+                if !lo.is_finite() || !hi.is_finite() || lo > hi {
+                    return Err(SmeltError::InvalidParameter(format!(
+                        "param '{name}': Uniform bounds must be finite with low <= high, got ({lo}, {hi})"
+                    )));
+                }
+            }
+            ParamDistribution::LogUniform(lo, hi) => {
+                if !lo.is_finite() || !hi.is_finite() || *lo <= 0.0 || lo > hi {
+                    return Err(SmeltError::InvalidParameter(format!(
+                        "param '{name}': LogUniform bounds must be finite with 0 < low <= high, got ({lo}, {hi})"
+                    )));
+                }
+            }
+            ParamDistribution::Choice(values) => {
+                if values.is_empty() {
+                    return Err(SmeltError::InvalidParameter(format!(
+                        "param '{name}': Choice requires at least one value"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Sample a single value from one `ParamDistribution`.
 pub(crate) fn sample_one(dist: &ParamDistribution, rng: &mut impl Rng) -> ParamValue {
     match dist {
@@ -314,5 +348,45 @@ mod tests {
                 "{n}: same seed must assign the same draw regardless of map layout"
             );
         }
+    }
+
+    /// 4th-audit LOW: invalid distributions used to panic inside
+    /// `rng.random_range` (Uniform with low > high) or produce NaN bounds
+    /// (LogUniform with non-positive low) deep in the tuning loop. They must
+    /// be rejected up front with `InvalidParameter` naming the parameter.
+    #[test]
+    fn validate_param_space_rejects_invalid_distributions() {
+        let cases: Vec<(&str, ParamDistribution)> = vec![
+            ("uniform_inverted", ParamDistribution::Uniform(5.0, 1.0)),
+            ("uniform_nan", ParamDistribution::Uniform(f64::NAN, 1.0)),
+            ("loguniform_zero_low", ParamDistribution::LogUniform(0.0, 10.0)),
+            ("loguniform_negative", ParamDistribution::LogUniform(-1.0, 10.0)),
+            ("loguniform_inverted", ParamDistribution::LogUniform(10.0, 1.0)),
+            ("choice_empty", ParamDistribution::Choice(vec![])),
+        ];
+        for (name, dist) in cases {
+            let mut space = ParamSpace::new();
+            space.insert(name.to_string(), dist);
+            let err = validate_param_space(&space).unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains(name),
+                "{name}: error must name the offending parameter, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_param_space_accepts_valid_distributions() {
+        let mut space = ParamSpace::new();
+        space.insert("u".into(), ParamDistribution::Uniform(0.0, 1.0));
+        // Degenerate-but-harmless single-point range is allowed.
+        space.insert("point".into(), ParamDistribution::Uniform(3.0, 3.0));
+        space.insert("log".into(), ParamDistribution::LogUniform(1e-4, 10.0));
+        space.insert(
+            "c".into(),
+            ParamDistribution::Choice(vec![ParamValue::Int(1), ParamValue::Str("a".into())]),
+        );
+        assert!(validate_param_space(&space).is_ok());
     }
 }

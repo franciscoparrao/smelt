@@ -123,6 +123,7 @@ impl BayesianOptimizer {
         resampling: &dyn Resample,
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
+        super::validate_param_space(&self.param_space)?;
         let maximize = measure.maximize();
         let mut rng = StdRng::seed_from_u64(self.seed);
         let mut history: Vec<(ParamSet, f64)> = Vec::with_capacity(self.n_iter);
@@ -150,6 +151,7 @@ impl BayesianOptimizer {
         resampling: &dyn Resample,
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
+        super::validate_param_space(&self.param_space)?;
         let maximize = measure.maximize();
         let mut rng = StdRng::seed_from_u64(self.seed);
         let mut history: Vec<(ParamSet, f64)> = Vec::with_capacity(self.n_iter);
