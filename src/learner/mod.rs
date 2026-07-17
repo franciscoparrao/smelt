@@ -103,6 +103,12 @@ pub trait TrainedModel: Send + Sync {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction>;
 
     /// Feature importances (if available).
+    ///
+    /// Contract: implementations must return exactly one entry per feature,
+    /// **in training-column order** (entry `i` describes feature column `i`),
+    /// not sorted by importance. Consumers rely on positional alignment --
+    /// e.g. `RFE` maps each entry back to the column it eliminates purely by
+    /// position.
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
         None
     }

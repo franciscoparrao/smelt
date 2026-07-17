@@ -37,6 +37,14 @@ impl ClusterResult {
             return 0.0;
         }
 
+        // Distinct non-noise labels actually present: hand-built results may
+        // carry non-contiguous labels (e.g. {0, 5}), which the previous
+        // `0..n_clusters` loop silently excluded from every b(i).
+        let mut present_labels: Vec<i32> =
+            self.labels.iter().copied().filter(|&l| l >= 0).collect();
+        present_labels.sort_unstable();
+        present_labels.dedup();
+
         let mut total = 0.0;
         let mut count = 0;
 
@@ -66,7 +74,7 @@ impl ClusterResult {
 
             // b(i) = min mean distance to samples in nearest other cluster
             let mut b = f64::INFINITY;
-            for c in 0..self.n_clusters as i32 {
+            for &c in &present_labels {
                 if c == ci {
                     continue;
                 }
@@ -448,6 +456,42 @@ impl DBSCAN {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 4th-audit LOW: b(i) used to iterate `0..n_clusters`, so a hand-built
+    /// result with non-contiguous labels (e.g. {0, 5}) had its high labels
+    /// silently excluded from every neighbour-cluster distance. The score
+    /// must be invariant to relabeling.
+    #[test]
+    fn silhouette_is_invariant_to_non_contiguous_labels() {
+        let data = ndarray::array![
+            [0.0, 0.0],
+            [0.1, 0.1],
+            [0.2, 0.0],
+            [10.0, 10.0],
+            [10.1, 9.9],
+            [9.9, 10.1]
+        ];
+        let contiguous = ClusterResult {
+            labels: vec![0, 0, 0, 1, 1, 1],
+            n_clusters: 2,
+            centroids: None,
+        };
+        let relabeled = ClusterResult {
+            labels: vec![0, 0, 0, 5, 5, 5],
+            n_clusters: 2,
+            centroids: None,
+        };
+        let s_contiguous = contiguous.silhouette_score(&data);
+        let s_relabeled = relabeled.silhouette_score(&data);
+        assert!(
+            (s_contiguous - s_relabeled).abs() < 1e-12,
+            "relabeling {{0,1}} -> {{0,5}} changed the score: {s_contiguous} vs {s_relabeled}"
+        );
+        assert!(
+            s_relabeled > 0.9,
+            "two tight, far-apart blobs must score near 1, got {s_relabeled}"
+        );
+    }
 
     /// 3 well-separated 2D blobs (>8 sigma apart), 10 points each, with a
     /// small fixed jitter pattern -- deterministic, no RNG needed for a

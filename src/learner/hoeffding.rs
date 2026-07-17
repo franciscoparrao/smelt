@@ -517,7 +517,15 @@ fn find_best_split(
         gains.push((feat, gain));
     }
 
-    gains.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    // Tie-break equal gains by feature index: `gains` is built by iterating
+    // a HashMap, so without this the winner among tied features follows the
+    // map's per-process iteration order and the grown tree can differ
+    // between runs on identical input.
+    gains.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+    });
 
     let best_feat = gains.first().map(|&(f, _)| f).unwrap_or(0);
     let best_gain = gains.first().map(|&(_, g)| g).unwrap_or(0.0);
@@ -607,6 +615,33 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    /// 4th-audit LOW: with tied gains, `find_best_split` used to inherit the
+    /// winner from the HashMap's per-process iteration order. Two features
+    /// with identical statistics must deterministically resolve to the lower
+    /// feature index, whatever order the map yields them in.
+    #[test]
+    fn find_best_split_breaks_gain_ties_by_feature_index() {
+        // Class 0 clustered near 0.0, class 1 near 1.0 -- identical stats
+        // for both features, so their gains tie exactly.
+        let mut stats = FeatureStats::new(2);
+        for v in [0.0, 0.1, 0.2] {
+            stats.update(v, 0);
+        }
+        for v in [1.0, 1.1, 1.2] {
+            stats.update(v, 1);
+        }
+        let mut feature_stats: HashMap<usize, FeatureStats> = HashMap::new();
+        // Insert the higher index first to make insertion order adversarial.
+        feature_stats.insert(7, stats.clone());
+        feature_stats.insert(2, stats);
+
+        for _ in 0..20 {
+            let (best_feat, best_gain, _) = find_best_split(&feature_stats, &[3, 3], 6, 2);
+            assert!(best_gain > 0.0, "separated classes must yield positive gain");
+            assert_eq!(best_feat, 2, "tied gains must resolve to the lower feature index");
+        }
+    }
 
     /// Regression test for `find_best_split`'s split-quality estimation: it
     /// must actually distinguish a genuinely predictive feature from pure

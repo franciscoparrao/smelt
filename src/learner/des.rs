@@ -149,15 +149,24 @@ impl TrainedModel for TrainedDES {
                 competent = (0..self.models.len()).collect();
             }
 
-            // Aggregate predictions from competent models
+            // Aggregate predictions from competent models. Errors propagate:
+            // swallowing them used to mean "every base model broken" quietly
+            // degenerated to predicting class 0 with uniform probabilities.
             let mut votes = vec![0usize; self.n_classes];
             let single = Array2::from_shape_vec((1, features.ncols()), row_vec).unwrap();
             for &m in &competent {
-                if let Ok(Prediction::Classification { predicted: p, .. }) =
-                    &self.models[m].predict(&single)
-                    && p[0] < votes.len()
-                {
-                    votes[p[0]] += 1;
+                match self.models[m].predict(&single)? {
+                    Prediction::Classification { predicted: p, .. } if p[0] < votes.len() => {
+                        votes[p[0]] += 1;
+                    }
+                    Prediction::Classification { .. } => {}
+                    _ => {
+                        return Err(SmeltError::InvalidParameter(
+                            "DynamicEnsemble base model returned a non-classification \
+                             prediction"
+                                .into(),
+                        ));
+                    }
                 }
             }
 
@@ -239,12 +248,20 @@ impl Learner for DynamicEnsemble {
         let dsel_features = features.select(Axis(0), dsel_idx);
         let dsel_target: Vec<usize> = dsel_idx.iter().map(|&i| target[i]).collect();
 
-        // Held-out predictions used for the KNORA-E competence check.
+        // Held-out predictions used for the KNORA-E competence check. A
+        // non-classification variant must be an error: silently skipping it
+        // would leave `val_predictions` misaligned with `models`, crediting
+        // each later model with an earlier model's competence.
         let mut val_predictions: Vec<Vec<usize>> = Vec::new();
         for model in &models {
-            let pred = model.predict(&dsel_features)?;
-            if let Prediction::Classification { predicted, .. } = pred {
-                val_predictions.push(predicted);
+            match model.predict(&dsel_features)? {
+                Prediction::Classification { predicted, .. } => val_predictions.push(predicted),
+                _ => {
+                    return Err(SmeltError::InvalidParameter(
+                        "DynamicEnsemble base model returned a non-classification prediction"
+                            .into(),
+                    ));
+                }
             }
         }
 
@@ -267,6 +284,59 @@ mod tests {
 
     fn one_learner() -> Vec<Box<dyn Fn() -> Box<dyn Learner> + Send + Sync>> {
         vec![Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>)]
+    }
+
+    /// Mock whose trained model answers every predict with a Regression
+    /// variant -- the shape a mis-composed base learner produces.
+    struct RegressingModel;
+    impl TrainedModel for RegressingModel {
+        fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+            Ok(Prediction::Regression {
+                predicted: vec![0.0; features.nrows()],
+                truth: None,
+            })
+        }
+    }
+    struct RegressingLearner;
+    impl Learner for RegressingLearner {
+        fn id(&self) -> &str {
+            "mock_regressor"
+        }
+        fn train_classif(&mut self, _task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+            Ok(Box::new(RegressingModel))
+        }
+    }
+
+    /// 4th-audit LOW: a base model emitting a non-classification prediction
+    /// used to be skipped silently while building `val_predictions`, leaving
+    /// it misaligned with `models` (model j scored with model i's
+    /// competence). It must be a training error.
+    #[test]
+    fn train_errors_on_non_classification_base_model() {
+        let features = array![
+            [0.0, 0.0],
+            [0.1, 0.1],
+            [0.2, 0.0],
+            [1.0, 1.0],
+            [1.1, 0.9],
+            [0.9, 1.1]
+        ];
+        let target = vec![0, 0, 0, 1, 1, 1];
+        let task = ClassificationTask::new("des_bad_base", features, target).unwrap();
+
+        let factories: Vec<Box<dyn Fn() -> Box<dyn Learner> + Send + Sync>> = vec![
+            Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>),
+            Box::new(|| Box::new(RegressingLearner) as Box<dyn Learner>),
+        ];
+        let mut des = DynamicEnsemble::new(factories);
+        let err = match des.train_classif(&task) {
+            Err(e) => e,
+            Ok(_) => panic!("a non-classification base model must fail training"),
+        };
+        assert!(
+            err.to_string().contains("non-classification"),
+            "got: {err}"
+        );
     }
 
     /// Regression test for HIGH-13: competence used to be evaluated on the

@@ -8,6 +8,8 @@ use crate::learner::{Learner, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::Array2;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// CART Decision Tree learner.
 ///
@@ -157,7 +159,11 @@ impl Learner for DecisionTree {
             None,
             n_features,
         );
-        let mut rng = rand::rng();
+        // Seeded even though a single tree with max_features=None never
+        // consumes it: an OS-seeded rng here would silently make DecisionTree
+        // nondeterministic the day TreeBuilder starts drawing from it (e.g.
+        // if a max_features knob is ever wired up).
+        let mut rng = StdRng::seed_from_u64(0);
         let root =
             builder.build_classifier(&features.view(), target, &indices, n_classes, 0, &mut rng);
 
@@ -183,7 +189,8 @@ impl Learner for DecisionTree {
             None,
             n_features,
         );
-        let mut rng = rand::rng();
+        // Same rationale as train_classif: keep the never-consumed rng seeded.
+        let mut rng = StdRng::seed_from_u64(0);
         let root = builder.build_regressor(&features.view(), target, &indices, 0, &mut rng);
 
         Ok(Box::new(TrainedDecisionTree {

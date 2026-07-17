@@ -69,6 +69,15 @@ impl Adasyn {
     /// Rebalance `task` by adaptively generating synthetic minority-class
     /// samples, concentrated where the minority class is hardest to learn.
     pub fn balance(&self, task: &ClassificationTask) -> Result<ClassificationTask> {
+        // k=0 would divide the density ratio r_i = majority_neighbors/k by
+        // zero: every ratio becomes NaN, the NaN-poisoned normalization
+        // yields per-sample counts of 0, and balance() "succeeds" while
+        // generating nothing.
+        if self.k_neighbors == 0 {
+            return Err(crate::SmeltError::InvalidParameter(
+                "Adasyn k_neighbors must be >= 1, got 0".into(),
+            ));
+        }
         let features = task.features();
         let target = task.target();
         let n_classes = task.n_classes();
@@ -248,6 +257,17 @@ impl Resampler for Adasyn {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 4th-audit LOW: k_neighbors=0 used to divide the density ratio by
+    /// zero -- NaN ratios, zero synthetic samples, and a successful return.
+    #[test]
+    fn rejects_zero_k_neighbors() {
+        let features = ndarray::array![[0.0, 0.0], [0.1, 0.1], [1.0, 1.0], [1.1, 0.9]];
+        let target = vec![0, 0, 0, 1];
+        let task = ClassificationTask::new("k0", features, target).unwrap();
+        let err = Adasyn::new().with_k_neighbors(0).balance(&task).unwrap_err();
+        assert!(err.to_string().contains("k_neighbors"), "got: {err}");
+    }
 
     /// Regression test for HIGH-12 in the audit: interpolation used to pick
     /// ANY same-class point, not one of the k nearest same-class neighbors
