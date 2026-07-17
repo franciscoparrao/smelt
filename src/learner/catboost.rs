@@ -62,6 +62,8 @@ pub struct CatBoost {
     cat_features: Vec<usize>,
     /// Prior for target statistics smoothing.
     prior_strength: f64,
+    /// Histogram bins per feature -- see `with_max_bins`.
+    max_bins: usize,
     seed: u64,
     early_stopping_rounds: usize,
     /// Optional held-out set for early stopping — see `EvalSet` docs.
@@ -77,6 +79,7 @@ impl Default for CatBoost {
             lambda: 1.0,
             cat_features: Vec::new(),
             prior_strength: 1.0,
+            max_bins: 64,
             seed: 42,
             early_stopping_rounds: 0,
             eval_set: None,
@@ -119,6 +122,15 @@ impl CatBoost {
     /// statistics (larger values shrink encodings toward the global mean).
     pub fn with_prior_strength(mut self, p: f64) -> Self {
         self.prior_strength = p;
+        self
+    }
+    /// Sets the number of histogram bins used to discretize each feature
+    /// for split search. Default is 64 -- a deliberate divergence from the
+    /// official CatBoost's `border_count` default of 254, trading split
+    /// resolution for speed; raise it toward 254 when fine-grained numeric
+    /// thresholds matter more than training time.
+    pub fn with_max_bins(mut self, b: usize) -> Self {
+        self.max_bins = b;
         self
     }
     /// Sets the RNG seed controlling the target-statistics permutation order.
@@ -761,7 +773,7 @@ impl Learner for CatBoost {
         let mut eval_preds = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
         let mut trees = Vec::with_capacity(self.n_estimators);
         let indices: Vec<usize> = (0..ns).collect();
-        let bins = HistBins::build(&encoded, 64);
+        let bins = HistBins::build(&encoded, self.max_bins);
         let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
@@ -849,7 +861,7 @@ impl CatBoost {
         let mut eval_fv = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
         let mut trees = Vec::with_capacity(self.n_estimators);
         let indices: Vec<usize> = (0..ns).collect();
-        let bins = HistBins::build(&encoded, 64);
+        let bins = HistBins::build(&encoded, self.max_bins);
         let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
@@ -971,7 +983,7 @@ impl CatBoost {
         let mut trees = Vec::with_capacity(self.n_estimators * nc);
         let indices: Vec<usize> = (0..ns).collect();
         let bins_by_class: Vec<HistBins> =
-            encoded_by_class.iter().map(|enc| HistBins::build(enc, 64)).collect();
+            encoded_by_class.iter().map(|enc| HistBins::build(enc, self.max_bins)).collect();
         let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
@@ -1038,6 +1050,41 @@ impl CatBoost {
 mod tests {
     use super::*;
     use ndarray::Array2;
+
+    /// 4th-audit LOW: 64 bins were hardcoded at every HistBins::build site,
+    /// with no builder and no doc of the divergence from the official 254
+    /// (`border_count`). `with_max_bins` must be wired through to training
+    /// at both extremes.
+    #[test]
+    fn with_max_bins_is_wired_through_training() {
+        let n = 80;
+        let features = Array2::from_shape_fn((n, 2), |(i, j)| (i as f64) + (j as f64) * 0.5);
+        let target: Vec<usize> = (0..n).map(|i| usize::from(i >= n / 2)).collect();
+        let task = ClassificationTask::new("bins", features.clone(), target.clone()).unwrap();
+
+        for bins in [2, 254] {
+            let model = CatBoost::new()
+                .with_n_estimators(30)
+                .with_depth(3)
+                .with_max_bins(bins)
+                .train_classif(&task)
+                .unwrap();
+            let Prediction::Classification { predicted, .. } = model.predict(&features).unwrap()
+            else {
+                panic!("expected classification prediction");
+            };
+            let acc = predicted
+                .iter()
+                .zip(&target)
+                .filter(|(p, t)| p == t)
+                .count() as f64
+                / n as f64;
+            assert!(
+                acc > 0.9,
+                "max_bins={bins}: separable data should fit well, got acc={acc}"
+            );
+        }
+    }
 
     /// Regression test for the leaf-index bit-order bug and boundary-value routing bug.
     /// On small datasets with large-magnitude features, these two bugs caused

@@ -69,11 +69,23 @@ impl Objective {
     }
 
     /// Monitoring loss for early stopping: the mean per-sample objective
-    /// value (MSE for squared error/Huber/custom, Poisson NLL for Poisson).
+    /// value (MSE for squared error/custom, Huber loss for Huber, Poisson
+    /// NLL for Poisson). Huber must monitor its own loss, not MSE: MSE is
+    /// dominated by exactly the large-residual outliers the Huber objective
+    /// is meant to be insensitive to, so an MSE monitor could stop (or
+    /// refuse to stop) on outlier noise the model isn't even fitting.
     #[inline]
     fn monitor_loss(&self, p: f64, y: f64) -> f64 {
         match self {
             Objective::Poisson => p.min(30.0).exp() - y * p,
+            Objective::Huber { delta } => {
+                let r = (p - y).abs();
+                if r <= *delta {
+                    0.5 * r * r
+                } else {
+                    delta * (r - 0.5 * delta)
+                }
+            }
             _ => (p - y).powi(2),
         }
     }
@@ -1707,6 +1719,23 @@ mod objective_tests {
             "Huber should resist outliers: huber clean RMSE={rmse_hu:.2}, \
              squared-error clean RMSE={rmse_sq:.2}"
         );
+    }
+
+    /// 4th-audit LOW: early stopping under `Objective::Huber` used to
+    /// monitor plain MSE, which is dominated by exactly the large-residual
+    /// outliers Huber is designed to be insensitive to. The monitor must be
+    /// the Huber loss itself: quadratic inside delta, linear beyond it.
+    #[test]
+    fn huber_monitor_loss_is_huber_not_mse() {
+        let obj = Objective::Huber { delta: 1.0 };
+        // Inside delta: 0.5 * r^2.
+        assert!((obj.monitor_loss(0.5, 0.0) - 0.125).abs() < 1e-12);
+        // Beyond delta: delta * (r - delta/2), NOT r^2.
+        assert!((obj.monitor_loss(3.0, 0.0) - 2.5).abs() < 1e-12);
+        // Linear growth in the tail: one extra unit of residual adds
+        // exactly delta, where MSE would add r-dependent (2r+1) amounts.
+        let step = obj.monitor_loss(10.0, 0.0) - obj.monitor_loss(9.0, 0.0);
+        assert!((step - 1.0).abs() < 1e-12, "tail must grow linearly, got step {step}");
     }
 
     /// Poisson objective fits count data on the log scale and returns

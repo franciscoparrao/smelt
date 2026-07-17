@@ -10,6 +10,51 @@ MINOR release with an explicit changelog entry -- never silently in a
 patch (established after 2.0.1 changed the RF/ET regression default in a
 patch; defensible as a bug fix, not a precedent to repeat).
 
+## [Unreleased]
+
+LOW-severity backlog of the 4th engine audit (2026-07-10). Mostly
+validation, determinism, and documentation fixes; the entries below are
+the ones that can change numerical results, so per the convention above
+this section ships in a MINOR, not a patch.
+
+### Changed — numerical behavior (4th audit LOWs)
+
+- LightGBM GOSS: the small-gradient amplification factor is now the exact
+  finite-sample correction `|rest| / |sampled|` instead of the asymptotic
+  `(1-top_rate)/other_rate` with the denominator clamped at 0.01. Opted-in
+  `other_rate < 0.01` was silently under-amplified (up to 2x at 0.005);
+  even standard rates drift by ceil-rounding when `n * rate` isn't
+  integral. GOSS is opt-in since 3.0.0, so default models are unaffected.
+- XGBoost with `Objective::Huber` + eval set: early stopping now monitors
+  the Huber loss instead of plain MSE, which was dominated by exactly the
+  outliers Huber is designed to resist -- the stopping round can change
+  for those configurations.
+- LightGBM `feature_importance`: a degenerate (reverted) split no longer
+  credits its gain to the feature -- importances can differ where the
+  guard fires (not observed in practice; the split finder only proposes
+  two-sided splits).
+
+### Fixed / Added (4th audit LOWs, behavior-preserving)
+
+- Tuners (RandomSearch/BayesianOptimizer/Hyperband) validate the
+  ParamSpace up front (`Uniform(lo>hi)`, `LogUniform(<=0)`, empty
+  `Choice` were panics mid-loop); Hyperband validates `eta >= 2`.
+- `friedman_test` rejects zero scores per model (was NaN ranks).
+- `SpatialBlockCV` drops folds with an empty train or test side instead
+  of emitting NaN-poisoning splits; errors if none remain.
+- prelude re-exports `ParamValue`/`ParamSet`/`ParamGrid`/`ParamSpace`.
+- HoeffdingTree breaks split-gain ties by feature index (was HashMap
+  iteration order -- nondeterministic across processes).
+- `Adasyn` rejects `k_neighbors=0` (was NaN ratios, zero synthetics).
+- `DynamicEnsemble` propagates base-model predict errors and rejects
+  non-classification base predictions (were silently swallowed;
+  val_predictions could misalign with models).
+- `silhouette_score` handles non-contiguous cluster labels.
+- `CatBoost::with_max_bins` exposes the histogram resolution previously
+  hardcoded at 64 (official `border_count` default is 254 -- documented
+  divergence); default unchanged.
+- `TrainedModel::feature_importance` documents its column-order contract.
+
 ## [smelt-ml 3.1.0] / [smelt-py 0.7.0] - 2026-07-16
 
 Closes Tier 3 of the 4th engine audit (M-3, M-7, M-13, M-19). Ships as a

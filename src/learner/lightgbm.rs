@@ -323,11 +323,16 @@ fn goss_sample(
     // so its contribution to the sum of gradients/hessians matches, in
     // expectation, what the full "other" population would have contributed
     // (Ke et al. 2017, Algorithm 2) -- this is GOSS's central correction;
-    // without it, the sampled sum is systematically biased low.
-    let amplify = if other_n > 0 {
-        (1.0 - top_rate) / other_rate.max(0.01)
-    } else {
+    // without it, the sampled sum is systematically biased low. Computed
+    // from the actual counts (|rest| / |sampled|, the exact finite-sample
+    // correction) rather than the paper's asymptotic (1-a)/b: the old form
+    // clamped the denominator at 0.01, silently under-amplifying any
+    // opted-in other_rate below that, and drifted from the true factor by
+    // ceil-rounding whenever n*rate wasn't integral.
+    let amplify = if sampled_rest.is_empty() {
         1.0
+    } else {
+        rest.len() as f64 / sampled_rest.len() as f64
     };
 
     let mut selected: Vec<usize> = top_indices.to_vec();
@@ -553,7 +558,6 @@ fn build_leaf_wise_tree(
         }
 
         let Some((li, split)) = best else { break };
-        feature_importances[split.feature] += split.gain;
 
         let placeholder = ArenaNode::Split {
             feature: split.feature,
@@ -593,6 +597,11 @@ fn build_leaf_wise_tree(
             active_leaves.retain(|&x| x != li);
             continue;
         }
+
+        // Credit importance only once the split is definitely applied --
+        // crediting before the degenerate check above charged the feature
+        // for a split that was then reverted.
+        feature_importances[split.feature] += split.gain;
 
         // Histogram subtraction: scan the smaller child, derive the larger
         // one as parent-minus-smaller.
@@ -1182,6 +1191,35 @@ mod tests {
              total ({n}) -- the unweighted (buggy) estimate would be ~{:.0}",
             n as f64 * (top_rate + other_rate)
         );
+    }
+
+    /// 4th-audit LOW: the amplification factor used to be the asymptotic
+    /// (1-a)/b with the denominator clamped at 0.01, so an opted-in
+    /// other_rate below the clamp silently under-amplified the sampled
+    /// tail. It is now the exact finite-sample correction |rest|/|sampled|.
+    #[test]
+    fn goss_sample_amplifies_exactly_below_the_old_clamp() {
+        let n = 1000;
+        let hess = vec![1.0; n];
+        let mut grads = vec![0.1; n];
+        for g in grads.iter_mut().take(100) {
+            *g = 10.0; // unmistakably the top 10%
+        }
+        let all: Vec<usize> = (0..n).collect();
+        // top_n = 100, rest = 900, other_n = ceil(1000*0.005) = 5:
+        // exact amplification 900/5 = 180. The old clamped form gave
+        // (1-0.1)/max(0.005, 0.01) = 90 -- half the correct weight.
+        let mut rng = StdRng::seed_from_u64(0);
+        let (selected, weights) = goss_sample(&grads, &hess, &all, 0.1, 0.005, &mut rng);
+        let sampled_tail: Vec<usize> = selected.iter().copied().filter(|&i| i >= 100).collect();
+        assert_eq!(sampled_tail.len(), 5);
+        for &i in &sampled_tail {
+            assert!(
+                (weights[i] - 180.0).abs() < 1e-9,
+                "tail weight must be |rest|/|sampled| = 180, got {}",
+                weights[i]
+            );
+        }
     }
 
     #[test]
