@@ -36,7 +36,7 @@ fn make_classification_data(n_samples: usize, seed: u64) -> (Array2<f64>, Vec<us
     }
 
     // Target based on linear combination of informative features
-    let mut weights = vec![0.0f64; N_INFORMATIVE];
+    let mut weights = [0.0f64; N_INFORMATIVE];
     for w in weights.iter_mut() {
         *w = sample_normal(&mut rng);
     }
@@ -64,7 +64,7 @@ fn make_regression_data(n_samples: usize, seed: u64) -> (Array2<f64>, Vec<f64>) 
         }
     }
 
-    let mut weights = vec![0.0f64; N_INFORMATIVE];
+    let mut weights = [0.0f64; N_INFORMATIVE];
     for w in weights.iter_mut() {
         *w = sample_normal(&mut rng) * 10.0;
     }

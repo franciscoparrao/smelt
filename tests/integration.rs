@@ -512,7 +512,7 @@ fn linear_regression_perfect_fit() {
     let target = vec![3.0, 5.0, 7.0, 9.0, 11.0];
     let task = RegressionTask::new("lin", features, target).unwrap();
 
-    let mut lr = LinearRegression::default();
+    let mut lr = LinearRegression;
     let model = lr.train_regress(&task).unwrap();
     let pred = model
         .predict(task.features())
@@ -533,7 +533,7 @@ fn linear_regression_multivariate() {
     let target = vec![4.0, 5.0, 6.0, 9.0, 8.0]; // 1+0+3, 0+2+3, 1+2+3, 2+4+3, 3+2+3
     let task = RegressionTask::new("multi", features, target).unwrap();
 
-    let mut lr = LinearRegression::default();
+    let mut lr = LinearRegression;
     let model = lr.train_regress(&task).unwrap();
     let pred = model
         .predict(task.features())
@@ -553,7 +553,7 @@ fn linear_regression_rejects_classification() {
     let target = vec![0, 1];
     let task = ClassificationTask::new("bad", features, target).unwrap();
 
-    let mut lr = LinearRegression::default();
+    let mut lr = LinearRegression;
     assert!(lr.train_classif(&task).is_err());
 }
 
@@ -571,7 +571,7 @@ fn linear_regression_feature_importance() {
     let target = vec![10.0, 20.0, 30.0, 11.0, 21.0, 31.0];
     let task = RegressionTask::new("imp", features, target).unwrap();
 
-    let mut lr = LinearRegression::default();
+    let mut lr = LinearRegression;
     let model = lr.train_regress(&task).unwrap();
 
     let imp = model.feature_importance().unwrap();
@@ -1889,7 +1889,7 @@ fn random_search_uniform() {
     assert_eq!(result.all_results.len(), 8);
     for (params, _) in &result.all_results {
         let d = params["max_depth"].as_f64().unwrap();
-        assert!(d >= 1.0 && d <= 10.0);
+        assert!((1.0..=10.0).contains(&d));
     }
 }
 
@@ -1970,7 +1970,7 @@ fn random_search_log_uniform() {
 
     for (params, _) in &result.all_results {
         let lr = params["learning_rate"].as_f64().unwrap();
-        assert!(lr >= 0.001 && lr <= 1.0, "lr={lr} out of bounds");
+        assert!((0.001..=1.0).contains(&lr), "lr={lr} out of bounds");
     }
 }
 
@@ -4240,7 +4240,7 @@ fn stacking_regress() {
     let mut stack = Stacking::new(
         vec![
             Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>),
-            Box::new(|| Box::new(LinearRegression::default()) as Box<dyn Learner>),
+            Box::new(|| Box::new(LinearRegression) as Box<dyn Learner>),
         ],
         || Box::new(Ridge::new(0.1)),
     )
@@ -4790,7 +4790,7 @@ fn bayesian_optimizer_log_uniform() {
     // All learning rates should be in [0.001, 1.0]
     for (params, _) in &result.all_results {
         let lr = params["learning_rate"].as_f64().unwrap();
-        assert!(lr >= 0.001 && lr <= 1.0, "lr={lr} out of bounds");
+        assert!((0.001..=1.0).contains(&lr), "lr={lr} out of bounds");
     }
 }
 
@@ -5196,8 +5196,8 @@ fn filter_variance_selects_non_constant() {
     let target = vec![0.0, 1.0, 0.0, 1.0];
     let task = RegressionTask::new("var", features.clone(), target).unwrap();
 
-    let mut selector = FilterSelector::variance(2); // keep top 2
-    let pipe = Pipeline::new(vec![Box::new(selector)], Box::new(DecisionTree::default()));
+    let selector = FilterSelector::variance(2); // keep top 2
+    let _pipe = Pipeline::new(vec![Box::new(selector)], Box::new(DecisionTree::default()));
     // The constant column should be dropped
     // Just verify it compiles and runs
     let mut pipe = Pipeline::new(
@@ -6007,8 +6007,8 @@ fn classifier_chain_accuracy_metrics() {
     let subset_acc = model.subset_accuracy(&pred, &labels);
     let hamming = model.hamming_score(&pred, &labels);
 
-    assert!(subset_acc >= 0.0 && subset_acc <= 1.0);
-    assert!(hamming >= 0.0 && hamming <= 1.0);
+    assert!((0.0..=1.0).contains(&subset_acc));
+    assert!((0.0..=1.0).contains(&hamming));
     assert!(
         hamming >= subset_acc,
         "hamming score should be >= subset accuracy"
@@ -6068,7 +6068,7 @@ fn qrf_predicts_median() {
 
 #[test]
 fn qrf_quantile_ordering() {
-    use smelt_ml::learner::quantile_forest::TrainedQuantileForest;
+    
 
     let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
@@ -6124,7 +6124,7 @@ fn adasyn_balances_classes() {
     let adasyn = Adasyn::new().with_seed(42);
     let balanced = adasyn.balance(&task).unwrap();
 
-    let n0 = balanced.target().iter().filter(|&&t| t == 0).count();
+    let _n0 = balanced.target().iter().filter(|&&t| t == 0).count();
     let n1 = balanced.target().iter().filter(|&&t| t == 1).count();
     // ADASYN should approximately balance (may not be exact due to rounding)
     assert!(
@@ -6620,7 +6620,7 @@ fn rsf_concordance_index() {
     let predictions = rsf.fit_predict(&features, &events).unwrap();
 
     let c_idx = concordance_index(&predictions, &events);
-    assert!(c_idx >= 0.0 && c_idx <= 1.0);
+    assert!((0.0..=1.0).contains(&c_idx));
     // With a clear monotonic relationship, C-index should be reasonable
     assert!(
         c_idx >= 0.4,
@@ -7037,8 +7037,8 @@ fn edge_imbalanced_99_1() {
     // 99 samples class 0, 1 sample class 1
     let mut feat_data = vec![vec![0.0; 2]; 100];
     let mut target = vec![0usize; 100];
-    for i in 0..99 {
-        feat_data[i] = vec![i as f64 * 0.01, 0.0];
+    for (i, row) in feat_data.iter_mut().take(99).enumerate() {
+        *row = vec![i as f64 * 0.01, 0.0];
     }
     feat_data[99] = vec![5.0, 5.0];
     target[99] = 1;
@@ -7334,7 +7334,7 @@ fn rsf_heavy_censoring() {
     // With heavy censoring, survival probabilities should still be valid
     for p in &preds {
         for &s in &p.survival {
-            assert!(s >= 0.0 && s <= 1.0 + 1e-10);
+            assert!((0.0..=1.0 + 1e-10).contains(&s));
         }
     }
 }

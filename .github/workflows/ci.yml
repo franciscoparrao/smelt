@@ -38,7 +38,7 @@ jobs:
       - run: cargo test --features parquet
 
   lint:
-    name: clippy (lib, deny warnings) + smelt-py check
+    name: clippy (workspace, deny warnings)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,12 +48,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: lint
-      # The library is clippy-clean and gated; --all-targets still carries
-      # legacy warnings (tracked in the audit backlog), so it stays
-      # advisory until that debt is paid.
-      - run: cargo clippy --lib -- -D warnings
-      - run: cargo clippy --all-targets
-        continue-on-error: true
-      # Catches binding breakage (the PyO3 crate compiles against the
-      # parent crate's API) without paying for a full maturin build.
-      - run: cargo check -p smelt-py
+      # Enforcing since 2026-07-17: the legacy --all-targets debt (tests +
+      # examples + smelt-py) was paid down to zero, so any new warning is a
+      # regression. --workspace also compiles smelt-py against the parent
+      # crate's API, which is what the old `cargo check -p smelt-py` step
+      # was for.
+      - run: cargo clippy --workspace --all-targets -- -D warnings

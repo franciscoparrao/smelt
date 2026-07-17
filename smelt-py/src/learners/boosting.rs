@@ -544,15 +544,14 @@ impl GeoXGBoost {
         let model = self.trained.as_ref().ok_or_else(not_fitted)?;
         let features = to_array2(x);
         let new_coords = coords.map(parse_coords).transpose()?;
-        if let Some(c) = &new_coords {
-            if c.len() != features.nrows() {
+        if let Some(c) = &new_coords
+            && c.len() != features.nrows() {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "coords length ({}) must match number of samples ({})",
                     c.len(),
                     features.nrows()
                 )));
             }
-        }
         let pred = py
             .allow_threads(|| match &new_coords {
                 Some(c) => model.predict_spatial(&features, c),
@@ -761,15 +760,14 @@ impl KrigingHybrid {
         let model = self.trained.as_ref().ok_or_else(not_fitted)?;
         let features = to_array2(x);
         let new_coords = coords.map(parse_coords).transpose()?;
-        if let Some(c) = &new_coords {
-            if c.len() != features.nrows() {
+        if let Some(c) = &new_coords
+            && c.len() != features.nrows() {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "coords length ({}) must match number of samples ({})",
                     c.len(),
                     features.nrows()
                 )));
             }
-        }
         let pred = py
             .allow_threads(|| match &new_coords {
                 Some(c) => model.predict_spatial(&features, c),

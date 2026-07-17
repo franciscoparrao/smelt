@@ -7,7 +7,6 @@
 
 use ndarray::Axis;
 use smelt_ml::data::CsvLoader;
-use smelt_ml::learner::TrainedModel;
 use smelt_ml::prelude::*;
 use std::fs;
 use std::time::Instant;

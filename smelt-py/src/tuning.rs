@@ -351,7 +351,7 @@ impl PyBayesianOptimizer {
             for (k, v) in params {
                 set_param(&pd, k, v)?;
             }
-            let tup = pyo3::types::PyTuple::new(py, &[pd.as_any(), score.into_pyobject(py)?.as_any()])?;
+            let tup = pyo3::types::PyTuple::new(py, [pd.as_any(), score.into_pyobject(py)?.as_any()])?;
             history.append(tup)?;
         }
         dict.set_item("all_results", history)?;

@@ -205,7 +205,7 @@ fn main() {
     let covered = intervals
         .iter()
         .zip(te_tgt.iter())
-        .filter(|&(ref iv, &t)| t >= iv.lower && t <= iv.upper)
+        .filter(|&(iv, &t)| t >= iv.lower && t <= iv.upper)
         .count();
     let coverage = covered as f64 / te_tgt.len() as f64;
     let width =

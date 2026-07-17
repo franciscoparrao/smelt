@@ -732,16 +732,14 @@ mod tests {
             let x1 = rng.random::<f64>();
             let y = if x1 > 0.5 { 1 } else { 0 };
 
-            if let Some((pred, _)) = arf.predict_one(&[x0, x1]) {
-                if pred == y {
+            if let Some((pred, _)) = arf.predict_one(&[x0, x1])
+                && pred == y {
                     arf_correct += 1;
                 }
-            }
-            if let Some((pred, _)) = plain.predict_one(&[x0, x1]) {
-                if pred == y {
+            if let Some((pred, _)) = plain.predict_one(&[x0, x1])
+                && pred == y {
                     plain_correct += 1;
                 }
-            }
         }
 
         let arf_acc = arf_correct as f64 / n_eval as f64;
@@ -775,16 +773,14 @@ mod tests {
             let x0 = rng.random::<f64>();
             let x1 = rng.random::<f64>();
             let y = if x0 > 0.5 { 1 } else { 0 };
-            if let Some((pred, _)) = arf.predict_one(&[x0, x1]) {
-                if pred == y {
+            if let Some((pred, _)) = arf.predict_one(&[x0, x1])
+                && pred == y {
                     arf_correct += 1;
                 }
-            }
-            if let Some((pred, _)) = plain.predict_one(&[x0, x1]) {
-                if pred == y {
+            if let Some((pred, _)) = plain.predict_one(&[x0, x1])
+                && pred == y {
                     plain_correct += 1;
                 }
-            }
         }
 
         let arf_acc = arf_correct as f64 / n_eval as f64;

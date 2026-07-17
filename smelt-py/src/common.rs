@@ -40,13 +40,11 @@ pub(crate) fn smelt_err(e: smelt_ml::SmeltError) -> PyErr {
 }
 
 pub(crate) fn is_integer(y: &Bound<'_, PyAny>) -> bool {
-    if let Ok(arr) = y.getattr("dtype") {
-        if let Ok(kind) = arr.getattr("kind") {
-            if let Ok(k) = kind.extract::<String>() {
+    if let Ok(arr) = y.getattr("dtype")
+        && let Ok(kind) = arr.getattr("kind")
+            && let Ok(k) = kind.extract::<String>() {
                 return k == "i" || k == "u" || k == "b";
             }
-        }
-    }
     y.extract::<Vec<i64>>().is_ok()
 }
 

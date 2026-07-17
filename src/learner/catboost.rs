@@ -1078,6 +1078,38 @@ impl CatBoost {
     }
 }
 
+/// Build final target encoding map for prediction-time categorical handling.
+fn build_final_encodings(
+    features: &Array2<f64>,
+    target: &[f64],
+    cat_features: &[usize],
+    prior: f64,
+    prior_strength: f64,
+) -> HashMap<usize, HashMap<i64, f64>> {
+    let mut result = HashMap::new();
+    for &col in cat_features {
+        let mut sum_by_cat: HashMap<i64, f64> = HashMap::new();
+        let mut count_by_cat: HashMap<i64, usize> = HashMap::new();
+        for (i, &t) in target.iter().enumerate() {
+            let raw = features[[i, col]];
+            if raw.is_nan() {
+                continue; // missing category: no statistic to accumulate
+            }
+            let cat_val = raw as i64;
+            *sum_by_cat.entry(cat_val).or_insert(0.0) += t;
+            *count_by_cat.entry(cat_val).or_insert(0) += 1;
+        }
+        let mut encodings = HashMap::new();
+        for (&cat_val, &sum) in &sum_by_cat {
+            let count = count_by_cat[&cat_val];
+            let enc = (sum + prior_strength * prior) / (count as f64 + prior_strength);
+            encodings.insert(cat_val, enc);
+        }
+        result.insert(col, encodings);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1436,36 +1468,4 @@ mod tests {
             rmse(&*m_train)
         );
     }
-}
-
-/// Build final target encoding map for prediction-time categorical handling.
-fn build_final_encodings(
-    features: &Array2<f64>,
-    target: &[f64],
-    cat_features: &[usize],
-    prior: f64,
-    prior_strength: f64,
-) -> HashMap<usize, HashMap<i64, f64>> {
-    let mut result = HashMap::new();
-    for &col in cat_features {
-        let mut sum_by_cat: HashMap<i64, f64> = HashMap::new();
-        let mut count_by_cat: HashMap<i64, usize> = HashMap::new();
-        for (i, &t) in target.iter().enumerate() {
-            let raw = features[[i, col]];
-            if raw.is_nan() {
-                continue; // missing category: no statistic to accumulate
-            }
-            let cat_val = raw as i64;
-            *sum_by_cat.entry(cat_val).or_insert(0.0) += t;
-            *count_by_cat.entry(cat_val).or_insert(0) += 1;
-        }
-        let mut encodings = HashMap::new();
-        for (&cat_val, &sum) in &sum_by_cat {
-            let count = count_by_cat[&cat_val];
-            let enc = (sum + prior_strength * prior) / (count as f64 + prior_strength);
-            encodings.insert(cat_val, enc);
-        }
-        result.insert(col, encodings);
-    }
-    result
 }

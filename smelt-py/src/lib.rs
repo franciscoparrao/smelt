@@ -1,5 +1,14 @@
 //! Python bindings for smelt-ml via PyO3.
 
+// Binding-crate lint posture: constructors and fit()/optimize() mirror
+// sklearn-style keyword APIs, so many arguments is the design, not an
+// accident; loaders/helpers return one-off (x, y, names) tuples of PyO3
+// types that a `type` alias would only obscure; and EBM/DBSCAN are the
+// canonical Python class names these wrappers must present.
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::upper_case_acronyms)]
+
 mod causal;
 mod cluster;
 mod common;

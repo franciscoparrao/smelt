@@ -670,11 +670,10 @@ mod tests {
             let x0 = rng.random::<f64>();
             let x1 = rng.random::<f64>();
             let y = if x0 > 0.5 { 1 } else { 0 };
-            if let Some((pred, _)) = tree.predict_one(&[x0, x1]) {
-                if pred == y {
+            if let Some((pred, _)) = tree.predict_one(&[x0, x1])
+                && pred == y {
                     correct += 1;
                 }
-            }
         }
         let acc = correct as f64 / n_eval as f64;
         assert!(

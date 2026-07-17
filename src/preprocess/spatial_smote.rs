@@ -354,7 +354,7 @@ mod tests {
         // midpoint of the ~140-unit gap between clusters.
         for &(x, _y) in &new_coords[28..] {
             assert!(
-                x < 10.0 || x > 90.0,
+                !(10.0..=90.0).contains(&x),
                 "synthetic point at x={x} straddles the inter-cluster gap"
             );
         }

@@ -225,7 +225,7 @@ fn main() {
     let covered = intervals
         .iter()
         .zip(test_target.iter())
-        .filter(|&(ref iv, &t)| t >= iv.lower && t <= iv.upper)
+        .filter(|&(iv, &t)| t >= iv.lower && t <= iv.upper)
         .count();
     let actual_coverage = covered as f64 / test_target.len() as f64;
 
