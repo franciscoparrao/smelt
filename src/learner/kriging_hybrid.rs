@@ -27,6 +27,21 @@ pub enum VariogramModel {
     /// Approaches the sill asymptotically with a smooth (parabolic) origin
     /// (`1 - e^{-(h/range)^2}`), giving very smooth short-range behavior.
     Gaussian,
+    /// Matérn with smoothness ν = 3/2:
+    /// `1 - (1 + √3·h/range)·e^{-√3·h/range}` (sklearn/GP length-scale
+    /// convention). Between `Exponential` and `Gaussian` in short-range
+    /// smoothness: once-differentiable realizations.
+    Matern32,
+    /// Matérn with smoothness ν = 5/2:
+    /// `1 - (1 + √5·h/range + 5h²/(3·range²))·e^{-√5·h/range}`. Smoother
+    /// than `Matern32` (twice-differentiable realizations), still rougher
+    /// than `Gaussian` (ν → ∞).
+    ///
+    /// Only the closed-form smoothness values are provided (ν = 1/2 is
+    /// exactly `Exponential`, ν → ∞ is `Gaussian`): continuous ν requires
+    /// the modified Bessel function K_ν, out of scope for this crate's
+    /// hand-rolled numerics (use an external geostatistics crate for that).
+    Matern52,
 }
 
 impl VariogramModel {
@@ -52,6 +67,14 @@ impl VariogramModel {
             }
             VariogramModel::Exponential => nugget + partial * (1.0 - (-h / range).exp()),
             VariogramModel::Gaussian => nugget + partial * (1.0 - (-(h / range).powi(2)).exp()),
+            VariogramModel::Matern32 => {
+                let s = 3.0_f64.sqrt() * h / range;
+                nugget + partial * (1.0 - (1.0 + s) * (-s).exp())
+            }
+            VariogramModel::Matern52 => {
+                let s = 5.0_f64.sqrt() * h / range;
+                nugget + partial * (1.0 - (1.0 + s + s * s / 3.0) * (-s).exp())
+            }
         }
     }
 }
@@ -129,13 +152,22 @@ fn empirical_variogram(
     (lags, semivariances, weights)
 }
 
-/// Fit `(nugget, sill, range)` by grid-search minimization of the
-/// pair-count-weighted SSE against the empirical variogram. There is no
-/// nonlinear least-squares solver in this crate (deliberately -- see
-/// `src/sparse.rs` for the same "hand-roll the small numeric routine
-/// instead of adding a dependency" precedent), so a bounded grid search
-/// (≤3000 combinations) stands in for one; the variogram only has 3
-/// parameters and this is a one-time fit per `train_regress_geo` call.
+/// Fit `(nugget, sill, range)` by minimizing Cressie's (1985) weighted
+/// least-squares objective against the empirical variogram:
+/// `Σ_j N_j · (γ̂_j − γ(h_j; θ))² / γ(h_j; θ)²` -- pair counts over the
+/// *squared model value*, so each bin contributes by its relative (not
+/// absolute) misfit. This is the standard "WLS" of the geostatistics
+/// literature (gstat's default family): plain `N_j`-weighted SSE lets the
+/// large-semivariance long-range bins dominate and fits the short-range
+/// structure -- the part kriging actually uses -- worst.
+///
+/// There is no nonlinear least-squares solver in this crate (deliberately
+/// -- see `src/sparse.rs` for the same "hand-roll the small numeric routine
+/// instead of adding a dependency" precedent). A grid search evaluates the
+/// exact WLS objective per candidate (no IRLS needed), in two stages: a
+/// coarse pass over the full bounds (≤3000 combinations) and a finer local
+/// pass (729) inside the ±1-coarse-step box around the winner. One-time
+/// cost per `train_regress_geo` call.
 fn fit_variogram(
     lags: &[f64],
     semivariances: &[f64],
@@ -157,43 +189,75 @@ fn fit_variogram(
         };
     }
 
-    const N_NUGGET: usize = 10;
-    const N_SILL: usize = 15;
-    const N_RANGE: usize = 20;
-
-    let mut best = VariogramFit {
-        nugget: 0.0,
-        sill: max_sv,
-        range: max_lag,
-        model,
+    // Parameterized as (nugget, partial = sill - nugget, range) so the
+    // `nugget <= sill` invariant (which `ordinary_kriging` relies on) holds
+    // by construction in both stages.
+    let objective = |nugget: f64, partial: f64, range: f64| -> f64 {
+        let sill = nugget + partial;
+        let mut score = 0.0;
+        for k in 0..lags.len() {
+            // Clamp only to dodge a literal 0/0 for degenerate all-zero
+            // candidates; genuine near-zero model values SHOULD be heavily
+            // penalized when the empirical bin is positive.
+            let pred = model.value(lags[k], nugget, sill, range).max(1e-12);
+            let diff = pred - semivariances[k];
+            score += weights[k] * diff * diff / (pred * pred);
+        }
+        score
     };
-    let mut best_sse = f64::INFINITY;
 
+    const N_NUGGET: usize = 10;
+    const N_PARTIAL: usize = 15;
+    const N_RANGE: usize = 20;
+    let nugget_step = max_sv / (N_NUGGET - 1) as f64;
+    let partial_step = 1.5 * max_sv / (N_PARTIAL - 1) as f64;
+    let range_step = max_lag / N_RANGE as f64;
+
+    let mut best = (0.0, max_sv, max_lag);
+    let mut best_score = f64::INFINITY;
     for ni in 0..N_NUGGET {
-        let nugget = max_sv * ni as f64 / (N_NUGGET - 1) as f64;
-        for si in 0..N_SILL {
-            let sill = nugget + (1.5 * max_sv - nugget).max(0.0) * si as f64 / (N_SILL - 1) as f64;
+        let nugget = ni as f64 * nugget_step;
+        for pi in 0..N_PARTIAL {
+            let partial = pi as f64 * partial_step;
             for ri in 0..N_RANGE {
-                let range = max_lag * (ri as f64 + 1.0) / N_RANGE as f64;
-                let mut sse = 0.0;
-                for k in 0..lags.len() {
-                    let pred = model.value(lags[k], nugget, sill, range);
-                    let diff = pred - semivariances[k];
-                    sse += weights[k] * diff * diff;
-                }
-                if sse < best_sse {
-                    best_sse = sse;
-                    best = VariogramFit {
-                        nugget,
-                        sill,
-                        range,
-                        model,
-                    };
+                let range = (ri as f64 + 1.0) * range_step;
+                let score = objective(nugget, partial, range);
+                if score < best_score {
+                    best_score = score;
+                    best = (nugget, partial, range);
                 }
             }
         }
     }
-    best
+
+    // Local refinement: same objective on a finer grid spanning one coarse
+    // step to each side of the coarse winner.
+    const N_FINE: usize = 9;
+    let (coarse_nugget, coarse_partial, coarse_range) = best;
+    for ni in 0..N_FINE {
+        let frac_n = 2.0 * ni as f64 / (N_FINE - 1) as f64 - 1.0;
+        let nugget = (coarse_nugget + frac_n * nugget_step).max(0.0);
+        for pi in 0..N_FINE {
+            let frac_p = 2.0 * pi as f64 / (N_FINE - 1) as f64 - 1.0;
+            let partial = (coarse_partial + frac_p * partial_step).max(0.0);
+            for ri in 0..N_FINE {
+                let frac_r = 2.0 * ri as f64 / (N_FINE - 1) as f64 - 1.0;
+                let range = (coarse_range + frac_r * range_step).max(range_step * 0.1);
+                let score = objective(nugget, partial, range);
+                if score < best_score {
+                    best_score = score;
+                    best = (nugget, partial, range);
+                }
+            }
+        }
+    }
+
+    VariogramFit {
+        nugget: best.0,
+        sill: best.0 + best.1,
+        range: best.2,
+        model,
+    }
 }
 
 /// Solves `matrix * x = rhs` via Gaussian elimination with partial
@@ -662,6 +726,97 @@ mod tests {
         assert!(semivariances.iter().all(|&s| s >= 0.0));
     }
 
+    /// Matérn closed forms against independently computed golden values
+    /// (nugget=0, sill=1): γ(h) = 1 − (1+s)e^{-s} with s = √3·h/r for
+    /// ν=3/2, and 1 − (1+s+s²/3)e^{-s} with s = √5·h/r for ν=5/2.
+    #[test]
+    fn matern_closed_forms_match_golden_values() {
+        let cases = [
+            (VariogramModel::Matern32, 1.0, 0.5166422754034923),
+            (VariogramModel::Matern32, 0.5, 0.21511234604254936),
+            (VariogramModel::Matern52, 1.0, 0.4760058911681797),
+            (VariogramModel::Matern52, 0.5, 0.17135085758187452),
+        ];
+        for (model, h, expected) in cases {
+            let got = model.value(h, 0.0, 1.0, 1.0);
+            assert!(
+                (got - expected).abs() < 1e-12,
+                "{model:?} at h={h}: got {got}, expected {expected}"
+            );
+        }
+    }
+
+    /// Structural properties of the Matérn variants: γ(0)=0, monotone
+    /// nondecreasing, sill-approaching, and the smoothness ordering near
+    /// the origin (Matérn is O(h²) there -- with ν=5/2 flattest -- while
+    /// Exponential rises O(h)).
+    #[test]
+    fn matern_variants_are_smooth_monotone_and_sill_bounded() {
+        for model in [VariogramModel::Matern32, VariogramModel::Matern52] {
+            assert_eq!(model.value(0.0, 0.3, 1.0, 1.0), 0.0, "{model:?}: γ(0) must be 0");
+            let mut prev = 0.0;
+            for i in 1..=100 {
+                let h = i as f64 * 0.1;
+                let v = model.value(h, 0.0, 1.0, 1.0);
+                assert!(v >= prev - 1e-12, "{model:?} must be nondecreasing");
+                assert!(v <= 1.0 + 1e-12, "{model:?} must stay below the sill");
+                prev = v;
+            }
+            assert!(prev > 0.99, "{model:?} must approach the sill at long range");
+        }
+        let h = 0.2;
+        let exp = VariogramModel::Exponential.value(h, 0.0, 1.0, 1.0);
+        let m32 = VariogramModel::Matern32.value(h, 0.0, 1.0, 1.0);
+        let m52 = VariogramModel::Matern52.value(h, 0.0, 1.0, 1.0);
+        assert!(
+            m52 < m32 && m32 < exp,
+            "short-lag smoothness ordering must hold: m52 ({m52}) < m32 ({m32}) < exp ({exp})"
+        );
+    }
+
+    /// The two-stage WLS fit must recover known parameters from an exact
+    /// model-generated empirical variogram to well within one coarse grid
+    /// step -- the local refinement pass is what buys the tight tolerance.
+    #[test]
+    fn wls_fit_recovers_known_variogram_parameters() {
+        let true_nugget = 0.2;
+        let true_sill = 1.0;
+        let true_range = 3.0;
+        let max_lag = 10.0;
+        for model in [
+            VariogramModel::Spherical,
+            VariogramModel::Exponential,
+            VariogramModel::Matern32,
+            VariogramModel::Matern52,
+        ] {
+            let lags: Vec<f64> = (1..=20).map(|i| i as f64 * 0.5).collect();
+            let semivariances: Vec<f64> = lags
+                .iter()
+                .map(|&h| model.value(h, true_nugget, true_sill, true_range))
+                .collect();
+            let weights = vec![30.0; lags.len()];
+            let fit = fit_variogram(&lags, &semivariances, &weights, model, max_lag);
+
+            // Coarse steps: nugget ~0.11, partial ~0.107, range 0.5. The
+            // refinement pass must land clearly inside one coarse cell.
+            assert!(
+                (fit.nugget - true_nugget).abs() < 0.08,
+                "{model:?}: nugget {} vs true {true_nugget}",
+                fit.nugget
+            );
+            assert!(
+                (fit.sill - true_sill).abs() < 0.08,
+                "{model:?}: sill {} vs true {true_sill}",
+                fit.sill
+            );
+            assert!(
+                (fit.range - true_range).abs() < 0.5,
+                "{model:?}: range {} vs true {true_range}",
+                fit.range
+            );
+        }
+    }
+
     #[test]
     fn fit_variogram_beats_flat_baseline_on_autocorrelated_residuals() {
         // Smooth spatial trend -> nearby points have similar residuals,
@@ -834,6 +989,76 @@ mod tests {
             spatial_mse < base_mse,
             "kriging-corrected MSE ({spatial_mse}) should be lower than base-model-only MSE ({base_mse})"
         );
+    }
+
+    /// Same end-to-end setup as above, but through each Matérn variant:
+    /// the correction must still beat the base model, confirming the new
+    /// models are wired into the full fit → kriging path (not just
+    /// `VariogramModel::value`).
+    #[test]
+    fn matern_variants_work_end_to_end_in_kriging_correction() {
+        let side = 10;
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut feats = Vec::new();
+        let mut target = Vec::new();
+        let mut coords = Vec::new();
+        for r in 0..side {
+            for c in 0..side {
+                let x = c as f64;
+                let y = r as f64;
+                coords.push((x, y));
+                feats.push(x - y);
+                let spatial_trend = (x * 0.5).sin() * 3.0 + (y * 0.5).cos() * 3.0;
+                target.push((x - y) * 0.1 + spatial_trend + rng.random::<f64>() * 0.05);
+            }
+        }
+        let features = Array2::from_shape_vec((side * side, 1), feats).unwrap();
+        let train_task = RegressionTask::new("t", features, target).unwrap();
+
+        let mut held_features = Vec::new();
+        let mut held_target = Vec::new();
+        let mut held_coords = Vec::new();
+        for r in 0..side {
+            for c in 0..side {
+                let x = c as f64 + 0.5;
+                let y = r as f64 + 0.5;
+                held_coords.push((x, y));
+                held_features.push(x - y);
+                let spatial_trend = (x * 0.5).sin() * 3.0 + (y * 0.5).cos() * 3.0;
+                held_target.push((x - y) * 0.1 + spatial_trend);
+            }
+        }
+        let held = Array2::from_shape_vec((side * side, 1), held_features).unwrap();
+
+        for variant in [VariogramModel::Matern32, VariogramModel::Matern52] {
+            let mut kh = KrigingHybrid::new(|| Box::new(DecisionTree::new()), coords.clone())
+                .with_variogram_model(variant)
+                .with_n_neighbors(10);
+            let model = kh.train_regress_geo(&train_task).unwrap();
+
+            let Prediction::Regression { predicted: base_pred, .. } =
+                model.predict(&held).unwrap()
+            else {
+                panic!("expected regression");
+            };
+            let Prediction::Regression { predicted: spatial_pred, .. } =
+                model.predict_spatial(&held, &held_coords).unwrap()
+            else {
+                panic!("expected regression");
+            };
+
+            let mse = |pred: &[f64]| -> f64 {
+                pred.iter()
+                    .zip(&held_target)
+                    .map(|(p, t)| (p - t).powi(2))
+                    .sum::<f64>()
+                    / pred.len() as f64
+            };
+            assert!(
+                mse(&spatial_pred) < mse(&base_pred),
+                "{variant:?}: kriging correction should reduce held-out MSE"
+            );
+        }
     }
 
     /// Regression test: when the base learner already fits the target

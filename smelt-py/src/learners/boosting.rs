@@ -21,8 +21,11 @@ fn resolve_variogram_model(name: &str) -> PyResult<smelt_ml::prelude::VariogramM
         "spherical" => Ok(VariogramModel::Spherical),
         "exponential" => Ok(VariogramModel::Exponential),
         "gaussian" => Ok(VariogramModel::Gaussian),
+        "matern32" => Ok(VariogramModel::Matern32),
+        "matern52" => Ok(VariogramModel::Matern52),
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "unknown variogram_model '{other}'; expected one of: spherical, exponential, gaussian"
+            "unknown variogram_model '{other}'; expected one of: spherical, exponential, \
+             gaussian, matern32, matern52"
         ))),
     }
 }
@@ -692,7 +695,8 @@ impl KrigingHybrid {
     ///
     /// Args:
     ///     base: base learner id string (see `smelt.registered_learner_ids()`).
-    ///     variogram_model: "spherical" (default), "exponential", or "gaussian".
+    ///     variogram_model: "spherical" (default), "exponential", "gaussian",
+    ///         "matern32", or "matern52" (Matérn ν=3/2 and ν=5/2 closed forms).
     ///     n_lags: number of lag bins used to build the empirical variogram.
     ///     n_neighbors: local kriging neighborhood size at predict time.
     #[new]

@@ -17,6 +17,23 @@ validation, determinism, and documentation fixes; the entries below are
 the ones that can change numerical results, so per the convention above
 this section ships in a MINOR, not a patch.
 
+### Added — KrigingHybrid variogram upgrade (PM2.5 handoff, gap 3b)
+
+- `VariogramModel::Matern32`/`Matern52`: Matérn ν=3/2 and ν=5/2 closed
+  forms (sklearn length-scale convention: `√3h/r`, `√5h/r`). ν=1/2 is
+  exactly `Exponential` and ν→∞ is `Gaussian`, both already present;
+  continuous ν (Bessel K_ν) is deliberately out of scope for this
+  crate's hand-rolled numerics. Python:
+  `KrigingHybrid(variogram_model="matern32"/"matern52")`.
+- `fit_variogram` now minimizes Cressie's (1985) WLS objective
+  (`Σ N_j (γ̂_j − γ_j)²/γ_j²` -- relative misfit, the gstat-default
+  family) instead of plain pair-count-weighted SSE, with a two-stage
+  grid search (coarse + ±1-step local refinement). **Changes fitted
+  variogram parameters and therefore `predict_spatial` outputs** for
+  existing `KrigingHybrid`/`predict_spatial` users -- the old absolute
+  SSE let large-semivariance long-range bins dominate, fitting worst
+  exactly the short-range structure kriging uses.
+
 ### Changed — numerical behavior (4th audit LOWs)
 
 - LightGBM GOSS: the small-gradient amplification factor is now the exact

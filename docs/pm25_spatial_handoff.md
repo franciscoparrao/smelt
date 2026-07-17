@@ -69,12 +69,19 @@ plain-XGBoost column so the residual-kriging contribution is visible.
    (expanding or sliding window, forecast horizon, step size) would let Smelt cover the
    temporal track too. Small, self-contained addition.
 
-3. **[OPEN — staged plan]** The Smelt team's position (2026-07-10): adopting
+3. **[STAGE (b) CLOSED 2026-07-17]** The Smelt team's position (2026-07-10): adopting
    `geostat-rs` as a dependency conflicts with the crate's hand-rolled-numerics
    policy (`CsrMatrix`, grid-search variogram precedents). Staged instead:
    (a) short term, the external composition in `rk_smelt_geostat/` stays the
-   documented publication-grade path; (b) medium term, upgrade the native
-   variogram fit to WLS + Matérn (self-contained, no new dependency);
+   documented publication-grade path; (b) **[DONE 2026-07-17]** upgrade the native
+   variogram fit to WLS + Matérn (self-contained, no new dependency) —
+   `fit_variogram` now minimizes Cressie's (1985) WLS objective
+   (`Σ N_j (γ̂_j − γ_j)²/γ_j²`, the gstat-default family) with a two-stage
+   grid search (coarse + local refinement), and `VariogramModel` gains
+   `Matern32`/`Matern52` closed forms (sklearn length-scale convention;
+   ν=1/2 ≡ Exponential, ν→∞ ≡ Gaussian; continuous ν stays out of scope —
+   that's what the external geostat-rs path is for). Python:
+   `KrigingHybrid(variogram_model="matern32"/"matern52")`;
    (c) an optional feature-gated backend only if the paper requires it
    (like the `parquet`/polars precedent). Original request:
    **Publication-grade residual kriging (prototyped).** `KrigingHybrid` fits an internal
