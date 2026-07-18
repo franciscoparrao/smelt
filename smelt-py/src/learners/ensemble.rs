@@ -3,12 +3,16 @@
 //! an already-constructed Python learner object -- see module comment below.
 
 use crate::common::{add_explain_methods, add_persistence_methods, declare_support};
-use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
+use crate::common::{
+    extract_class_labels, fit_learner, is_integer, not_fitted, predict_proba_values,
+    predict_values, smelt_err, to_array2, validate_sample_weight,
+};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use smelt_ml::learner::TrainedModel;
+use smelt_ml::measure::Measure;
 
 // ── Bagging / Stacking / DynamicEnsemble ────────────────────────────────
 //
@@ -302,6 +306,333 @@ impl TargetTransformRegressor {
     }
 }
 
+// ── CalibratedClassifier / ThresholdedClassifier ────────────────────────
+
+/// Resolve a Python-facing calibration-method name to the core enum,
+/// validating eagerly (same pattern as `resolve_transform`) so both `__new__`
+/// and `set_params` reject bad values with a clear ValueError.
+fn resolve_calibration_method(method: &str) -> PyResult<smelt_ml::prelude::CalibrationMethod> {
+    use smelt_ml::prelude::CalibrationMethod;
+    match method {
+        "platt" => Ok(CalibrationMethod::Platt),
+        "isotonic" => Ok(CalibrationMethod::Isotonic),
+        other => Err(PyValueError::new_err(format!(
+            "unknown calibration method \"{other}\"; valid methods: platt, isotonic"
+        ))),
+    }
+}
+
+/// Resolve a threshold-tuning metric name to a boxed measure. Restricted to
+/// the classification measures where "predict class 1 iff p1 >= t" tuning is
+/// meaningful (higher-is-better scores); rejects regression / probability-only
+/// measures eagerly so a bad choice fails at `__new__`/`set_params`, not fit.
+fn resolve_threshold_metric(metric: &str) -> PyResult<Box<dyn Measure>> {
+    use smelt_ml::measure::*;
+    match metric {
+        "f1" => Ok(Box::new(F1Score)),
+        "balanced_accuracy" => Ok(Box::new(BalancedAccuracy)),
+        "accuracy" => Ok(Box::new(Accuracy)),
+        "precision" => Ok(Box::new(Precision)),
+        "recall" => Ok(Box::new(Recall)),
+        "mcc" => Ok(Box::new(Mcc)),
+        "kappa" => Ok(Box::new(CohensKappa)),
+        other => Err(PyValueError::new_err(format!(
+            "unknown threshold metric \"{other}\"; valid metrics: f1, balanced_accuracy, \
+             accuracy, precision, recall, mcc, kappa"
+        ))),
+    }
+}
+
+/// Probability-calibration wrapper: trains the base classifier, remaps its
+/// probabilities (Platt sigmoid or isotonic regression) on a held-out split,
+/// and refits the base on all the data (scikit-learn `ensemble=False` style).
+/// Classification only. Calibration preserves the ranking (Platt is monotone,
+/// so AUC is unchanged) while making the probability *values* trustworthy.
+#[pyclass]
+#[derive(Default)]
+pub(crate) struct CalibratedClassifier {
+    trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
+    base: String,
+    method: String,
+    calib_fraction: f64,
+    seed: u64,
+}
+
+#[pymethods]
+impl CalibratedClassifier {
+    /// `base`: learner id string (see `smelt.registered_learner_ids()`);
+    /// `method`: "platt" or "isotonic"; `calib_fraction`: held-out fraction
+    /// used to fit the calibrator; `seed`: RNG seed for that split. `base` and
+    /// `method` are validated eagerly here (and again in `set_params`).
+    #[new]
+    #[pyo3(signature = (base, method="platt".to_string(), calib_fraction=0.3, seed=42))]
+    fn new(base: String, method: String, calib_fraction: f64, seed: u64) -> PyResult<Self> {
+        validate_learner_id(&base)?;
+        resolve_calibration_method(&method)?;
+        Ok(Self {
+            trained: None,
+            is_classif: false,
+            base,
+            method,
+            calib_fraction,
+            seed,
+        })
+    }
+
+    /// `sample_weight` (sklearn convention): rejected with a clear ValueError
+    /// (the calibration split does not propagate weights), same as the other
+    /// factory-based composites.
+    #[pyo3(signature = (x, y, sample_weight=None))]
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
+    ) -> PyResult<()> {
+        let base = self.base.clone();
+        let method = resolve_calibration_method(&self.method)?;
+        let mut learner = smelt_ml::prelude::CalibratedClassifier::new(
+            move || {
+                smelt_ml::prelude::learner_from_id(&base)
+                    .expect("validated in CalibratedClassifier::new")
+            },
+            method,
+        )
+        .with_calib_fraction(self.calib_fraction)
+        .with_seed(self.seed);
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
+        self.trained = Some(model);
+        self.is_classif = is_classif;
+        Ok(())
+    }
+
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+
+    fn predict_proba<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+
+    #[getter]
+    fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
+        Ok(self.trained.as_ref().ok_or_else(not_fitted)?.feature_importance())
+    }
+
+    fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item("base", self.base.clone())?;
+        dict.set_item("method", self.method.clone())?;
+        dict.set_item("calib_fraction", self.calib_fraction)?;
+        dict.set_item("seed", self.seed)?;
+        Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+
+    #[pyo3(signature = (**kwargs))]
+    fn set_params(&mut self, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                let key: String = k.extract()?;
+                match key.as_str() {
+                    "base" => {
+                        let base: String = v.extract()?;
+                        validate_learner_id(&base)?;
+                        self.base = base;
+                    }
+                    "method" => {
+                        let method: String = v.extract()?;
+                        resolve_calibration_method(&method)?;
+                        self.method = method;
+                    }
+                    "calib_fraction" => self.calib_fraction = v.extract()?,
+                    "seed" => self.seed = v.extract()?,
+                    other => {
+                        return Err(PyValueError::new_err(format!(
+                            "invalid parameter '{other}' for this estimator"
+                        )))
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Binary decision-threshold wrapper: replaces the implicit 0.5 rule with
+/// either a fixed threshold or one tuned on a holdout to maximize a metric
+/// (F1/balanced_accuracy/...). Binary classification only. After `fit`, the
+/// applied threshold is exposed as `best_threshold_` (sklearn
+/// `TunedThresholdClassifierCV` style). Note: the cost-optimal threshold in
+/// closed form is `CostSensitiveClassifier` instead — this one tunes it
+/// empirically from data.
+#[pyclass]
+#[derive(Default)]
+pub(crate) struct ThresholdedClassifier {
+    trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
+    base: String,
+    threshold: Option<f64>,
+    metric: String,
+    calib_fraction: f64,
+    seed: u64,
+    best_threshold: Option<f64>,
+}
+
+#[pymethods]
+impl ThresholdedClassifier {
+    /// `base`: learner id string; `threshold`: a fixed threshold (skips
+    /// tuning) or `None` to tune; `metric`: measure to tune for when
+    /// `threshold is None` (f1/balanced_accuracy/accuracy/precision/recall/
+    /// mcc/kappa); `calib_fraction`/`seed`: the tuning holdout. `base` and
+    /// `metric` are validated eagerly (and again in `set_params`).
+    #[new]
+    #[pyo3(signature = (base, threshold=None, metric="f1".to_string(), calib_fraction=0.3, seed=42))]
+    fn new(
+        base: String,
+        threshold: Option<f64>,
+        metric: String,
+        calib_fraction: f64,
+        seed: u64,
+    ) -> PyResult<Self> {
+        validate_learner_id(&base)?;
+        resolve_threshold_metric(&metric)?;
+        Ok(Self {
+            trained: None,
+            is_classif: false,
+            base,
+            threshold,
+            metric,
+            calib_fraction,
+            seed,
+            best_threshold: None,
+        })
+    }
+
+    /// `sample_weight` (sklearn convention): rejected with a clear ValueError
+    /// (the tuning split does not propagate weights).
+    #[pyo3(signature = (x, y, sample_weight=None))]
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
+    ) -> PyResult<()> {
+        if !is_integer(y) {
+            return Err(PyValueError::new_err(
+                "ThresholdedClassifier is binary-classification only; pass integer 0/1 labels",
+            ));
+        }
+        let features = to_array2(x);
+        if let Some(w) = &sample_weight {
+            validate_sample_weight(w, features.nrows())?;
+        }
+        let target = extract_class_labels(y)?;
+        let mut task =
+            smelt_ml::task::ClassificationTask::new("py", features, target).map_err(smelt_err)?;
+        if let Some(w) = sample_weight {
+            task = task.with_weights(w);
+        }
+
+        let base = self.base.clone();
+        let mut wrapper = smelt_ml::prelude::ThresholdedClassifier::new(move || {
+            smelt_ml::prelude::learner_from_id(&base)
+                .expect("validated in ThresholdedClassifier::new")
+        });
+        wrapper = match self.threshold {
+            Some(t) => wrapper.with_threshold(t),
+            None => wrapper.with_metric(resolve_threshold_metric(&self.metric)?),
+        };
+        wrapper = wrapper.with_calib_fraction(self.calib_fraction).with_seed(self.seed);
+
+        let trained = py
+            .allow_threads(|| wrapper.fit_classif(&task))
+            .map_err(smelt_err)?;
+        self.best_threshold = Some(trained.best_threshold());
+        self.trained = Some(Box::new(trained));
+        self.is_classif = true;
+        Ok(())
+    }
+
+    /// The decision threshold this fitted model applies (the fixed value, or
+    /// the tuned winner). Raises if not fitted.
+    #[getter]
+    fn best_threshold_(&self) -> PyResult<f64> {
+        self.best_threshold.ok_or_else(not_fitted)
+    }
+
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+
+    fn predict_proba<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+
+    #[getter]
+    fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
+        Ok(self.trained.as_ref().ok_or_else(not_fitted)?.feature_importance())
+    }
+
+    fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item("base", self.base.clone())?;
+        dict.set_item("threshold", self.threshold)?;
+        dict.set_item("metric", self.metric.clone())?;
+        dict.set_item("calib_fraction", self.calib_fraction)?;
+        dict.set_item("seed", self.seed)?;
+        Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+
+    #[pyo3(signature = (**kwargs))]
+    fn set_params(&mut self, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                let key: String = k.extract()?;
+                match key.as_str() {
+                    "base" => {
+                        let base: String = v.extract()?;
+                        validate_learner_id(&base)?;
+                        self.base = base;
+                    }
+                    "threshold" => self.threshold = v.extract()?,
+                    "metric" => {
+                        let metric: String = v.extract()?;
+                        resolve_threshold_metric(&metric)?;
+                        self.metric = metric;
+                    }
+                    "calib_fraction" => self.calib_fraction = v.extract()?,
+                    "seed" => self.seed = v.extract()?,
+                    other => {
+                        return Err(PyValueError::new_err(format!(
+                            "invalid parameter '{other}' for this estimator"
+                        )))
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[pyclass]
 #[derive(Default)]
 pub(crate) struct Stacking {
@@ -484,13 +815,23 @@ impl DynamicEnsemble {
 }
 
 
-add_explain_methods!(Bagging, Stacking, DynamicEnsemble, CostSensitiveClassifier, TargetTransformRegressor);
+add_explain_methods!(
+    Bagging,
+    Stacking,
+    DynamicEnsemble,
+    CostSensitiveClassifier,
+    TargetTransformRegressor,
+    CalibratedClassifier,
+    ThresholdedClassifier
+);
 
 declare_support!(Bagging,                classif = true, regress = true);
 declare_support!(Stacking,               classif = true, regress = true);
 declare_support!(DynamicEnsemble,        classif = true, regress = false);
 declare_support!(CostSensitiveClassifier, classif = true, regress = false);
 declare_support!(TargetTransformRegressor, classif = false, regress = true);
+declare_support!(CalibratedClassifier,   classif = true, regress = false);
+declare_support!(ThresholdedClassifier,  classif = true, regress = false);
 
 // All 5 hold their base learner(s)' `Box<dyn TrainedModel>` internally, so
 // `SerializableModel` (`src/serialize.rs`) has no variant for any of
@@ -502,6 +843,8 @@ add_persistence_methods!(
     DynamicEnsemble => "DynamicEnsemble",
     CostSensitiveClassifier => "CostSensitiveClassifier",
     TargetTransformRegressor => "TargetTransformRegressor",
+    CalibratedClassifier => "CalibratedClassifier",
+    ThresholdedClassifier => "ThresholdedClassifier",
 );
 
 // get_params/set_params are hand-written here (not via `declare_params!`)

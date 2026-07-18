@@ -17,7 +17,8 @@ use crate::{Result, SmeltError};
 ///
 /// Not every learner is registered: [`super::Bagging`], [`super::Stacking`],
 /// [`super::DynamicEnsemble`], [`super::CostSensitiveClassifier`],
-/// [`super::AutoTuner`], [`super::TargetTransformRegressor`] and
+/// [`super::AutoTuner`], [`super::TargetTransformRegressor`],
+/// [`super::CalibratedClassifier`], [`super::ThresholdedClassifier`] and
 /// [`super::KrigingHybrid`] wrap *other* learners via a base-learner factory
 /// that has no sensible default (`CostSensitiveClassifier` additionally
 /// needs an explicit cost matrix with no sensible default either, and
@@ -148,6 +149,8 @@ mod tests {
             "stacking",
             "dynamic_ensemble",
             "cost_sensitive",
+            "calibrated",
+            "thresholded",
             "kriging_hybrid",
             "geo_xgboost",
         ] {

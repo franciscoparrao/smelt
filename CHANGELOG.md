@@ -124,6 +124,32 @@ MINOR, not a patch.
   removed from git and ignored; `docs/roadmap_checklist.md` brought up
   to date.
 
+### Added — mlr3-parity roadmap, item 4: probability calibration + threshold tuning (2026-07-18)
+
+- `CalibratedClassifier` (`src/learner/calibration.rs`): wraps any
+  probabilistic classifier and recalibrates its probabilities via
+  `CalibrationMethod::Platt` (1D logistic on the positive-class score,
+  Platt-smoothed labels) or `Isotonic` (hand-rolled PAV + linear
+  interpolation), multiclass one-vs-rest + renormalization. Strategy:
+  internal fit/calib holdout (`calib_fraction`, default 0.3, seeded),
+  then refit the base on all training data — sklearn's
+  `CalibratedClassifierCV(ensemble=False)`; k-fold is a documented
+  follow-up. Improves Brier score / ECE on a miscalibrated base and
+  preserves AUC under Platt (monotone).
+- `ThresholdedClassifier` (`src/learner/threshold.rs`): binary wrapper
+  replacing the implicit 0.5 with either a user-fixed threshold or one
+  tuned on a holdout to maximize any `Measure` (default F1), exposing
+  `best_threshold()`. The cost-optimal threshold coincides with
+  `CostSensitiveClassifier`'s Bayes rule (empirical vs closed-form —
+  documented, deliberately not unified).
+- Both are factory wrappers (like `CostSensitiveClassifier`), reject
+  weighted tasks via `check_no_weights` (the internal split does not
+  propagate weights), and are not registry-constructible. Python:
+  `CalibratedClassifier(base, method=, calib_fraction=, seed=)` and
+  `ThresholdedClassifier(base, threshold=, metric=, seed=)` with
+  `best_threshold_`, eager `base`/`method`/`metric` validation.
+- **Closes Prioridad 6 (mlr3 parity).**
+
 ### Added — mlr3-parity roadmap, item 5: learner properties + contract autotest (2026-07-18)
 
 - `LearnerProperties` (`src/learner/properties.rs`): queryable per-learner

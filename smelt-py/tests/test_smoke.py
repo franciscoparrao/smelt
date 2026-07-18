@@ -243,3 +243,74 @@ def test_learner_properties():
     # Unknown id raises ValueError.
     with pytest.raises(ValueError):
         smelt.learner_properties("not_a_learner")
+
+
+def test_calibrated_classifier_improves_brier_on_overconfident_base():
+    """Probability calibration wraps a base classifier and remaps its
+    probabilities; on a miscalibrated (correlated-feature, over-confident)
+    GaussianNB it reduces the Brier score, and get/set_params round-trips.
+    Composite -> save() raises NotImplementedError."""
+    def data(seed, n=800):
+        rng = np.random.default_rng(seed)
+        y = (rng.random(n) < 0.5).astype(np.int64)
+        s = np.where(y == 1, 0.8, -0.8) + rng.normal(size=n)
+        x0 = s + rng.normal(scale=0.3, size=n)
+        x1 = s + rng.normal(scale=0.3, size=n)  # correlated -> NB over-confident
+        flip = rng.random(n) < 0.15
+        y = np.where(flip, 1 - y, y)
+        return np.c_[x0, x1], y
+
+    xtr, ytr = data(1)
+    xte, yte = data(2, n=500)
+    raw = smelt.GaussianNB()
+    raw.fit(xtr, ytr)
+    raw_brier = smelt.brier_score(yte, raw.predict_proba(xte))
+
+    cc = smelt.CalibratedClassifier(base="gaussian_nb", method="platt", seed=7)
+    cc.fit(xtr, ytr)
+    cal_brier = smelt.brier_score(yte, cc.predict_proba(xte))
+    assert cal_brier < raw_brier
+
+    assert cc.get_params()["method"] == "platt"
+    cc.set_params(method="isotonic", calib_fraction=0.25)
+    assert cc.get_params() == {
+        "base": "gaussian_nb", "method": "isotonic",
+        "calib_fraction": 0.25, "seed": 7,
+    }
+    with pytest.raises(ValueError):
+        smelt.CalibratedClassifier(base="gaussian_nb", method="bogus")
+    with pytest.raises(NotImplementedError):
+        cc.save("/tmp/should_not_write.json")
+
+
+def test_thresholded_classifier_tunes_threshold_on_imbalanced_data():
+    """Threshold tuning replaces the 0.5 rule with an F1-optimal one on
+    imbalanced data (F1 improves vs the base), exposes best_threshold_, and
+    a fixed extreme threshold saturates the prediction. Bad metric raises."""
+    def imbalanced(seed, n):
+        rng = np.random.default_rng(seed)
+        y = (rng.random(n) < 0.10).astype(np.int64)
+        c = np.where(y == 1, 1.0, 0.0)[:, None]
+        x = c + (rng.random((n, 2)) - 0.5) * 4.0
+        return x, y
+
+    xtr, ytr = imbalanced(2, 1200)
+    xte, yte = imbalanced(3, 800)
+    base = smelt.LogisticRegression()
+    base.fit(xtr, ytr)
+    plain_f1 = smelt.f1_score(yte, base.predict(xte))
+
+    tc = smelt.ThresholdedClassifier(base="logistic_regression", metric="f1", seed=3)
+    tc.fit(xtr, ytr)
+    tuned_f1 = smelt.f1_score(yte, tc.predict(xte))
+    assert tuned_f1 > plain_f1
+    assert 0.0 <= tc.best_threshold_ <= 1.0
+
+    all_ones = smelt.ThresholdedClassifier(base="logistic_regression", threshold=0.0)
+    all_ones.fit(xtr, ytr)
+    assert int(all_ones.predict(xte).sum()) == len(yte)
+
+    with pytest.raises(ValueError):
+        smelt.ThresholdedClassifier(base="logistic_regression", metric="rmse")
+    with pytest.raises(NotImplementedError):
+        tc.save("/tmp/should_not_write.json")

@@ -105,10 +105,17 @@ y learners espaciales — esto cubre lo inverso).
       los folds internos). Python `AutoTuner(learner, param_space, tuner=,
       cv=, metric=, seed=)` con `best_params_`/`best_score_` sklearn-style,
       reusando la allowlist del M-13. 9 tests Rust + sondas. ✅ (2026-07-18)
-- [ ] **Calibración de probabilidades + threshold tuning** — Platt/isotonic
-      como wrapper (mismo patrón factory) + búsqueda de umbral óptimo por
-      costo/métrica; completa la historia que `CostSensitiveClassifier`
-      empezó. ~300 líneas.
+- [x] **Calibración de probabilidades + threshold tuning** —
+      `CalibratedClassifier` (`src/learner/calibration.rs`, Platt + isotonic
+      PAV hand-rolled, holdout fit/calib + refit-en-todo estilo
+      `CalibratedClassifierCV(ensemble=False)`, OvR multiclase) y
+      `ThresholdedClassifier` (`src/learner/threshold.rs`, umbral fijo o
+      tuneado en holdout maximizando una Measure, `best_threshold()`
+      inherente). Wrappers factory como CostSensitive; guard de pesos
+      coherente; no registrados. Oráculos: Brier baja tras calibrar, Platt
+      preserva AUC (monótona), F1 0.55→0.64 con umbral tuneado en
+      desbalanceado. Python sklearn-style con `best_threshold_`. 17 tests.
+      ✅ (2026-07-18). **Prioridad 6 (paridad mlr3) COMPLETA.**
 - [x] **Registry con properties + autotest de contrato** — `LearnerProperties`
       (`src/learner/properties.rs`): 8 flags por learner (classif/regress/
       weights/proba/nan/categorical/feature_importance/serializable), fuente

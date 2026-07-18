@@ -87,16 +87,18 @@ pub mod prelude {
         FeatureImportance, permutation_importance_classif, permutation_importance_regress,
     };
     pub use crate::learner::{
-        AdaBoost, AdaptiveRandomForest, Activation, Adwin, AutoTuner, Bagging, CatBoost,
-        CostSensitiveClassifier, DecisionTree, DeepForest, DynamicEnsemble, EBM, ElasticNet,
-        ExtraTrees, ExtremeLearningMachine, BandwidthSelection, GaussianNB, GeoXGBoost,
-        GradientBoosting, HoeffdingTree, KNearestNeighbors, KrigingHybrid, Lasso, Learner,
-        LearnerProperties, TrainedDeepForest, TrainedGeoXGBoost, TrainedKrigingHybrid, LightGBM,
-        LinearRegression, LinearSVM, LogisticRegression, MondrianForest, MondrianTree, ObliqueForest,
-        ObliqueTree, Objective, QuantileForest, QuantileGB, RandomForest, Ridge, Stacking,
-        TargetTransform, TargetTransformRegressor, TrainedAutoTuner, TrainedTargetTransformRegressor,
-        TrainedQuantileForest, TunerSpec, VariogramFit,
-        VariogramModel, XGBoost, learner_from_id, learner_properties, registered_learner_ids,
+        AdaBoost, AdaptiveRandomForest, Activation, Adwin, AutoTuner, Bagging, CalibratedClassifier,
+        CalibrationMethod, CatBoost, CostSensitiveClassifier, DecisionTree, DeepForest,
+        DynamicEnsemble, EBM, ElasticNet, ExtraTrees, ExtremeLearningMachine, BandwidthSelection,
+        GaussianNB, GeoXGBoost, GradientBoosting, HoeffdingTree, KNearestNeighbors, KrigingHybrid,
+        Lasso, Learner, LearnerProperties, TrainedCalibratedClassifier, TrainedDeepForest,
+        TrainedGeoXGBoost, TrainedKrigingHybrid, LightGBM, LinearRegression, LinearSVM,
+        LogisticRegression, MondrianForest, MondrianTree, ObliqueForest, ObliqueTree, Objective,
+        QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, TargetTransform,
+        TargetTransformRegressor, ThresholdedClassifier, TrainedAutoTuner,
+        TrainedTargetTransformRegressor, TrainedThresholdedClassifier, TrainedQuantileForest,
+        TunerSpec, VariogramFit, VariogramModel, XGBoost, learner_from_id, learner_properties,
+        registered_learner_ids,
     };
     pub use crate::measure::{
         Accuracy, AteBias, AucRoc, BalancedAccuracy, Brier, CohensKappa, F1Score, LogLoss, Mae,
