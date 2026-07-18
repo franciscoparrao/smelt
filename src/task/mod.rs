@@ -165,8 +165,32 @@ impl ClassificationTask {
         Ok(self)
     }
 
-    /// Set custom class names, indexed by class label.
+    /// Set custom class names, indexed by class label. Providing MORE names
+    /// than observed labels is valid and useful (it widens `n_classes` so a
+    /// subset/fold task keeps the full class set of its parent — how
+    /// Pipeline/Stacking/resamplers propagate names); providing FEWER names
+    /// than the highest label + 1 is never valid, since `n_classes()` is
+    /// `class_names.len()` and every downstream probability row / class
+    /// count would be too narrow.
+    ///
+    /// # Panics
+    ///
+    /// Panics immediately if `names` has fewer entries than the highest
+    /// target label + 1 — before this check, the mismatch surfaced later as
+    /// an opaque index-out-of-bounds panic deep inside whatever consumed
+    /// `n_classes()` first (e.g. SMOTE's per-class grouping). Kept as a
+    /// panic rather than `Result` because changing the signature would be a
+    /// breaking API change (5th audit, LOW-C).
     pub fn with_class_names(mut self, names: Vec<String>) -> Self {
+        let required = self.target.iter().copied().max().map_or(0, |m| m + 1);
+        assert!(
+            names.len() >= required,
+            "with_class_names: {} class name(s) provided, but the target's highest label is {} \
+             so at least {} name(s) are required",
+            names.len(),
+            required.saturating_sub(1),
+            required
+        );
         self.class_names = names;
         self
     }

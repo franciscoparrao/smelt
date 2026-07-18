@@ -735,12 +735,29 @@ impl MondrianForest {
     }
 }
 
+/// A negative or NaN lifetime silently degenerates the Mondrian process:
+/// every sampled split time exceeds the budget immediately (NaN poisons the
+/// `tau >= lifetime` comparison the same way), so no tree ever splits and
+/// the model is a single running-stats leaf. `f64::INFINITY` — the default
+/// — remains valid (unlimited budget), as does `0.0` (the limiting valid
+/// budget). The builders don't return `Result`, so the check runs at train
+/// time (5th audit, LOW-D).
+fn check_lifetime(lifetime: f64) -> Result<()> {
+    if lifetime.is_nan() || lifetime < 0.0 {
+        return Err(crate::SmeltError::InvalidParameter(format!(
+            "mondrian lifetime must be non-negative (infinity, the default, is valid), got {lifetime}"
+        )));
+    }
+    Ok(())
+}
+
 impl Learner for MondrianTree {
     fn id(&self) -> &str {
         "mondrian_tree"
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        check_lifetime(self.lifetime)?;
         crate::validate::check_no_nan(task.features())?;
         self.fit_batch_classif(task.features(), task.target(), task.n_classes());
         Ok(Box::new(TrainedMondrianTree {
@@ -752,6 +769,7 @@ impl Learner for MondrianTree {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        check_lifetime(self.lifetime)?;
         crate::validate::check_no_nan(task.features())?;
         self.fit_batch_regress(task.features(), task.target());
         Ok(Box::new(TrainedMondrianTree {
@@ -818,6 +836,7 @@ impl Learner for MondrianForest {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        check_lifetime(self.lifetime)?;
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
@@ -847,6 +866,7 @@ impl Learner for MondrianForest {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        check_lifetime(self.lifetime)?;
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
@@ -948,6 +968,52 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    /// Regression test (5th audit, LOW-D): a negative or NaN lifetime used
+    /// to be accepted and silently degenerated every tree to a single
+    /// running-stats leaf (any sampled split time exceeds the budget; NaN
+    /// poisons the comparison). Both learners must reject it at train time,
+    /// while the infinite default stays valid.
+    #[test]
+    fn negative_or_nan_lifetime_is_rejected_at_train() {
+        let features = Array2::from_shape_fn((6, 1), |(i, _)| i as f64);
+        let classif =
+            ClassificationTask::new("mt_life_c", features.clone(), vec![0, 0, 0, 1, 1, 1]).unwrap();
+        let regress = RegressionTask::new(
+            "mt_life_r",
+            features,
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+        )
+        .unwrap();
+
+        for bad in [-1.0, f64::NAN, f64::NEG_INFINITY] {
+            let Err(err) = MondrianTree::new().with_lifetime(bad).train_classif(&classif)
+            else {
+                panic!("bad lifetime must be rejected (tree, classif)");
+            };
+            assert!(
+                matches!(err, crate::SmeltError::InvalidParameter(_))
+                    && format!("{err}").contains("lifetime"),
+                "got: {err}"
+            );
+            assert!(
+                MondrianTree::new().with_lifetime(bad).train_regress(&regress).is_err(),
+                "bad lifetime must be rejected (tree, regress)"
+            );
+            assert!(
+                MondrianForest::new().with_lifetime(bad).train_classif(&classif).is_err(),
+                "bad lifetime must be rejected (forest, classif)"
+            );
+            assert!(
+                MondrianForest::new().with_lifetime(bad).train_regress(&regress).is_err(),
+                "bad lifetime must be rejected (forest, regress)"
+            );
+        }
+
+        // The infinite default (and an explicit finite budget) remain valid.
+        MondrianTree::new().train_classif(&classif).unwrap();
+        MondrianForest::new().with_lifetime(5.0).train_regress(&regress).unwrap();
+    }
 
     #[test]
     fn sample_exponential_mean_matches_rate() {

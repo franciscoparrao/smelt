@@ -171,6 +171,17 @@ impl Transformer for RFE {
         Ok(indices.iter().map(|&i| names[i].clone()).collect())
     }
 
+    fn transform_types(
+        &self,
+        types: &[crate::task::FeatureType],
+    ) -> Result<Vec<crate::task::FeatureType>> {
+        let indices = self
+            .selected_indices
+            .as_ref()
+            .ok_or(SmeltError::NotTrained)?;
+        Ok(indices.iter().map(|&i| types[i]).collect())
+    }
+
     fn clone_box(&self) -> Box<dyn Transformer> {
         Box::new(self.clone())
     }

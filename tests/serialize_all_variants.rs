@@ -148,3 +148,93 @@ fn every_serializable_model_variant_survives_a_save_load_roundtrip() {
         covered.len()
     );
 }
+
+/// Rewrite a saved CatBoost model file's `cat_encodings` from the current
+/// vec-of-pairs wire form into the nested-JSON-object form that smelt-ml
+/// 2.0.x–3.0.0 wrote (string keys), byte-for-byte what those releases'
+/// default serde derive produced: `[{"col": {"code": enc, ...}, ...}, ...]`
+/// (or `[{}]` with no categorical features). Returns the rewritten envelope.
+fn to_legacy_cat_encodings_form(envelope_json: &str) -> String {
+    let mut raw: serde_json::Value = serde_json::from_str(envelope_json).unwrap();
+    let enc = raw["model"]["cat_encodings"].take();
+    let outer = enc.as_array().expect("cat_encodings must be an array");
+    let legacy: Vec<serde_json::Value> = outer
+        .iter()
+        .map(|per_output| {
+            let mut obj = serde_json::Map::new();
+            for pair in per_output.as_array().expect("pairs form: outer vec") {
+                let pair = pair.as_array().expect("pairs form: (col, cats) tuple");
+                let col = pair[0].as_u64().unwrap().to_string();
+                let mut cats = serde_json::Map::new();
+                for cat_pair in pair[1].as_array().expect("pairs form: cats vec") {
+                    let cat_pair = cat_pair.as_array().unwrap();
+                    cats.insert(cat_pair[0].to_string(), cat_pair[1].clone());
+                }
+                obj.insert(col, serde_json::Value::Object(cats));
+            }
+            serde_json::Value::Object(obj)
+        })
+        .collect();
+    raw["model"]["cat_encodings"] = serde_json::Value::Array(legacy);
+    serde_json::to_string_pretty(&raw).unwrap()
+}
+
+/// Regression test (5th audit, M-2): the vec-of-pairs `cat_encodings_serde`
+/// introduced for the HIGH-2 fix rejected the legacy JSON-object wire form
+/// that smelt-ml 2.0.x–3.0.0 wrote — `"cat_encodings": [{}]` (no
+/// categorical features) or string-keyed nested maps (populated) — with an
+/// opaque `invalid type: map, expected a sequence` serde error, inside the
+/// same `format_version` 1 the envelope check waves through. Both legacy
+/// forms must now load and predict identically to the original model, and
+/// the current pairs form must keep roundtripping bit-identically.
+#[test]
+fn catboost_legacy_object_form_cat_encodings_still_loads() {
+    let task = classif_task();
+    let tmp = std::env::temp_dir();
+    let pid = std::process::id();
+
+    // (a) populated cat_features → legacy string-keyed nested maps.
+    // (b) no cat_features → legacy `[{}]` / `[{}, {}, ...]` empty objects.
+    let configs: Vec<(&str, Box<dyn Learner>)> = vec![
+        ("legacy_cat", Box::new(CatBoost::new().with_cat_features(vec![2]))),
+        ("legacy_nocat", Box::new(CatBoost::new())),
+    ];
+
+    for (name, mut learner) in configs {
+        let trained = learner.train_classif(&task).unwrap();
+        let before = serde_json::to_string(&trained.predict(task.features()).unwrap()).unwrap();
+        let serial = trained.to_serializable().unwrap();
+
+        let path = tmp.join(format!("smelt_catboost_{name}_{pid}.json"));
+        save_json(&serial, &path).unwrap();
+        let current_json = std::fs::read_to_string(&path).unwrap();
+
+        // Sanity: the rewrite really produced the legacy object form (every
+        // per-output entry is a JSON object, not a vec of pairs).
+        let legacy_json = to_legacy_cat_encodings_form(&current_json);
+        let reparsed: serde_json::Value = serde_json::from_str(&legacy_json).unwrap();
+        let entries = reparsed["model"]["cat_encodings"].as_array().unwrap();
+        assert!(
+            !entries.is_empty() && entries.iter().all(|e| e.is_object()),
+            "{name}: rewrite should have produced JSON objects, got: {entries:?}"
+        );
+        std::fs::write(&path, &legacy_json).unwrap();
+
+        // Legacy form must load through the full envelope path and predict
+        // bit-identically.
+        let loaded = load_json(&path)
+            .unwrap_or_else(|e| panic!("{name}: legacy 2.0.x–3.0.0 wire form must load: {e}"));
+        let after = serde_json::to_string(&loaded.predict(task.features()).unwrap()).unwrap();
+        assert_eq!(before, after, "{name}: legacy-form load changed predictions");
+
+        // The current pairs form still roundtrips bit-identically (the dual
+        // deserializer must not have disturbed the new path).
+        std::fs::write(&path, &current_json).unwrap();
+        let reloaded = load_json(&path).unwrap();
+        let after_current =
+            serde_json::to_string(&reloaded.predict(task.features()).unwrap()).unwrap();
+        assert_eq!(before, after_current, "{name}: pairs-form load changed predictions");
+
+        std::fs::remove_file(&path).ok();
+    }
+}

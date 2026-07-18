@@ -117,6 +117,11 @@ fn euclidean_dist(a: &[f64], b: &[f64]) -> f64 {
 
 impl TrainedModel for TrainedDES {
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        // 5th audit, LOW-B: without this check, the KNORA-E neighbour search
+        // silently ran Euclidean distances over the common column prefix of
+        // mismatched dimensions (zip truncation) instead of erroring like
+        // every other trained model.
+        crate::validate::check_n_features(features, self.val_features.ncols())?;
         let mut predicted = Vec::with_capacity(features.nrows());
         let mut probabilities = Vec::with_capacity(features.nrows());
 
@@ -336,6 +341,49 @@ mod tests {
         assert!(
             err.to_string().contains("non-classification"),
             "got: {err}"
+        );
+    }
+
+    /// Regression test (5th audit, LOW-B): `TrainedDES::predict` was the one
+    /// trained model not validating `n_features` — a query with the wrong
+    /// column count silently ran the KNORA-E neighbour search over the
+    /// zip-truncated common prefix of the dimensions instead of erroring.
+    #[test]
+    fn predict_rejects_mismatched_feature_count() {
+        let features = array![
+            [0.0, 0.0],
+            [0.1, 0.1],
+            [0.2, 0.0],
+            [1.0, 1.0],
+            [1.1, 0.9],
+            [0.9, 1.1]
+        ];
+        let target = vec![0, 0, 0, 1, 1, 1];
+        let task = ClassificationTask::new("des_dim", features.clone(), target).unwrap();
+
+        let mut des = DynamicEnsemble::new(one_learner());
+        let model = des.train_classif(&task).unwrap();
+
+        // Correct width still predicts.
+        model.predict(&features).unwrap();
+
+        // 1 column (too few) and 3 columns (too many) must both error.
+        let narrow = array![[0.5], [1.0]];
+        let err = model
+            .predict(&narrow)
+            .expect_err("1-column query against a 2-feature model must be rejected");
+        assert!(
+            matches!(err, SmeltError::DimensionMismatch { expected: 2, got: 1 }),
+            "got: {err:?}"
+        );
+
+        let wide = array![[0.5, 0.5, 0.5]];
+        let err = model
+            .predict(&wide)
+            .expect_err("3-column query against a 2-feature model must be rejected");
+        assert!(
+            matches!(err, SmeltError::DimensionMismatch { expected: 2, got: 3 }),
+            "got: {err:?}"
         );
     }
 

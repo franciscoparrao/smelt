@@ -156,10 +156,12 @@ fn empirical_variogram(
 /// least-squares objective against the empirical variogram:
 /// `Σ_j N_j · (γ̂_j − γ(h_j; θ))² / γ(h_j; θ)²` -- pair counts over the
 /// *squared model value*, so each bin contributes by its relative (not
-/// absolute) misfit. This is the standard "WLS" of the geostatistics
-/// literature (gstat's default family): plain `N_j`-weighted SSE lets the
-/// large-semivariance long-range bins dominate and fits the short-range
-/// structure -- the part kriging actually uses -- worst.
+/// absolute) misfit. This is the standard WLS family of the geostatistics
+/// literature (Cressie 1985; gstat's `fit.method = 2` -- note gstat's own
+/// *default* is method 7, which weights by `N_j / h_j²` instead): plain
+/// `N_j`-weighted SSE lets the large-semivariance long-range bins dominate
+/// and fits the short-range structure -- the part kriging actually uses --
+/// worst.
 ///
 /// There is no nonlinear least-squares solver in this crate (deliberately
 /// -- see `src/sparse.rs` for the same "hand-roll the small numeric routine

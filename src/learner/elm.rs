@@ -170,10 +170,27 @@ impl ExtremeLearningMachine {
             seed: 42,
         }
     }
-    /// Sets the number of random hidden units.
+    /// Sets the number of random hidden units. `0` is stored as-is and
+    /// rejected with a clear error at train time (5th audit, LOW-D) — the
+    /// old silent `max(1)` clamp trained a different model than requested
+    /// without any signal.
     pub fn with_n_hidden(mut self, n: usize) -> Self {
-        self.n_hidden = n.max(1);
+        self.n_hidden = n;
         self
+    }
+
+    /// A zero-width hidden layer has no basis functions to regress on: the
+    /// model would degenerate to a constant. The builder doesn't return
+    /// `Result`, so the check runs at the start of training.
+    fn check_n_hidden(&self) -> Result<()> {
+        if self.n_hidden == 0 {
+            return Err(SmeltError::InvalidParameter(
+                "elm n_hidden must be at least 1 (got 0): with no hidden units there is \
+                 nothing to regress the outputs on"
+                    .into(),
+            ));
+        }
+        Ok(())
     }
     /// Sets the hidden-layer activation function.
     pub fn with_activation(mut self, a: Activation) -> Self {
@@ -303,6 +320,7 @@ impl Learner for ExtremeLearningMachine {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        self.check_n_hidden()?;
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
@@ -333,6 +351,7 @@ impl Learner for ExtremeLearningMachine {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        self.check_n_hidden()?;
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
@@ -370,6 +389,35 @@ mod tests {
     #[test]
     fn registered_id_matches() {
         assert_eq!(ExtremeLearningMachine::new().id(), "elm");
+    }
+
+    /// Regression test (5th audit, LOW-D): `with_n_hidden(0)` used to be
+    /// silently clamped to 1 by the builder — a different model than
+    /// requested, with no signal. It must now be a clear train-time error
+    /// on both task types.
+    #[test]
+    fn zero_hidden_units_is_rejected_at_train() {
+        let features = Array2::from_shape_vec((4, 1), vec![0.0, 1.0, 2.0, 3.0]).unwrap();
+        let classif = ClassificationTask::new("elm0_c", features.clone(), vec![0, 0, 1, 1]).unwrap();
+        let regress = RegressionTask::new("elm0_r", features, vec![0.0, 1.0, 2.0, 3.0]).unwrap();
+
+        let Err(err) = ExtremeLearningMachine::new().with_n_hidden(0).train_classif(&classif)
+        else {
+            panic!("n_hidden=0 must be rejected for classification");
+        };
+        assert!(
+            matches!(err, SmeltError::InvalidParameter(_)) && format!("{err}").contains("n_hidden"),
+            "got: {err}"
+        );
+
+        let Err(err) = ExtremeLearningMachine::new().with_n_hidden(0).train_regress(&regress)
+        else {
+            panic!("n_hidden=0 must be rejected for regression");
+        };
+        assert!(
+            matches!(err, SmeltError::InvalidParameter(_)) && format!("{err}").contains("n_hidden"),
+            "got: {err}"
+        );
     }
 
     #[test]

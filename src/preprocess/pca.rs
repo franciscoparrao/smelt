@@ -102,6 +102,20 @@ impl Transformer for PCA {
         Ok((0..nc).map(|i| format!("PC{}", i + 1)).collect())
     }
 
+    fn transform_types(
+        &self,
+        _types: &[crate::task::FeatureType],
+    ) -> Result<Vec<crate::task::FeatureType>> {
+        // Principal components are linear mixtures of all input columns:
+        // no output column preserves any input column's integer-code
+        // invariant, so every output is Numeric.
+        let nc = self
+            .components
+            .as_ref()
+            .map_or(self.n_components, |c| c.nrows());
+        Ok(vec![crate::task::FeatureType::Numeric; nc])
+    }
+
     fn clone_box(&self) -> Box<dyn Transformer> {
         Box::new(self.clone())
     }

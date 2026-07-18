@@ -190,6 +190,24 @@ impl Transformer for OneHotEncoder {
         Ok(result)
     }
 
+    fn transform_types(
+        &self,
+        types: &[crate::task::FeatureType],
+    ) -> Result<Vec<crate::task::FeatureType>> {
+        let categories = self.categories.as_ref().ok_or(SmeltError::NotTrained)?;
+        let mut result = Vec::new();
+        for (j, &ty) in types.iter().enumerate() {
+            if let Some((_, cats)) = categories.iter().find(|(c, _)| *c == j) {
+                // One-hot output columns are 0/1 indicators, not integer
+                // category codes: Numeric for each expanded column.
+                result.extend(std::iter::repeat_n(crate::task::FeatureType::Numeric, cats.len()));
+            } else {
+                result.push(ty);
+            }
+        }
+        Ok(result)
+    }
+
     fn clone_box(&self) -> Box<dyn Transformer> {
         Box::new(self.clone())
     }

@@ -273,6 +273,14 @@ impl XGBoost {
     /// `Huber { delta }`, `Poisson`, or `Custom(f)` where
     /// `f(prediction, target) -> (gradient, hessian)`. Only affects
     /// `train_regress`.
+    ///
+    /// Note on early stopping with `Custom`: a custom objective supplies
+    /// only gradients/hessians, not a loss value, so `early_stopping_rounds`
+    /// monitors MSE computed on the *raw* (untransformed) score as a proxy.
+    /// If your custom loss ranks models differently from squared error
+    /// (e.g. an asymmetric or robust loss), early stopping may stop on the
+    /// wrong round for it — consider disabling early stopping or validating
+    /// externally. `Huber`/`Poisson` monitor their own loss.
     pub fn with_objective(mut self, o: Objective) -> Self {
         self.objective = o;
         self

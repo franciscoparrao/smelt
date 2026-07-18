@@ -145,6 +145,7 @@ impl QRFNode {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_qrf_tree(
     features: &Array2<f64>,
     target: &[f64],
@@ -155,6 +156,7 @@ fn build_qrf_tree(
     max_features: Option<usize>,
     depth: usize,
     rng: &mut impl Rng,
+    importances: &mut [f64],
 ) -> QRFNode {
     let n = indices.len();
 
@@ -242,6 +244,12 @@ fn build_qrf_tree(
 
     match best_split {
         Some((feat, threshold, left_idx, right_idx)) => {
+            // Weighted-gain importance, same accounting as
+            // `TreeBuilder`/RandomForest: MSE reduction scaled by the number
+            // of samples the split routes (5th audit, LOW-D: QRF was the one
+            // forest whose trained model left `feature_importance()` at the
+            // trait's `None` default).
+            importances[feat] += best_gain * n as f64;
             let left = build_qrf_tree(
                 features,
                 target,
@@ -252,6 +260,7 @@ fn build_qrf_tree(
                 max_features,
                 depth + 1,
                 rng,
+                importances,
             );
             let right = build_qrf_tree(
                 features,
@@ -263,6 +272,7 @@ fn build_qrf_tree(
                 max_features,
                 depth + 1,
                 rng,
+                importances,
             );
             QRFNode::Split {
                 feature: feat,
@@ -295,6 +305,15 @@ fn mse_indices(target: &[f64], indices: &[usize]) -> f64 {
 pub struct TrainedQuantileForest {
     trees: Vec<QRFNode>,
     n_features: usize,
+    /// `serde(default)` so files saved before importances existed (< 5th
+    /// audit fix) still load; they report `feature_importance() == None`
+    /// (empty vec) rather than fabricated zeros with names.
+    #[serde(default)]
+    feature_names: Vec<String>,
+    /// Split-gain importances, same weighted-gain accounting as
+    /// RandomForest (gain × node size, summed over all trees' splits).
+    #[serde(default)]
+    feature_importances: Vec<f64>,
 }
 
 impl TrainedQuantileForest {
@@ -348,6 +367,22 @@ impl TrainedModel for TrainedQuantileForest {
         Ok(Prediction::regression(predicted))
     }
 
+    fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
+        // Same normalized weighted-gain report as TrainedRandomForest
+        // (5th audit, LOW-D: this used to be the trait's None default).
+        let total: f64 = self.feature_importances.iter().sum();
+        if total == 0.0 {
+            return None;
+        }
+        Some(
+            self.feature_names
+                .iter()
+                .zip(&self.feature_importances)
+                .map(|(name, &imp)| (name.clone(), imp / total))
+                .collect(),
+        )
+    }
+
     fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
         Some(crate::serialize::SerializableModel::QuantileForest(
             self.clone(),
@@ -371,7 +406,7 @@ impl QuantileForest {
         let n_features = task.n_features();
         let max_features = self.max_features.resolve(n_features, false);
 
-        let trees: Vec<QRFNode> = (0..self.n_estimators)
+        let built: Vec<(QRFNode, Vec<f64>)> = (0..self.n_estimators)
             .into_par_iter()
             .map(|i| {
                 let mut rng = StdRng::seed_from_u64(self.seed.wrapping_add(i as u64));
@@ -379,7 +414,8 @@ impl QuantileForest {
                 let indices: Vec<usize> = (0..n_samples)
                     .map(|_| rng.random_range(0..n_samples))
                     .collect();
-                build_qrf_tree(
+                let mut importances = vec![0.0; n_features];
+                let tree = build_qrf_tree(
                     features,
                     target,
                     &indices,
@@ -389,11 +425,27 @@ impl QuantileForest {
                     max_features,
                     0,
                     &mut rng,
-                )
+                    &mut importances,
+                );
+                (tree, importances)
             })
             .collect();
 
-        Ok(TrainedQuantileForest { trees, n_features })
+        let mut trees = Vec::with_capacity(built.len());
+        let mut feature_importances = vec![0.0; n_features];
+        for (tree, imp) in built {
+            trees.push(tree);
+            for (total, v) in feature_importances.iter_mut().zip(imp) {
+                *total += v;
+            }
+        }
+
+        Ok(TrainedQuantileForest {
+            trees,
+            n_features,
+            feature_names: task.feature_names().to_vec(),
+            feature_importances,
+        })
     }
 }
 
@@ -491,7 +543,9 @@ mod tests {
         for offset in [0.0, 1e6, 1e8] {
             let target: Vec<f64> = base.iter().map(|y| y + offset).collect();
             let mut rng = StdRng::seed_from_u64(0);
-            let root = build_qrf_tree(&features, &target, &indices, None, 1, 1, None, 0, &mut rng);
+            let mut imp = vec![0.0; 1];
+            let root =
+                build_qrf_tree(&features, &target, &indices, None, 1, 1, None, 0, &mut rng, &mut imp);
             let QRFNode::Split { threshold, .. } = root else {
                 panic!("a step signal must produce a root split, got a leaf at offset {offset}");
             };
@@ -565,6 +619,44 @@ mod tests {
             assert!(
                 model.predict_interval(&features, bad_alpha).is_err(),
                 "alpha {bad_alpha} must be rejected"
+            );
+        }
+    }
+
+    /// Regression test (5th audit, LOW-D): `TrainedQuantileForest` was the
+    /// one forest left on the trait's `feature_importance() -> None`
+    /// default. With signal only in x0, the weighted-gain importances must
+    /// exist, be normalized, and rank x0 first.
+    #[test]
+    fn feature_importance_ranks_the_signal_feature_first() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let n = 300;
+        let p = 4;
+        let mut feats = Vec::with_capacity(n * p);
+        let mut target = Vec::with_capacity(n);
+        for _ in 0..n {
+            let row: Vec<f64> = (0..p).map(|_| rng.random::<f64>()).collect();
+            let y = 6.0 * row[0] + 0.05 * rng.random::<f64>(); // signal only in x0
+            feats.extend_from_slice(&row);
+            target.push(y);
+        }
+        let features = Array2::from_shape_vec((n, p), feats).unwrap();
+        let task = RegressionTask::new("qrf_imp", features, target).unwrap();
+
+        let mut qrf = QuantileForest::new().with_n_estimators(30).with_seed(3);
+        let model = qrf.train_regress(&task).unwrap();
+        let imp = model
+            .feature_importance()
+            .expect("QRF must report split-gain importances after training");
+        assert_eq!(imp.len(), p);
+        assert_eq!(imp[0].0, "x0");
+        let total: f64 = imp.iter().map(|(_, v)| v).sum();
+        assert!((total - 1.0).abs() < 1e-9, "importances must be normalized, sum={total}");
+        for (name, v) in imp.iter().skip(1) {
+            assert!(
+                imp[0].1 > *v,
+                "x0 carries all the signal and must outrank {name}: x0={} vs {v}",
+                imp[0].1
             );
         }
     }

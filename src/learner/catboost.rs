@@ -582,11 +582,32 @@ pub struct TrainedCatBoost {
 /// CatBoost model trained with `cat_features` saved fine but could never
 /// be loaded (same bug class as HoeffdingTree's `feature_stats`). Models
 /// without categorical features serialize an empty vec and are unaffected.
+///
+/// Deserialization accepts BOTH wire forms (5th audit, M-2): the current
+/// vec-of-pairs form, and the legacy nested-JSON-object form that smelt-ml
+/// 2.0.x–3.0.0 wrote (string keys, e.g. `[{"2": {"0": 0.5}}]`, or `[{}]`
+/// with no categorical features). Legacy files with populated
+/// `cat_features` were unreadable back then (the Content-buffering bug
+/// above), but the files themselves are valid within `format_version` 1 and
+/// must load now — otherwise the fix that made new saves loadable would
+/// have silently orphaned every model saved before it. The dual-form
+/// deserializer is why `SERIALIZATION_FORMAT_VERSION` did not need a bump.
 mod cat_encodings_serde {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::collections::HashMap;
 
     type Encodings = Vec<HashMap<usize, HashMap<i64, f64>>>;
+
+    /// One per-output entry as it may appear on the wire: the current
+    /// sorted-pairs form, or the legacy 2.0.x–3.0.0 JSON-object form whose
+    /// integer keys arrive as strings (both from serde_json's text path and
+    /// through serde's `Content` buffer, which also stringifies map keys).
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum WireEntry {
+        Pairs(Vec<(usize, Vec<(i64, f64)>)>),
+        LegacyObject(HashMap<String, HashMap<String, f64>>),
+    }
 
     pub fn serialize<S: Serializer>(v: &Encodings, s: S) -> Result<S::Ok, S::Error> {
         let as_pairs: Vec<Vec<(usize, Vec<(i64, f64)>)>> = v
@@ -609,15 +630,38 @@ mod cat_encodings_serde {
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Encodings, D::Error> {
-        let as_pairs = Vec::<Vec<(usize, Vec<(i64, f64)>)>>::deserialize(d)?;
-        Ok(as_pairs
-            .into_iter()
-            .map(|cols| {
-                cols.into_iter()
+        use serde::de::Error;
+        let wire = Vec::<WireEntry>::deserialize(d)?;
+        wire.into_iter()
+            .map(|entry| match entry {
+                WireEntry::Pairs(cols) => Ok(cols
+                    .into_iter()
                     .map(|(col, cats)| (col, cats.into_iter().collect()))
-                    .collect()
+                    .collect()),
+                WireEntry::LegacyObject(cols) => cols
+                    .into_iter()
+                    .map(|(col, cats)| {
+                        let col: usize = col.parse().map_err(|_| {
+                            D::Error::custom(format!(
+                                "legacy cat_encodings column key {col:?} is not a valid column index"
+                            ))
+                        })?;
+                        let cats = cats
+                            .into_iter()
+                            .map(|(code, enc)| {
+                                let code: i64 = code.parse().map_err(|_| {
+                                    D::Error::custom(format!(
+                                        "legacy cat_encodings category key {code:?} is not a valid integer code"
+                                    ))
+                                })?;
+                                Ok((code, enc))
+                            })
+                            .collect::<Result<HashMap<i64, f64>, D::Error>>()?;
+                        Ok((col, cats))
+                    })
+                    .collect::<Result<HashMap<usize, HashMap<i64, f64>>, D::Error>>(),
             })
-            .collect())
+            .collect()
     }
 }
 
@@ -777,6 +821,7 @@ impl Learner for CatBoost {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        self.check_max_bins()?;
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
@@ -849,6 +894,7 @@ impl Learner for CatBoost {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        self.check_max_bins()?;
         let nc = task.n_classes();
         if nc == 2 {
             self.train_binary(task)
@@ -859,6 +905,22 @@ impl Learner for CatBoost {
 }
 
 impl CatBoost {
+    /// `with_max_bins(0|1)` used to be accepted and silently produced a
+    /// constant model: with fewer than 2 histogram bins no split boundary
+    /// exists, so every tree is a single leaf (5th audit, LOW-A). The
+    /// builder doesn't return `Result`, so the check lives at the start of
+    /// training, where this crate validates other parameters.
+    fn check_max_bins(&self) -> Result<()> {
+        if self.max_bins < 2 {
+            return Err(crate::SmeltError::InvalidParameter(format!(
+                "catboost max_bins must be at least 2 (got {}): histogram split finding needs \
+                 at least two bins to place a split boundary; fewer silently yields a constant \
+                 model",
+                self.max_bins
+            )));
+        }
+        Ok(())
+    }
     fn train_binary(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
         let target = task.target();
@@ -1146,6 +1208,41 @@ mod tests {
             assert!(
                 acc > 0.9,
                 "max_bins={bins}: separable data should fit well, got acc={acc}"
+            );
+        }
+    }
+
+    /// Regression test (5th audit, LOW-A): `with_max_bins(0)` and `(1)`
+    /// used to be accepted and silently trained a constant model (no split
+    /// boundary can exist with < 2 bins). Both training entry points must
+    /// reject them with a clear InvalidParameter instead.
+    #[test]
+    fn max_bins_below_two_is_rejected_at_train() {
+        let n = 20;
+        let features = Array2::from_shape_fn((n, 1), |(i, _)| i as f64);
+        let classif_target: Vec<usize> = (0..n).map(|i| usize::from(i >= n / 2)).collect();
+        let classif =
+            ClassificationTask::new("degenerate_bins_c", features.clone(), classif_target).unwrap();
+        let regress_target: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let regress = RegressionTask::new("degenerate_bins_r", features, regress_target).unwrap();
+
+        for bins in [0usize, 1] {
+            let Err(err) = CatBoost::new().with_max_bins(bins).train_classif(&classif) else {
+                panic!("max_bins < 2 must be rejected for classification");
+            };
+            assert!(
+                matches!(err, crate::SmeltError::InvalidParameter(_))
+                    && format!("{err}").contains("max_bins"),
+                "got: {err}"
+            );
+
+            let Err(err) = CatBoost::new().with_max_bins(bins).train_regress(&regress) else {
+                panic!("max_bins < 2 must be rejected for regression");
+            };
+            assert!(
+                matches!(err, crate::SmeltError::InvalidParameter(_))
+                    && format!("{err}").contains("max_bins"),
+                "got: {err}"
             );
         }
     }

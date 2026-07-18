@@ -192,6 +192,25 @@ impl GeoXGBoost {
                  smaller value on toy data"
             )));
         }
+        // 5th audit, M-1: with n <= MIN_BANDWIDTH every candidate (all >=
+        // MIN_BANDWIDTH per the check above) would be clamped to n-1 inside
+        // `loo_cv_criterion`, producing a fictitious sweep — identical
+        // scores for every candidate and a reported "best" whose effective
+        // neighbourhood violates the documented 30-neighbour minimum.
+        // Erroring here is the conservative option (a warning-plus-proceed
+        // mode would need to be agreed with Grekousis first, since it would
+        // report results the method's own guidance calls unreliable).
+        if n - 1 < MIN_BANDWIDTH {
+            return Err(SmeltError::InvalidParameter(format!(
+                "dataset with n={n} samples cannot satisfy the {MIN_BANDWIDTH}-neighbour minimum: \
+                 each location has at most n-1={} neighbours, so every candidate bandwidth would \
+                 silently clamp to the same value and the selection sweep would be meaningless. \
+                 Bandwidth selection needs at least {} samples; use with_bandwidth() directly for \
+                 toy data",
+                n - 1,
+                MIN_BANDWIDTH + 1
+            )));
+        }
 
         let mut scores: Vec<(usize, f64)> = Vec::with_capacity(candidates.len());
         for &bw in candidates {
@@ -510,6 +529,28 @@ impl GeoXGBoost {
         }
         crate::validate::check_coords_finite(&self.coords)?;
 
+        // 5th audit, M-1 (train-path companion of the select_bandwidth
+        // check): a nominal bandwidth that satisfies the documented
+        // 30-neighbour minimum must not be silently clamped BELOW it by the
+        // n-1 cap — the caller asked for a compliant neighbourhood and
+        // would get an unreliable sub-minimum fit without any signal.
+        // Nominal bandwidths already below MIN_BANDWIDTH stay accepted:
+        // that is `with_bandwidth`'s documented explicit toy-data override.
+        // Err (rather than warn-and-proceed) is the conservative choice;
+        // a warning mode would need to be discussed with Grekousis first.
+        if self.bandwidth >= MIN_BANDWIDTH && n_samples - 1 < MIN_BANDWIDTH {
+            return Err(SmeltError::InvalidParameter(format!(
+                "bandwidth {} cannot be honoured with n={} samples: it would be clamped to \
+                 n-1={} neighbours, below the {MIN_BANDWIDTH}-neighbour minimum for reliable \
+                 geographically weighted fits (Grekousis). Provide at least {} samples, or \
+                 explicitly request a sub-minimum bandwidth via with_bandwidth() for toy data",
+                self.bandwidth,
+                n_samples,
+                n_samples - 1,
+                MIN_BANDWIDTH + 1
+            )));
+        }
+
         let bandwidth = self.bandwidth.min(n_samples - 1);
 
         // Step 1: Train global XGBoost model
@@ -707,7 +748,12 @@ mod tests {
         );
 
         let good_coords: Vec<(f64, f64)> = (0..n).map(|i| (i as f64, 0.0)).collect();
-        let mut gxgb = GeoXGBoost::new(good_coords.clone()).with_n_estimators(5);
+        // Explicit sub-minimum bandwidth: n=20 can't honour the default 30
+        // without clamping below the documented minimum (rejected since the
+        // 5th audit's M-1 fix); this test is about NaN coords, not that.
+        let mut gxgb = GeoXGBoost::new(good_coords.clone())
+            .with_n_estimators(5)
+            .with_bandwidth(10);
         let trained = gxgb.train_geo(&task).unwrap();
         let Err(err) = trained.predict_spatial(
             &features.slice(ndarray::s![0..1, ..]).to_owned(),
@@ -864,5 +910,54 @@ mod tests {
         let (task, coords) = toy_task(5);
         let gxgb = GeoXGBoost::new(coords);
         assert!(gxgb.select_bandwidth(&task, &[]).is_err());
+    }
+
+    /// Regression test (5th audit, M-1): with n <= MIN_BANDWIDTH the old
+    /// code clamped every candidate to n-1 inside `loo_cv_criterion`,
+    /// producing a fictitious sweep — identical scores for all candidates
+    /// and a "best" whose effective neighbourhood (n-1 < 30) violated the
+    /// documented minimum the nominal-value validation claims to enforce.
+    /// It must be a clear `Err` naming n and the minimum instead.
+    #[test]
+    fn select_bandwidth_rejects_datasets_too_small_for_the_minimum() {
+        let (task, coords) = toy_task(5); // n = 25 < MIN_BANDWIDTH + 1
+        let gxgb = GeoXGBoost::new(coords).with_n_estimators(5);
+        let Err(err) = gxgb.select_bandwidth(&task, &[30, 40, 50]) else {
+            panic!("n=25 cannot satisfy the 30-neighbour minimum; the sweep must be rejected")
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("n=25") && msg.contains("30"),
+            "error must name n and the minimum: {msg}"
+        );
+    }
+
+    /// M-1 train-path companion: a nominal bandwidth that meets the
+    /// 30-neighbour minimum must not be silently clamped below it by the
+    /// n-1 cap — that's an `Err` — while an explicitly sub-minimum
+    /// bandwidth (the documented `with_bandwidth` toy-data override, no
+    /// clamp below the minimum involved) keeps training.
+    #[test]
+    fn train_rejects_min_compliant_bandwidth_that_would_clamp_below_minimum() {
+        let (task, coords) = toy_task(5); // n = 25
+
+        // Default bandwidth (30, exactly the minimum) can't be honoured.
+        let mut default_bw = GeoXGBoost::new(coords.clone()).with_n_estimators(5);
+        let Err(err) = default_bw.train_geo(&task) else {
+            panic!("bandwidth 30 with n=25 clamps to 24 < 30 and must be rejected")
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("30") && msg.contains("24"),
+            "error must name the requested bandwidth and the clamped value: {msg}"
+        );
+
+        // Explicit sub-minimum override still works (documented behavior).
+        let mut small_bw = GeoXGBoost::new(coords)
+            .with_n_estimators(5)
+            .with_bandwidth(8);
+        small_bw
+            .train_geo(&task)
+            .expect("explicit sub-minimum bandwidth must remain a valid toy-data override");
     }
 }

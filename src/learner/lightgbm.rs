@@ -300,6 +300,21 @@ fn goss_sample(
     other_rate: f64,
     rng: &mut StdRng,
 ) -> (Vec<usize>, Vec<f64>) {
+    // Degenerate "keep everything" configuration -- notably the plain-GBDT
+    // DEFAULT (top_rate=1.0, other_rate=0.0): every candidate is a "top"
+    // sample with weight 1.0 and nothing is subsampled, so the
+    // sort-by-|gradient| below is a pure O(n log n) waste per tree (5th
+    // audit, LOW-A). Skip it. RNG state is untouched either way (the
+    // general path's shuffle of the empty `rest` draws nothing), so
+    // seeded runs are unaffected.
+    if top_rate >= 1.0 && other_rate <= 0.0 {
+        let mut weights = vec![0.0; grads.len()];
+        for &i in candidates {
+            weights[i] = 1.0;
+        }
+        return (candidates.to_vec(), weights);
+    }
+
     let n = candidates.len();
     let mut sorted: Vec<usize> = candidates.to_vec();
     sorted.sort_by(|&a, &b| {
@@ -1144,6 +1159,102 @@ mod tests {
             / n as f64)
             .sqrt();
         assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
+    }
+
+    /// Regression test (5th audit, LOW-A): the plain-GBDT default
+    /// (top_rate=1.0, other_rate=0.0) paid goss_sample's O(n log n)
+    /// sort-by-|gradient| for nothing on every tree. The shortcut must be
+    /// behaviorally invisible:
+    /// 1. the default and explicitly-spelled GOSS 1.0/0.0 train
+    ///    bit-identically (both are the same degenerate configuration and
+    ///    take the shortcut);
+    /// 2. `(top_rate=1.0, other_rate=0.5)` still takes the OLD general path
+    ///    (sorts, then samples from an empty "rest", ending with the same
+    ///    all-candidates selection and all-1.0 weights the pre-shortcut
+    ///    default produced). Its trained predictions agree with the
+    ///    shortcut's to floating-point reassociation only: the selection
+    ///    set, weights, and RNG stream are identical (pinned exactly by
+    ///    `goss_sample_shortcut_preserves_selection_weights_and_rng`), but
+    ///    histogram/leaf sums accumulate in |gradient|-sorted vs natural
+    ///    index order, so individual predictions may differ at ulp level —
+    ///    the same class of divergence the 4th audit accepted for the M-3
+    ///    incremental sweep ("paridad de calidad, diferencias a nivel de
+    ///    ulp").
+    #[test]
+    fn gbdt_default_shortcut_matches_the_sorting_path_bit_for_bit() {
+        let n = 200;
+        let features = Array2::from_shape_fn((n, 2), |(i, j)| {
+            ((i as f64) * (0.37 + 0.21 * j as f64)).sin() * 3.0
+        });
+        let target: Vec<f64> = (0..n)
+            .map(|i| features[[i, 0]] * 2.0 + features[[i, 1]] + (i as f64 * 0.71).cos())
+            .collect();
+        let task = RegressionTask::new("goss_shortcut", features.clone(), target).unwrap();
+
+        let train = |lgbm: &mut LightGBM| -> Vec<f64> {
+            let model = lgbm.train_regress(&task).unwrap();
+            let Prediction::Regression { predicted, .. } = model.predict(&features).unwrap() else {
+                panic!("expected regression");
+            };
+            predicted
+        };
+
+        let mut default_cfg = LightGBM::new().with_n_estimators(20);
+        let default_preds = train(&mut default_cfg);
+
+        let mut explicit_goss = LightGBM::new()
+            .with_n_estimators(20)
+            .with_top_rate(1.0)
+            .with_other_rate(0.0);
+        assert_eq!(
+            default_preds,
+            train(&mut explicit_goss),
+            "default and explicit GOSS 1.0/0.0 must be the same configuration"
+        );
+
+        let mut sorting_path = LightGBM::new()
+            .with_n_estimators(20)
+            .with_top_rate(1.0)
+            .with_other_rate(0.5); // rest is empty, so nothing is actually sampled
+        let sorting_preds = train(&mut sorting_path);
+        for (i, (a, b)) in default_preds.iter().zip(&sorting_preds).enumerate() {
+            assert!(
+                (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1.0),
+                "sample {i}: shortcut ({a}) vs sorting path ({b}) may differ only by \
+                 floating-point reassociation, not materially"
+            );
+        }
+    }
+
+    /// Unit-level pin for the shortcut: same selection SET, identical
+    /// weights vector, and untouched RNG stream versus the general path in
+    /// the degenerate keep-everything configuration.
+    #[test]
+    fn goss_sample_shortcut_preserves_selection_weights_and_rng() {
+        use rand::Rng;
+        let n = 50;
+        let grads: Vec<f64> = (0..n).map(|i| ((i * 37) % 11) as f64 - 5.0).collect();
+        let hess = vec![1.0; n];
+        let candidates: Vec<usize> = (0..n).filter(|i| i % 3 != 0).collect();
+
+        let mut rng_shortcut = StdRng::seed_from_u64(9);
+        let (sel_shortcut, w_shortcut) =
+            goss_sample(&grads, &hess, &candidates, 1.0, 0.0, &mut rng_shortcut);
+
+        let mut rng_general = StdRng::seed_from_u64(9);
+        let (sel_general, w_general) =
+            goss_sample(&grads, &hess, &candidates, 1.0, 0.5, &mut rng_general);
+
+        assert_eq!(sel_shortcut, candidates, "shortcut keeps every candidate");
+        let mut sorted_general = sel_general;
+        sorted_general.sort_unstable();
+        assert_eq!(sorted_general, candidates, "general path also keeps every candidate");
+        assert_eq!(w_shortcut, w_general, "weights must be identical (1.0 on candidates)");
+        assert_eq!(
+            rng_shortcut.random::<u64>(),
+            rng_general.random::<u64>(),
+            "neither path may consume RNG state in the degenerate configuration"
+        );
     }
 
     /// Regression test for GOSS's central correction (Ke et al. 2017,

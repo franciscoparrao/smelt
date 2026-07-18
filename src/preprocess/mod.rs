@@ -14,7 +14,7 @@ pub mod smote;
 pub mod spatial_smote;
 
 use crate::Result;
-use crate::task::ClassificationTask;
+use crate::task::{ClassificationTask, FeatureType};
 use ndarray::Array2;
 
 pub use adasyn::Adasyn;
@@ -69,6 +69,19 @@ pub trait Transformer: Send + Sync {
     /// Default: pass through unchanged.
     fn transform_names(&self, names: &[String]) -> Result<Vec<String>> {
         Ok(names.to_vec())
+    }
+
+    /// Transform per-column [`FeatureType`]s, mirroring [`Self::transform_names`]
+    /// (5th audit, M-3: `Pipeline` rebuilt the transformed task without its
+    /// feature types, silently degrading the boosting engines' categorical
+    /// splits to numeric even with zero transformers). Default: pass through
+    /// unchanged (correct for column-preserving transformers). Column
+    /// *selectors* (FilterSelector/RFE) keep the selected columns' types;
+    /// transformers whose outputs mix or re-derive columns (PCA, one-hot
+    /// expansion) return `Numeric` for those output columns, since the
+    /// integer-code invariant no longer holds there.
+    fn transform_types(&self, types: &[FeatureType]) -> Result<Vec<FeatureType>> {
+        Ok(types.to_vec())
     }
 
     /// Clone this transformer into a boxed trait object.

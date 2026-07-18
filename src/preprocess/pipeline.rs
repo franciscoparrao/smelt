@@ -116,12 +116,14 @@ impl Learner for Pipeline {
 
         let mut features = task.features().clone();
         let mut names = task.feature_names().to_vec();
+        let mut types = task.feature_types().to_vec();
         // Pass target as f64 for supervised filters
         let target_f64: Vec<f64> = task.target().iter().map(|&t| t as f64).collect();
 
         for transformer in &mut self.transformers {
             features = transformer.fit_transform_supervised(&features, &target_f64)?;
             names = transformer.transform_names(&names)?;
+            types = transformer.transform_types(&types)?;
         }
 
         // Propagate class_names: rebuilding the task from scratch would
@@ -131,9 +133,16 @@ impl Learner for Pipeline {
         // against by forwarding class_names to every fold (a base learner
         // that is itself a Pipeline used to destroy that propagation and
         // panic downstream).
+        //
+        // Propagate feature_types too (5th audit, M-3): rebuilding without
+        // them reset every column to Numeric, silently degrading the
+        // boosting engines' categorical split finding even with zero
+        // transformers -- each transformer maps them via `transform_types`,
+        // the type-level analogue of `transform_names`.
         let transformed_task =
             ClassificationTask::new(task.id(), features, task.target().to_vec())?
                 .with_feature_names(names)?
+                .with_feature_types(types)?
                 .with_class_names(task.class_names().to_vec());
 
         let model = self.learner.train_classif(&transformed_task)?;
@@ -158,15 +167,20 @@ impl Learner for Pipeline {
 
         let mut features = task.features().clone();
         let mut names = task.feature_names().to_vec();
+        let mut types = task.feature_types().to_vec();
         let target_f64 = task.target();
 
         for transformer in &mut self.transformers {
             features = transformer.fit_transform_supervised(&features, target_f64)?;
             names = transformer.transform_names(&names)?;
+            types = transformer.transform_types(&types)?;
         }
 
+        // feature_types propagated for the same reason as in train_classif
+        // (5th audit, M-3).
         let transformed_task = RegressionTask::new(task.id(), features, task.target().to_vec())?
-            .with_feature_names(names)?;
+            .with_feature_names(names)?
+            .with_feature_types(types)?;
 
         let model = self.learner.train_regress(&transformed_task)?;
 
@@ -266,5 +280,107 @@ mod tests {
         let pipe = Pipeline::new(vec![], Box::new(KNearestNeighbors::new(1)))
             .with_resampler(Box::new(Smote::new()));
         assert!(pipe.id().contains("smote"), "id={}", pipe.id());
+    }
+
+    /// A categorical feature whose code → class mapping is deliberately
+    /// non-monotonic, so numeric threshold splits cannot separate it but a
+    /// single native categorical (Fisher) split can.
+    fn categorical_probe_task() -> ClassificationTask {
+        let mapping = [0usize, 1, 0, 1, 1, 0, 1, 0]; // 8 codes, alternating
+        let n = 8 * 50;
+        let features = Array2::from_shape_fn((n, 1), |(i, _)| (i % 8) as f64);
+        let target: Vec<usize> = (0..n).map(|i| mapping[i % 8]).collect();
+        ClassificationTask::new("cat_probe", features, target)
+            .unwrap()
+            .with_categorical_features(&[0])
+            .unwrap()
+    }
+
+    /// Regression test (5th audit, M-3): `Pipeline` rebuilt the transformed
+    /// task without `feature_types`, so even a pipeline with ZERO
+    /// transformers silently reset every column to Numeric and degraded the
+    /// boosting engines' categorical splits (audit probe: acc 1.000 →
+    /// 0.623). Direct training and `Pipeline::new(vec![], ...)` must be
+    /// indistinguishable in both accuracy and per-sample predictions.
+    #[test]
+    fn empty_pipeline_preserves_categorical_feature_types_for_boosting() {
+        use crate::learner::XGBoost;
+
+        let task = categorical_probe_task();
+        let stumps = || XGBoost::new().with_n_estimators(20).with_max_depth(1);
+
+        let direct_model = stumps().train_classif(&task).unwrap();
+        let direct = direct_model.predict(task.features()).unwrap();
+        let Prediction::Classification { predicted: direct_pred, .. } = direct else {
+            panic!("expected classification");
+        };
+        let direct_acc = direct_pred
+            .iter()
+            .zip(task.target())
+            .filter(|(p, t)| p == t)
+            .count() as f64
+            / task.n_samples() as f64;
+        assert_eq!(
+            direct_acc, 1.0,
+            "sanity: the categorical split path must separate the probe perfectly"
+        );
+
+        let mut pipe = Pipeline::new(vec![], Box::new(stumps()));
+        let pipe_model = pipe.train_classif(&task).unwrap();
+        let piped = pipe_model.predict(task.features()).unwrap();
+        let Prediction::Classification { predicted: pipe_pred, .. } = piped else {
+            panic!("expected classification");
+        };
+        assert_eq!(
+            direct_pred, pipe_pred,
+            "an empty Pipeline must train on the same feature_types as direct training"
+        );
+    }
+
+    /// A probe learner that records the `feature_types` of the task it is
+    /// actually trained on, then delegates to KNN — lets the tests assert
+    /// what reaches the final stage of a Pipeline end-to-end.
+    struct TypeProbe {
+        seen: std::sync::Arc<std::sync::Mutex<Option<Vec<crate::task::FeatureType>>>>,
+    }
+
+    impl Learner for TypeProbe {
+        fn id(&self) -> &str {
+            "type_probe"
+        }
+        fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+            *self.seen.lock().unwrap() = Some(task.feature_types().to_vec());
+            KNearestNeighbors::new(1).train_classif(task)
+        }
+    }
+
+    /// M-3 companion: with a resampler stage (Smote) attached, the
+    /// resampled-and-rebuilt task must still carry the original
+    /// feature_types all the way to the learner (Smote itself propagates
+    /// them since M-5/4th audit; the Pipeline rebuild was the remaining
+    /// place they were dropped).
+    #[test]
+    fn resampler_stage_keeps_feature_types_end_to_end() {
+        use crate::task::FeatureType;
+
+        let task = imbalanced_task();
+        // Mark column 1 categorical by hand-copied types (the imbalanced
+        // task's values aren't integer codes, so use with_feature_types,
+        // which is exactly what fold/resample propagation uses).
+        let types = vec![FeatureType::Numeric, FeatureType::Categorical { n_categories: 7 }];
+        let task = task.with_feature_types(types.clone()).unwrap();
+
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let probe = TypeProbe { seen: seen.clone() };
+        let mut pipe = Pipeline::new(vec![], Box::new(probe))
+            .with_resampler(Box::new(Smote::new().with_k_neighbors(1).with_seed(42)));
+        pipe.train_classif(&task).unwrap();
+
+        let observed = seen.lock().unwrap().clone();
+        assert_eq!(
+            observed,
+            Some(types),
+            "feature_types must survive the resampler stage and the Pipeline task rebuild"
+        );
     }
 }

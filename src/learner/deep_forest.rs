@@ -251,7 +251,13 @@ impl DeepForest {
                 for (train_idx, test_idx) in &splits {
                     let train_features = current_input.select(Axis(0), train_idx);
                     let train_target: Vec<usize> = train_idx.iter().map(|&i| target[i]).collect();
-                    let fold_task = ClassificationTask::new("deep_forest_fold", train_features, train_target)?;
+                    // Propagate class_names (backlog M-9, closed in the 5th
+                    // audit): rebuilding a fold task from scratch re-derives
+                    // n_classes as max(label)+1, so a fold missing the
+                    // highest class trained a narrower forest whose OOF
+                    // probability rows dropped that class's column.
+                    let fold_task = ClassificationTask::new("deep_forest_fold", train_features, train_target)?
+                        .with_class_names(task.class_names().to_vec());
 
                     let mut fold_learner = new_forest(is_random_forest, self.n_estimators_per_forest, self.max_depth, forest_seed);
                     let fold_model = fold_learner.train_classif(&fold_task)?;
@@ -267,7 +273,8 @@ impl DeepForest {
                 oof_probs_per_forest.push(oof);
 
                 // Retrain on the FULL current-layer input for deployment.
-                let full_task = ClassificationTask::new("deep_forest_layer", current_input.clone(), target.clone())?;
+                let full_task = ClassificationTask::new("deep_forest_layer", current_input.clone(), target.clone())?
+                    .with_class_names(task.class_names().to_vec());
                 let mut full_learner = new_forest(is_random_forest, self.n_estimators_per_forest, self.max_depth, forest_seed);
                 let full_model = full_learner.train_classif(&full_task)?;
                 trained_forests.push(full_model);
@@ -401,6 +408,49 @@ mod tests {
         let correct = predicted.iter().zip(&target).filter(|(p, t)| *p == *t).count();
         let acc = correct as f64 / n as f64;
         assert!(acc > 0.85, "should fit a simple boundary well, got acc={acc}");
+    }
+
+    /// Regression test (backlog M-9, closed in the 5th audit): fold tasks
+    /// (and the full-layer retrain task) are rebuilt from scratch inside
+    /// `fit`, which re-derives n_classes as max(label)+1 — without
+    /// propagating the parent task's class_names, a CV fold whose training
+    /// split lost the rare highest class trained a narrower forest whose
+    /// OOF probability column for that class silently degenerated to zero.
+    /// With the propagation, every internal task declares the full class
+    /// set, so the cascade trains cleanly and every probability row —
+    /// including through the multi-layer OOF-augmented path — has exactly
+    /// the declared width, with the rare class recoverable at predict time.
+    #[test]
+    fn rare_class_with_class_names_keeps_full_probability_width() {
+        // 3 declared classes; class 2 has a single sample, so with 3 CV
+        // folds the fold holding it in TEST trains without class 2 at all —
+        // exactly the narrowing scenario class_names propagation prevents.
+        let features = array![
+            [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
+            [5.0, 5.0], [5.1, 4.9], [4.9, 5.1], [5.0, 4.8], [5.1, 5.1],
+            [10.0, 10.0],
+        ];
+        let target = vec![0usize, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2];
+        let task = ClassificationTask::new("df_rare", features.clone(), target.clone())
+            .unwrap()
+            .with_class_names(vec!["a".into(), "b".into(), "c".into()]);
+        assert_eq!(task.n_classes(), 3);
+
+        let mut df = DeepForest::new()
+            .with_n_estimators_per_forest(20)
+            .with_max_layers(2)
+            .with_seed(3);
+        let model = df.fit(&task).unwrap();
+        let pred = model.predict(&features).unwrap();
+        let Prediction::Classification { predicted, probabilities: Some(probs), .. } = pred else {
+            panic!("expected classification with probabilities");
+        };
+        for row in &probs {
+            assert_eq!(row.len(), 3, "every probability row must span the declared 3 classes");
+        }
+        // The rare class is trivially separable (far from both clusters), so
+        // the deployed cascade must actually recover it.
+        assert_eq!(predicted[10], 2, "the rare class must be predictable, got {predicted:?}");
     }
 
     #[test]

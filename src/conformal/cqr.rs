@@ -65,6 +65,16 @@ impl<'a> CQR<'a> {
         if cal_targets.is_empty() {
             return Err(SmeltError::EmptyDataset);
         }
+        // 5th audit, LOW-C: mismatched calibration lengths used to be
+        // zip-truncated silently (scores computed over the common prefix),
+        // quietly mis-calibrating the interval — same check
+        // SplitConformal::calibrate_from_predictions already does.
+        if cal_features.nrows() != cal_targets.len() {
+            return Err(SmeltError::DimensionMismatch {
+                expected: cal_targets.len(),
+                got: cal_features.nrows(),
+            });
+        }
 
         let lower_pred = lower_model.predict(cal_features)?;
         let upper_pred = upper_model.predict(cal_features)?;

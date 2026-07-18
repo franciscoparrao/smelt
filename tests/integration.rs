@@ -1003,6 +1003,37 @@ fn bagging_decision_tree_classif() {
     );
 }
 
+/// Regression test (5th audit, LOW-D): `Bagging` with `n_estimators = 0`
+/// used to train "successfully" and silently predict a constant (class 0 /
+/// 0.0 from an empty aggregation) — the ensemble twin of the `max_depth=0`
+/// validation. Both task types must reject it with InvalidParameter.
+#[test]
+fn bagging_rejects_zero_estimators() {
+    let features = array![[0.0], [1.0], [2.0], [3.0]];
+    let classif = ClassificationTask::new("bag0_c", features.clone(), vec![0, 0, 1, 1]).unwrap();
+    let regress = RegressionTask::new("bag0_r", features, vec![0.0, 1.0, 2.0, 3.0]).unwrap();
+
+    let mut bag = Bagging::new(|| Box::new(DecisionTree::default())).with_n_estimators(0);
+    let Err(err) = bag.train_classif(&classif) else {
+        panic!("n_estimators=0 must be rejected for classification");
+    };
+    assert!(
+        matches!(err, smelt_ml::SmeltError::InvalidParameter(_))
+            && format!("{err}").contains("n_estimators"),
+        "got: {err}"
+    );
+
+    let mut bag = Bagging::new(|| Box::new(DecisionTree::default())).with_n_estimators(0);
+    let Err(err) = bag.train_regress(&regress) else {
+        panic!("n_estimators=0 must be rejected for regression");
+    };
+    assert!(
+        matches!(err, smelt_ml::SmeltError::InvalidParameter(_))
+            && format!("{err}").contains("n_estimators"),
+        "got: {err}"
+    );
+}
+
 #[test]
 fn bagging_knn_classif() {
     let features = array![
@@ -1339,6 +1370,35 @@ fn label_encoder_roundtrip() {
 fn label_encoder_unknown_label() {
     let encoder = LabelEncoder::fit(&["a", "b"]);
     assert!(encoder.encode(&["c"]).is_err());
+}
+
+/// Regression test (5th audit, LOW-C): `with_class_names` with FEWER names
+/// than the highest label + 1 used to be accepted silently — `n_classes()`
+/// is `class_names.len()`, so the mismatch only surfaced later as an opaque
+/// index-out-of-bounds panic deep inside whatever consumed the class count
+/// first (probe: SMOTE's per-class grouping). It must panic immediately,
+/// with a message naming both counts.
+#[test]
+#[should_panic(expected = "with_class_names: 2 class name(s) provided")]
+fn with_class_names_panics_immediately_on_too_few_names() {
+    let features = array![[0.0], [1.0], [2.0]];
+    let target = vec![0, 1, 2]; // labels {0, 1, 2} need >= 3 names
+    let _task = ClassificationTask::new("too_few_names", features, target)
+        .unwrap()
+        .with_class_names(vec!["a".into(), "b".into()]);
+}
+
+/// Companion of the panic test: MORE names than observed labels stays
+/// valid — it's exactly how fold/subset tasks keep their parent's class
+/// width (HIGH-4's propagation).
+#[test]
+fn with_class_names_accepts_extra_names_for_unobserved_classes() {
+    let features = array![[0.0], [1.0]];
+    let target = vec![0, 1];
+    let task = ClassificationTask::new("extra_names", features, target)
+        .unwrap()
+        .with_class_names(vec!["a".into(), "b".into(), "c".into()]);
+    assert_eq!(task.n_classes(), 3);
 }
 
 // ── Pipeline tests ─────────────────────────────────────────────────
@@ -6252,6 +6312,68 @@ fn cqr_adaptive_intervals() {
         assert!(iv.lower <= iv.prediction);
         assert!(iv.prediction <= iv.upper);
     }
+}
+
+/// Regression test (5th audit, LOW-C): `CQR::calibrate` used to zip-truncate
+/// mismatched calibration features/targets silently (conformity scores over
+/// the common prefix), the same bug SplitConformal/ConformalRegressor
+/// already guard against. It must be a DimensionMismatch.
+#[test]
+fn cqr_calibrate_rejects_mismatched_calibration_lengths() {
+    use smelt_ml::conformal::cqr::CQR;
+
+    let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+    let task = RegressionTask::new("cqr_dim", features, target).unwrap();
+
+    let mut lower_gb = QuantileGB::new(0.1).with_n_estimators(20);
+    let mut upper_gb = QuantileGB::new(0.9).with_n_estimators(20);
+    let lower_model = lower_gb.train_regress(&task).unwrap();
+    let upper_model = upper_gb.train_regress(&task).unwrap();
+
+    // 3 calibration rows but only 2 targets.
+    let cal_features = array![[6.0], [7.0], [8.0]];
+    let cal_targets = vec![12.0, 14.0];
+    let Err(err) = CQR::calibrate(&*lower_model, &*upper_model, &cal_features, &cal_targets, 0.1)
+    else {
+        panic!("mismatched calibration lengths must be rejected, not zip-truncated");
+    };
+    assert!(
+        matches!(
+            err,
+            smelt_ml::SmeltError::DimensionMismatch { expected: 2, got: 3 }
+        ),
+        "got: {err:?}"
+    );
+}
+
+/// Regression test (5th audit, LOW-C): `ConformalClassifier::calibrate`
+/// shared CQR's silent zip-truncation of mismatched calibration lengths.
+#[test]
+fn conformal_classifier_calibrate_rejects_mismatched_calibration_lengths() {
+    use smelt_ml::conformal::ConformalClassifier;
+
+    let features = array![[0.0], [0.5], [1.0], [1.5], [2.0], [2.5]];
+    let target = vec![0, 0, 0, 1, 1, 1];
+    let task = ClassificationTask::new("ccl_dim", features, target).unwrap();
+
+    let mut dt = DecisionTree::default();
+    let model = dt.train_classif(&task).unwrap();
+
+    // 3 calibration rows but only 2 targets.
+    let cal_features = array![[0.5], [1.0], [2.0]];
+    let cal_targets = vec![0, 1];
+    let Err(err) = ConformalClassifier::calibrate(&*model, &cal_features, &cal_targets, 0.1)
+    else {
+        panic!("mismatched calibration lengths must be rejected, not zip-truncated");
+    };
+    assert!(
+        matches!(
+            err,
+            smelt_ml::SmeltError::DimensionMismatch { expected: 2, got: 3 }
+        ),
+        "got: {err:?}"
+    );
 }
 
 // ── LightGBM tests ─────────────────────────────────────────────────

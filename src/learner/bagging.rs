@@ -56,6 +56,22 @@ impl Bagging {
         self.seed = seed;
         self
     }
+
+    /// `with_n_estimators(0)` used to be accepted and silently produced a
+    /// model with zero members, whose aggregation degenerates to a constant
+    /// (class 0 / 0.0) prediction (5th audit, LOW-D — the ensemble twin of
+    /// the `max_depth=0` validation added in the 4th audit's LOW batch).
+    /// The builder doesn't return `Result`, so the check runs at train time.
+    fn check_n_estimators(&self) -> Result<()> {
+        if self.n_estimators == 0 {
+            return Err(crate::SmeltError::InvalidParameter(
+                "bagging n_estimators must be at least 1 (got 0): an ensemble with zero \
+                 members would silently predict a constant"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 struct TrainedBagging {
@@ -216,6 +232,7 @@ impl Learner for Bagging {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        self.check_n_estimators()?;
         let features = task.features();
         let target = task.target();
         let n_samples = task.n_samples();
@@ -255,6 +272,7 @@ impl Learner for Bagging {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        self.check_n_estimators()?;
         let features = task.features();
         let target = task.target();
         let n_samples = task.n_samples();

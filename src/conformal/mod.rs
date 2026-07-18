@@ -243,6 +243,16 @@ impl<'a> ConformalClassifier<'a> {
         if cal_targets.is_empty() {
             return Err(crate::SmeltError::EmptyDataset);
         }
+        // 5th audit, LOW-C: mismatched calibration lengths used to be
+        // zip-truncated silently (scores over the common prefix), quietly
+        // mis-calibrating the set threshold — same check the regression
+        // path (SplitConformal) already does.
+        if cal_features.nrows() != cal_targets.len() {
+            return Err(crate::SmeltError::DimensionMismatch {
+                expected: cal_targets.len(),
+                got: cal_features.nrows(),
+            });
+        }
 
         let pred = model.predict(cal_features)?;
         let probabilities = match &pred {
