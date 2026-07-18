@@ -185,9 +185,14 @@ the full design rationale.
       both assume the `(X,y)`-`Learner` shape); `validate_learner_id`
       promoted from private to `pub(crate)` in `learners/ensemble.rs` to
       share it instead of duplicating
-- [ ] Generic per-sample-weight support on `Learner`/`RegressionTask` —
-      would let R-learner use the paper's weighted R-loss instead of the
-      documented unweighted simplification; cross-cutting, out of scope
+- [x] Generic per-sample-weight support on `Learner`/`RegressionTask` —
+      done 2026-07-18 as item 2 of the mlr3-parity roadmap
+      (`docs/roadmap_checklist.md` Prioridad 6): `with_weights()` on both
+      Tasks, `check_no_weights` guard on non-supporting learners (never
+      silently ignored), real consumption in 13 learners (trees, boosting,
+      linear family), Python `sample_weight=`, and the R-learner now uses
+      the paper's exact weighted R-loss with weight-aware bases
+      (row-replication fallback otherwise)
 
 ### Geospatial differentiators (2026-07-04, not part of Fase 3)
 

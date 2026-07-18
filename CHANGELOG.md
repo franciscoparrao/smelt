@@ -124,6 +124,48 @@ MINOR, not a patch.
   removed from git and ignored; `docs/roadmap_checklist.md` brought up
   to date.
 
+### Added — mlr3-parity roadmap, item 2: per-sample weights (2026-07-18)
+
+- `ClassificationTask::with_weights` / `RegressionTask::with_weights`:
+  optional per-sample training weights (validated immediately: finite,
+  non-negative, not all zero; an individual 0 excludes the sample).
+  CV/resampling slices weights fold-consistently; `Pipeline` propagates
+  them through row-preserving transformers; resamplers (SMOTE/ADASYN/
+  SpatialSmote and the pipeline resampler stage) reject weighted tasks
+  (synthetic samples' weights are undefined). **No learner ignores
+  weights silently**: 13 learners consume them, every other learner
+  rejects a weighted task with a clear `InvalidParameter`
+  (`check_no_weights`, the `check_no_nan` precedent), and the new
+  `Learner::supports_weights()` (default `false`) exposes the property.
+- Weight-aware learners (sklearn conventions; canonical oracle:
+  integer weight k ≡ row duplicated k times — bit-identical for
+  DecisionTree, 1e-9-documented where summation order differs):
+  DecisionTree/RandomForest/ExtraTrees/GradientBoosting (weighted
+  impurity and leaves, node-mean-centered weighted MSE, uniform
+  bootstrap), XGBoost/LightGBM/CatBoost (weights multiply grad/hess
+  before all accumulation; weighted initial score; GOSS operates on
+  weighted gradients; CatBoost ordered target statistics weighted like
+  the official; XGBoost's pre-existing `with_sample_weights` unified —
+  both sources at once is an error), LinearRegression/Ridge/Lasso/
+  ElasticNet/LogisticRegression/ELM (weighted least squares /
+  coordinate descent normalized by Σw — algebraically sklearn's
+  convention, golden-verified — and weighted internal standardization).
+  LinearSVM deliberately excluded (per-sample SGD has no weighted form
+  that satisfies the duplication oracle; semantics TBD); GeoXGBoost
+  excluded (co-designed method).
+- R-learner: with a weight-aware base learner it now minimizes the
+  **exact weighted R-loss** of Nie & Wager (2021) (pseudo-outcome
+  regression with `T̃²` weights, near-zero treatment residuals excluded
+  for stability) instead of the documented row-replication
+  approximation — PEHE 0.272 vs 0.318 on the heteroscedastic-propensity
+  test. Bases without weight support keep the previous behavior
+  bit-identically (introspected via `supports_weights`).
+- Python: `fit(x, y, sample_weight=None)` on ~30 wrappers (macro and
+  hand-written), validated in the binding before reaching Rust (no
+  `PanicException` path), plus a `supports_sample_weight` property;
+  unsupported learners raise a clear `ValueError`. Two permanent smoke
+  tests cover the surface in CI.
+
 ### Added — mlr3-parity roadmap, item 1 (2026-07-18)
 
 - `TargetTransformRegressor`: trains any base `Learner` (factory pattern,

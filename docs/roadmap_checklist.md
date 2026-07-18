@@ -74,11 +74,25 @@ y learners espaciales — esto cubre lo inverso).
       Python con validación eager de `base`/`transform`. 13 tests
       (bit-identidad manual-vs-wrapper en los 4 transforms, composición con
       CV, log-normal RMSE < 0.8× base). ✅ (2026-07-18)
-- [ ] **Pesos por muestra** — propiedad de `RegressionTask`/`ClassificationTask`
-      + soporte declarado por learner. Transversal y caro (~44 call sites de
-      `features()`), pero desbloquea a la vez: R-loss exacto del R-learner
-      (documentado como gap), boosting ponderado, costos por muestra, y
-      medidas ponderadas. El gap más citado internamente. ~600+ líneas.
+- [x] **Pesos por muestra** — `with_weights()`/`weights()` en ambas Tasks
+      (validación inmediata), guard `check_no_weights` en todo learner sin
+      soporte (nunca ignorados en silencio; precedente check_no_nan),
+      `supports_weights()` en el trait, slicing correcto por folds de CV y
+      propagación por Pipeline (resamplers los rechazan: pesos sintéticos
+      indefinidos). Consumo real en 13 learners: DT/RF/ET/GBM (impureza y
+      hojas ponderadas, MSE centrado — lección HIGH-1), XGBoost/LightGBM/
+      CatBoost (grad/hess ponderados, ordered TS ponderados, GOSS sobre
+      grads ponderados; unificado con el `with_sample_weights` previo de
+      XGBoost), OLS/Ridge/Lasso/EN/LogReg/ELM (WLS, CD normalizado por Σw,
+      estandarizaciones ponderadas). Oráculo peso-k ≡ fila duplicada k veces
+      (bit-idéntico en DT, 1e-9 documentada donde el orden de suma difiere)
+      + goldens sklearn. R-learner usa la R-loss EXACTA de Nie & Wager con
+      bases ponderadas (PEHE 0.272 vs 0.318 de la aproximación; fallback
+      documentado para bases sin soporte). Python: `fit(..., sample_weight=)`
+      en ~30 wrappers + `supports_sample_weight` + validación pre-panic.
+      LinearSVM y GeoXGBoost excluidos deliberadamente (semántica SGD por
+      decidir / co-diseño con George). 66 tests nuevos (740 total).
+      ✅ (2026-07-18)
 - [ ] **AutoTuner + nested CV** — envolver (learner + tuner + resampling)
       como un `Learner`, haciendo trivial el CV anidado (reporte honesto de
       performance tuneada — rigor publicable). ~200 líneas sobre los tuners
