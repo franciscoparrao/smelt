@@ -31,6 +31,7 @@ pub mod regularized;
 pub mod registry;
 pub mod stacking;
 pub mod svm;
+pub mod target_transform;
 pub mod tree;
 pub mod xgboost;
 
@@ -64,6 +65,7 @@ pub use regularized::{ElasticNet, Lasso, Ridge};
 pub use registry::{learner_from_id, registered_learner_ids};
 pub use stacking::Stacking;
 pub use svm::LinearSVM;
+pub use target_transform::{TargetTransform, TargetTransformRegressor, TrainedTargetTransformRegressor};
 pub use tree::decision_tree::DecisionTree;
 pub use tree::extra_trees::ExtraTrees;
 pub use tree::gradient_boosting::GradientBoosting;
@@ -117,7 +119,8 @@ pub trait TrainedModel: Send + Sync {
     /// concrete type has a `SerializableModel` variant (`src/serialize.rs`).
     /// Returns `None` for the `Box<dyn TrainedModel>`-holding composites
     /// (Bagging, Pipeline, Stacking, GeoXGBoost, DeepForest, KrigingHybrid,
-    /// DynamicEnsemble, CostSensitiveClassifier) that have no variant.
+    /// DynamicEnsemble, CostSensitiveClassifier, TargetTransformRegressor)
+    /// that have no variant.
     fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
         None
     }

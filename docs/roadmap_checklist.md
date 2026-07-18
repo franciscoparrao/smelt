@@ -58,6 +58,48 @@
 - [ ] **OpenML Integration** — Cargar datasets de OpenML por ID. ~100 líneas.
 - [x] **Parquet Loading** — `ParquetLoader` detrás del feature opcional `parquet` (dep polars, zero-cost apagado). ✅ `src/data/parquet.rs` (2026-07-03)
 
+## Prioridad 6: PARIDAD mlr3 (gap analysis 2026-07-18)
+
+Gaps de infraestructura de composición frente a mlr3/mlr3pipelines/mlr3tuning,
+priorizados por valor para el nicho GIS/científico (análisis conversado
+2026-07-18; Smelt ya está *adelante* de mlr3 en conformal, causal, streaming
+y learners espaciales — esto cubre lo inverso).
+
+- [x] **Target-trafo con inversa automática** — `TargetTransformRegressor`
+      (`src/learner/target_transform.rs`): wrapper `Learner` (patrón factory
+      de Bagging/CostSensitive), transforms log/log1p/sqrt/standardize con
+      validación de dominio nombrando el índice, inversa automática al
+      predecir, propagación de feature_names/types (lección M-3), sesgo de
+      retransformación documentado (Duan smearing = opt-in futuro). Binding
+      Python con validación eager de `base`/`transform`. 13 tests
+      (bit-identidad manual-vs-wrapper en los 4 transforms, composición con
+      CV, log-normal RMSE < 0.8× base). ✅ (2026-07-18)
+- [ ] **Pesos por muestra** — propiedad de `RegressionTask`/`ClassificationTask`
+      + soporte declarado por learner. Transversal y caro (~44 call sites de
+      `features()`), pero desbloquea a la vez: R-loss exacto del R-learner
+      (documentado como gap), boosting ponderado, costos por muestra, y
+      medidas ponderadas. El gap más citado internamente. ~600+ líneas.
+- [ ] **AutoTuner + nested CV** — envolver (learner + tuner + resampling)
+      como un `Learner`, haciendo trivial el CV anidado (reporte honesto de
+      performance tuneada — rigor publicable). ~200 líneas sobre los tuners
+      existentes.
+- [ ] **Calibración de probabilidades + threshold tuning** — Platt/isotonic
+      como wrapper (mismo patrón factory) + búsqueda de umbral óptimo por
+      costo/métrica; completa la historia que `CostSensitiveClassifier`
+      empezó. ~300 líneas.
+- [ ] **Registry con properties + autotest de contrato** — metadata
+      consultable por learner (¿NaN? ¿categóricas? ¿proba? ¿pesos?) y un
+      harness que verifica el contrato de cada learner registrado
+      automáticamente (la clase de hallazgos que las 5 auditorías pescaron a
+      mano). ~250 líneas, alto retorno en mantenibilidad.
+- [ ] **Menores / futuro**: terminators componibles (tiempo/estancamiento/
+      objetivo), dependencias entre parámetros en `ParamSet` (habría
+      prevenido el M-5 de la 5ª auditoría), tuning multi-objetivo (Pareto),
+      repeated CV / bootstrap / LOO explícito, kernel SVM, GP standalone con
+      `se`, CoxPH, plotting (ROC/critical-difference sobre el benchmark ya
+      existente), Pipeline como DAG. Deep learning (mlr3torch) sigue
+      **descartado deliberadamente** (sin autodiff en el workspace).
+
 ## Infraestructura pendiente
 
 - [x] **Python bindings (PyO3)** — Crate separado `smelt-py`, publicado en PyPI como `smelt-ml` (v0.7.0), 30+ learners + preprocessing + tuning + stats. ✅ (bindings iniciales 2026, cierre de paridad de learners 2026-07-03)

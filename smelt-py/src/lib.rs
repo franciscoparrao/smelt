@@ -36,7 +36,8 @@ use feature_selection::{
 };
 use learners::boosting::{CatBoost, GeoXGBoost, KrigingHybrid, LightGBM, XGBoost};
 use learners::ensemble::{
-    Bagging, CostSensitiveClassifier, DynamicEnsemble, Stacking, registered_learner_ids,
+    Bagging, CostSensitiveClassifier, DynamicEnsemble, Stacking, TargetTransformRegressor,
+    registered_learner_ids,
 };
 use learners::linear::{ElasticNet, Lasso, LinearRegression, LinearSVM, LogisticRegression, Ridge};
 use learners::misc::{
@@ -92,6 +93,7 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Stacking>()?;
     m.add_class::<DynamicEnsemble>()?;
     m.add_class::<CostSensitiveClassifier>()?;
+    m.add_class::<TargetTransformRegressor>()?;
     m.add_function(wrap_pyfunction!(registered_learner_ids, m)?)?;
 
     // Causal meta-learners

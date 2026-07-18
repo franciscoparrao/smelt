@@ -174,6 +174,99 @@ impl CostSensitiveClassifier {
     }
 }
 
+/// Resolve a Python-facing transform name to the core enum, validating
+/// eagerly (same `resolve_*` pattern as ELM's `activation` / XGBoost's
+/// `objective`) so both `__new__` and `set_params` reject bad values with a
+/// clear ValueError listing the options instead of failing later at fit.
+fn resolve_transform(transform: &str) -> PyResult<smelt_ml::prelude::TargetTransform> {
+    use smelt_ml::prelude::TargetTransform;
+    match transform {
+        "log" => Ok(TargetTransform::Log),
+        "log1p" => Ok(TargetTransform::Log1p),
+        "sqrt" => Ok(TargetTransform::Sqrt),
+        "standardize" => Ok(TargetTransform::Standardize),
+        other => Err(PyValueError::new_err(format!(
+            "unknown transform \"{other}\"; valid transforms: log, log1p, sqrt, standardize"
+        ))),
+    }
+}
+
+/// Regression wrapper that trains its base learner on a transformed target
+/// (log/log1p/sqrt/standardize) and automatically applies the inverse
+/// transformation at predict time, so predictions come back in the original
+/// scale. Regression-only. Note the naive log inverse estimates the
+/// *median* (not the mean) of a right-skewed target under symmetric
+/// log-scale errors — same behavior as sklearn's TransformedTargetRegressor.
+#[pyclass]
+#[derive(Default)]
+pub(crate) struct TargetTransformRegressor {
+    trained: Option<Box<dyn TrainedModel>>,
+    is_classif: bool,
+    base: String,
+    transform: String,
+}
+
+#[pymethods]
+impl TargetTransformRegressor {
+    /// `base`: learner id string (see `smelt.registered_learner_ids()`);
+    /// `transform`: one of "log", "log1p", "sqrt", "standardize". Both are
+    /// validated eagerly here (and again in `set_params`).
+    #[new]
+    #[pyo3(signature = (base, transform="log".to_string()))]
+    fn new(base: String, transform: String) -> PyResult<Self> {
+        validate_learner_id(&base)?;
+        resolve_transform(&transform)?;
+        Ok(Self {
+            trained: None,
+            is_classif: false,
+            base,
+            transform,
+        })
+    }
+
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let base = self.base.clone();
+        let transform = resolve_transform(&self.transform)?;
+        let mut learner = smelt_ml::prelude::TargetTransformRegressor::new(
+            move || {
+                smelt_ml::prelude::learner_from_id(&base)
+                    .expect("validated in TargetTransformRegressor::new")
+            },
+            transform,
+        );
+        // `fit_learner` routes an integer `y` to `train_classif`, which the
+        // Rust wrapper rejects with a clear regression-only error; a float
+        // `y` goes through `check_finite_target` (5th audit M-4) before the
+        // wrapper's own domain validation.
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        self.trained = Some(model);
+        self.is_classif = is_classif;
+        Ok(())
+    }
+
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
+    }
+
+    #[getter]
+    fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
+        Ok(self
+            .trained
+            .as_ref()
+            .ok_or_else(not_fitted)?
+            .feature_importance())
+    }
+}
+
 #[pyclass]
 #[derive(Default)]
 pub(crate) struct Stacking {
@@ -344,14 +437,15 @@ impl DynamicEnsemble {
 }
 
 
-add_explain_methods!(Bagging, Stacking, DynamicEnsemble, CostSensitiveClassifier);
+add_explain_methods!(Bagging, Stacking, DynamicEnsemble, CostSensitiveClassifier, TargetTransformRegressor);
 
 declare_support!(Bagging,                classif = true, regress = true);
 declare_support!(Stacking,               classif = true, regress = true);
 declare_support!(DynamicEnsemble,        classif = true, regress = false);
 declare_support!(CostSensitiveClassifier, classif = true, regress = false);
+declare_support!(TargetTransformRegressor, classif = false, regress = true);
 
-// All 4 hold their base learner(s)' `Box<dyn TrainedModel>` internally, so
+// All 5 hold their base learner(s)' `Box<dyn TrainedModel>` internally, so
 // `SerializableModel` (`src/serialize.rs`) has no variant for any of
 // them -- `save()` always fails with a clear "does not support
 // serialization" error rather than being silently absent from the API.
@@ -360,6 +454,7 @@ add_persistence_methods!(
     Stacking => "Stacking",
     DynamicEnsemble => "DynamicEnsemble",
     CostSensitiveClassifier => "CostSensitiveClassifier",
+    TargetTransformRegressor => "TargetTransformRegressor",
 );
 
 // get_params/set_params are hand-written here (not via `declare_params!`)
@@ -424,6 +519,43 @@ impl CostSensitiveClassifier {
                         self.base = base;
                     }
                     "cost_matrix" => self.cost_matrix = v.extract()?,
+                    other => {
+                        return Err(PyValueError::new_err(format!(
+                            "invalid parameter '{other}' for this estimator"
+                        )))
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[pymethods]
+impl TargetTransformRegressor {
+    fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item("base", self.base.clone())?;
+        dict.set_item("transform", self.transform.clone())?;
+        Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+
+    #[pyo3(signature = (**kwargs))]
+    fn set_params(&mut self, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                let key: String = k.extract()?;
+                match key.as_str() {
+                    "base" => {
+                        let base: String = v.extract()?;
+                        validate_learner_id(&base)?;
+                        self.base = base;
+                    }
+                    "transform" => {
+                        let transform: String = v.extract()?;
+                        resolve_transform(&transform)?;
+                        self.transform = transform;
+                    }
                     other => {
                         return Err(PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"

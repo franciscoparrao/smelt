@@ -94,6 +94,7 @@ pub mod prelude {
         TrainedDeepForest, TrainedGeoXGBoost, TrainedKrigingHybrid, LightGBM, LinearRegression,
         LinearSVM, LogisticRegression, MondrianForest, MondrianTree, ObliqueForest, ObliqueTree,
         Objective, QuantileForest, QuantileGB, RandomForest, Ridge, Stacking,
+        TargetTransform, TargetTransformRegressor, TrainedTargetTransformRegressor,
         TrainedQuantileForest, VariogramFit,
         VariogramModel, XGBoost, learner_from_id, registered_learner_ids,
     };

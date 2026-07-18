@@ -7485,3 +7485,91 @@ fn serialize_regression_roundtrip() {
     let restored: Prediction = serde_json::from_str(&json).unwrap();
     assert_eq!(restored.n_samples(), 3);
 }
+
+// ── TargetTransformRegressor (Prioridad 6, item 1) ─────────────────
+
+/// The wrapper must compose with the generic benchmark/resampling machinery
+/// with no special handling: since `predict` already returns original-scale
+/// values, `resample_regress` scores original-scale errors directly.
+#[test]
+fn target_transform_composes_with_cv_resampling() {
+    let n = 120;
+    let mut features = Array2::<f64>::zeros((n, 1));
+    let mut target = vec![0.0; n];
+    for i in 0..n {
+        let x = i as f64 / n as f64 * 3.0;
+        features[[i, 0]] = x;
+        target[i] = (1.2 * x + 0.3 * ((i * 7 % 11) as f64 / 11.0 - 0.5)).exp();
+    }
+    let task = RegressionTask::new("cv_log", features, target).unwrap();
+
+    let mut ttr = TargetTransformRegressor::new(|| Box::new(LinearRegression), TargetTransform::Log);
+    let cv = CrossValidation::new(5).with_seed(42);
+    let result = benchmark::resample_regress(&mut ttr, &task, &cv, &[&Rmse]).unwrap();
+    let mean_rmse = result.mean_scores()[0];
+    assert!(
+        mean_rmse.is_finite() && mean_rmse >= 0.0,
+        "CV over the wrapper must produce a finite RMSE, got {mean_rmse}"
+    );
+}
+
+/// feature_names and feature_types must reach the base learner through the
+/// wrapper's task rebuild (the 5th audit's M-3 lesson: silently dropping
+/// them disables native categorical splits downstream). Verified with a
+/// probe learner that records what it is actually trained on.
+#[test]
+fn target_transform_feature_metadata_reaches_base_learner() {
+    use smelt_ml::learner::TrainedModel;
+    use smelt_ml::task::FeatureType;
+    use std::sync::{Arc, Mutex};
+
+    type SeenMetadata = Option<(Vec<String>, Vec<FeatureType>)>;
+    struct MetaProbe {
+        seen: Arc<Mutex<SeenMetadata>>,
+    }
+    impl Learner for MetaProbe {
+        fn id(&self) -> &str {
+            "meta_probe"
+        }
+        fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+            *self.seen.lock().unwrap() = Some((
+                task.feature_names().to_vec(),
+                task.feature_types().to_vec(),
+            ));
+            LinearRegression.train_regress(task)
+        }
+    }
+
+    let features = array![[0.0, 1.0], [1.0, 0.0], [2.0, 1.0], [3.0, 2.0]];
+    let target = vec![1.0, 2.0, 4.0, 8.0];
+    let names = vec!["grade".to_string(), "lithology".to_string()];
+    let types = vec![
+        FeatureType::Numeric,
+        FeatureType::Categorical { n_categories: 3 },
+    ];
+    let task = RegressionTask::new("meta", features, target)
+        .unwrap()
+        .with_feature_names(names.clone())
+        .unwrap()
+        .with_feature_types(types.clone())
+        .unwrap();
+
+    let seen = Arc::new(Mutex::new(None));
+    let seen_clone = seen.clone();
+    let mut ttr = TargetTransformRegressor::new(
+        move || {
+            Box::new(MetaProbe {
+                seen: seen_clone.clone(),
+            })
+        },
+        TargetTransform::Log,
+    );
+    ttr.train_regress(&task).unwrap();
+
+    let observed = seen.lock().unwrap().clone();
+    assert_eq!(
+        observed,
+        Some((names, types)),
+        "feature_names and feature_types must survive the wrapper's task rebuild"
+    );
+}

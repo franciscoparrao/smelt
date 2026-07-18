@@ -46,6 +46,7 @@ from smelt._smelt import (
     Stacking,
     DynamicEnsemble,
     CostSensitiveClassifier,
+    TargetTransformRegressor,
     registered_learner_ids,
     # Causal meta-learners
     TLearner,
@@ -137,7 +138,7 @@ __all__ = [
     "KNearestNeighbors", "GaussianNB", "GeoXGBoost", "KrigingHybrid",
     "AdaBoost", "EBM", "Lasso", "ElasticNet", "GradientBoosting",
     "HoeffdingTree", "AdaptiveRandomForest", "MondrianForest", "DeepForest", "ExtremeLearningMachine", "LinearSVM", "ObliqueTree", "ObliqueForest", "QuantileForest", "QuantileGB",
-    "Bagging", "Stacking", "DynamicEnsemble", "CostSensitiveClassifier", "registered_learner_ids",
+    "Bagging", "Stacking", "DynamicEnsemble", "CostSensitiveClassifier", "TargetTransformRegressor", "registered_learner_ids",
     "TLearner", "SLearner", "XLearner", "RLearner", "DrLearner",
     "KMeans", "DBSCAN", "IsolationForest",
     "CsvLoader",

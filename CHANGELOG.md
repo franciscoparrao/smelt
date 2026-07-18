@@ -124,6 +124,23 @@ MINOR, not a patch.
   removed from git and ignored; `docs/roadmap_checklist.md` brought up
   to date.
 
+### Added — mlr3-parity roadmap, item 1 (2026-07-18)
+
+- `TargetTransformRegressor`: trains any base `Learner` (factory pattern,
+  like `Bagging`/`CostSensitiveClassifier`) on a transformed regression
+  target — `Log`, `Log1p`, `Sqrt`, or `Standardize` (train-set mean/std,
+  `StandardScaler` zero-variance convention) — and applies the inverse
+  automatically at predict time, returning original-scale predictions
+  (mlr3's `po("targettrafo")` / sklearn's `TransformedTargetRegressor`).
+  Domain violations (`Log` with y ≤ 0, non-finite targets, …) are
+  rejected naming the first offending index; feature names/types
+  propagate to the base learner; the log retransformation bias
+  (naive `exp` estimates the conditional median, not the mean) is
+  documented, with Duan smearing noted as a possible future opt-in.
+  Python: `TargetTransformRegressor(base="xgboost", transform="log")`
+  with eager validation of both arguments in the constructor and
+  `set_params`.
+
 ### Added — KrigingHybrid variogram upgrade (PM2.5 handoff, gap 3b)
 
 - `VariogramModel::Matern32`/`Matern52`: Matérn ν=3/2 and ν=5/2 closed

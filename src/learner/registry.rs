@@ -16,7 +16,8 @@ use crate::{Result, SmeltError};
 /// Construct a learner by its `id()` string, using default hyperparameters.
 ///
 /// Not every learner is registered: [`super::Bagging`], [`super::Stacking`],
-/// [`super::DynamicEnsemble`], [`super::CostSensitiveClassifier`] and
+/// [`super::DynamicEnsemble`], [`super::CostSensitiveClassifier`],
+/// [`super::TargetTransformRegressor`] and
 /// [`super::KrigingHybrid`] wrap *other* learners via a base-learner factory
 /// that has no sensible default (`CostSensitiveClassifier` additionally
 /// needs an explicit cost matrix with no sensible default either), and
