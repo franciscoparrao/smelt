@@ -164,6 +164,27 @@ fn validate_param_space(
         }
     }
 
+    // `huber_delta` is only ever read inside the factory's `if let` on
+    // `objective` when the sampled value is "huber" -- tuning it without
+    // "huber" among the objective choices is a silent no-op where every
+    // trial trains the identical model (5th audit M-5, the same class as
+    // M-13 surviving inside the allowlist).
+    if space.get("huber_delta").is_some() {
+        let has_huber = matches!(
+            space.get("objective"),
+            Some(ParamDistribution::Choice(values))
+                if values.iter().any(|v| v.as_str().is_ok_and(|s| s == "huber"))
+        );
+        if !has_huber {
+            return Err(PyValueError::new_err(
+                "'huber_delta' only takes effect when 'objective' is tuned to include \
+                 \"huber\"; add e.g. \"objective\": [\"huber\"] (or [\"squared_error\", \
+                 \"huber\"]) to the param space, or remove 'huber_delta' -- otherwise \
+                 every trial trains the identical model and its value is ignored",
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -287,7 +308,9 @@ impl PyBayesianOptimizer {
     ///         Param names are validated against the learner's tunable set;
     ///         an unknown name raises ValueError listing the valid ones.
     ///         For "xgboost", `objective` (["squared_error", "huber",
-    ///         "poisson"]) and `huber_delta` are tunable too.
+    ///         "poisson"]) and `huber_delta` are tunable too; `huber_delta`
+    ///         requires "huber" among the `objective` choices (it is
+    ///         ignored by every other objective).
     ///     x, y: training data
     ///     metric: "rmse", "r2", "accuracy", etc.
     ///     n_folds: cross-validation folds
@@ -328,6 +351,7 @@ impl PyBayesianOptimizer {
                 .map_err(smelt_err)?
         } else {
             let target: Vec<f64> = y.extract()?;
+            crate::common::check_finite_target(&target)?;
             let task = smelt_ml::task::RegressionTask::new("bo", features, target)
                 .map_err(smelt_err)?;
             py.allow_threads(|| bo.tune_regress(&task, &cv, &*measure))

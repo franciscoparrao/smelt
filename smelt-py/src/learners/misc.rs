@@ -182,6 +182,7 @@ impl QuantileForest {
 
     /// Train on regression data.
     fn fit(&mut self, py: Python<'_>, x: PyReadonlyArray2<'_, f64>, y: Vec<f64>) -> PyResult<()> {
+        crate::common::check_finite_target(&y)?;
         let features = to_array2(x);
         let task = smelt_ml::task::RegressionTask::new("qrf", features, y)
             .map_err(crate::common::smelt_err)?;

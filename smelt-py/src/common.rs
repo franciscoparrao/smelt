@@ -110,6 +110,21 @@ pub(crate) fn extract_treatment_labels(treatment: Vec<i64>) -> PyResult<Vec<usiz
         .collect()
 }
 
+/// Reject non-finite regression targets (NaN/±inf) before training, naming
+/// the first offending index. Without this, `fit(X, y)` with a NaN in `y`
+/// trains "successfully" and predicts all-NaN (5th audit M-4) -- the CSV
+/// loading path already rejects exactly this (4th audit M-8); this is the
+/// same check for the main ndarray entry points.
+pub(crate) fn check_finite_target(target: &[f64]) -> PyResult<()> {
+    if let Some((i, v)) = target.iter().enumerate().find(|(_, v)| !v.is_finite()) {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "regression target contains non-finite value {v} at index {i}; \
+             targets must be finite -- impute or filter missing values before fit"
+        )));
+    }
+    Ok(())
+}
+
 /// Train a learner, releasing the GIL for the (rayon-parallel, potentially
 /// long-running) training call. `y` is extracted into an owned Rust value
 /// first since that requires the GIL; the actual `train_classif`/
@@ -149,6 +164,7 @@ pub(crate) fn fit_learner_cat(
         Ok((model, true))
     } else {
         let target: Vec<f64> = y.extract()?;
+        check_finite_target(&target)?;
         let mut task =
             smelt_ml::task::RegressionTask::new("py", features, target).map_err(smelt_err)?;
         if let Some(cats) = cat_features {
@@ -177,7 +193,12 @@ pub(crate) fn parse_eval_set(
             if is_integer(&y) {
                 Ok(Some((features, EvalKind::Classification(extract_class_labels(&y)?))))
             } else {
-                Ok(Some((features, EvalKind::Regression(y.extract()?))))
+                let target: Vec<f64> = y.extract()?;
+                // Same finiteness check as the main training target: a NaN
+                // in the eval target silently corrupts the early-stopping
+                // metric instead of stopping training meaningfully.
+                check_finite_target(&target)?;
+                Ok(Some((features, EvalKind::Regression(target))))
             }
         }
     }
@@ -240,11 +261,19 @@ pub(crate) fn not_fitted() -> PyErr {
 /// those, so `to_serializable` returns `None`.
 pub(crate) fn save_model(trained: &Option<Box<dyn TrainedModel>>, path: &str) -> PyResult<()> {
     let model = trained.as_deref().ok_or_else(not_fitted)?;
+    // NotImplementedError, not RuntimeError: "this capability doesn't exist
+    // for this type" is exactly Python's NotImplementedError, and it matches
+    // the taxonomy GeoXGBoost/KrigingHybrid already use for the same
+    // situation (`unsupported_persistence` in `learners/boosting.rs`) --
+    // before, composite learners routed here (DeepForest, Bagging, Stacking,
+    // DynamicEnsemble, CostSensitiveClassifier) raised RuntimeError instead
+    // (5th audit LOW-D5).
     let serializable = model.to_serializable().ok_or_else(|| {
-        PyRuntimeError::new_err(
-            "this model type does not support serialization: it holds other trained \
-             models internally, and smelt_ml::serialize::SerializableModel has no \
-             variant for it",
+        pyo3::exceptions::PyNotImplementedError::new_err(
+            "this model type does not support save()/load(): it holds other trained \
+             models internally (a factory-built composite), and smelt's serialization \
+             format has no variant for composite models. Persist your training \
+             data/pipeline configuration and re-train instead",
         )
     })?;
     // Multi-MB JSON serialization + file write: release the GIL. We're

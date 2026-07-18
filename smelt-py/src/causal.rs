@@ -52,6 +52,7 @@ impl TLearner {
         treatment: Vec<i64>,
         outcome: Vec<f64>,
     ) -> PyResult<PyObject> {
+        crate::common::check_finite_target(&outcome)?;
         let features = to_array2(x);
         let treatment = extract_treatment_labels(treatment)?;
         let control = self.control.clone();
@@ -125,6 +126,7 @@ impl SLearner {
         treatment: Vec<i64>,
         outcome: Vec<f64>,
     ) -> PyResult<PyObject> {
+        crate::common::check_finite_target(&outcome)?;
         let features = to_array2(x);
         let treatment = extract_treatment_labels(treatment)?;
         let base = self.base.clone();
@@ -215,6 +217,7 @@ impl XLearner {
         treatment: Vec<i64>,
         outcome: Vec<f64>,
     ) -> PyResult<PyObject> {
+        crate::common::check_finite_target(&outcome)?;
         let features = to_array2(x);
         let treatment = extract_treatment_labels(treatment)?;
         let control = self.control.clone();
@@ -338,6 +341,7 @@ impl RLearner {
         treatment: Vec<i64>,
         outcome: Vec<f64>,
     ) -> PyResult<PyObject> {
+        crate::common::check_finite_target(&outcome)?;
         let features = to_array2(x);
         let treatment = extract_treatment_labels(treatment)?;
         let outcome_id = self.outcome.clone();
@@ -455,6 +459,7 @@ impl DrLearner {
         treatment: Vec<i64>,
         outcome: Vec<f64>,
     ) -> PyResult<PyObject> {
+        crate::common::check_finite_target(&outcome)?;
         let features = to_array2(x);
         let treatment = extract_treatment_labels(treatment)?;
         let control = self.control.clone();

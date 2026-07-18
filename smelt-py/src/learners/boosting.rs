@@ -92,8 +92,12 @@ impl XGBoost {
         monotone_constraints: Option<Vec<i8>>,
         objective: String,
         huber_delta: f64,
-    ) -> Self {
-        Self {
+    ) -> PyResult<Self> {
+        // Eager validation, same convention as KrigingHybrid's
+        // `variogram_model` and ELM's `activation` (5th audit LOW-D):
+        // a typo'd objective used to surface only at fit() time.
+        resolve_objective(&objective, huber_delta)?;
+        Ok(Self {
             trained: None,
             is_classif: false,
             n_estimators,
@@ -108,7 +112,7 @@ impl XGBoost {
             monotone_constraints,
             objective,
             huber_delta,
-        }
+        })
     }
 
     /// `cat_features`: column indices to treat as categorical (native Fisher
@@ -444,6 +448,7 @@ impl GeoXGBoost {
                 features.nrows()
             )));
         }
+        crate::common::check_finite_target(&y)?;
         let task = smelt_ml::task::RegressionTask::new("gxgb", features, y).map_err(smelt_err)?;
         let mut learner = smelt_ml::prelude::GeoXGBoost::new(parsed)
             .with_bandwidth(self.bandwidth)
@@ -511,6 +516,7 @@ impl GeoXGBoost {
             ));
         }
 
+        crate::common::check_finite_target(&y)?;
         let task = smelt_ml::task::RegressionTask::new("gxgb", features, y).map_err(smelt_err)?;
         let learner = smelt_ml::prelude::GeoXGBoost::new(parsed)
             .with_n_estimators(self.n_estimators)
@@ -653,9 +659,14 @@ impl GeoXGBoost {
         perm_importance_impl(py, model, false, x, y, metric, n_repeats, seed, feature_names)
     }
 
-    /// Split conformal prediction intervals. Calibration data may include
-    /// their own `coords` for spatially-aware predictions on the calibration set;
-    /// if omitted, the global model is used for calibration.
+    /// Split conformal prediction intervals over the GLOBAL model only:
+    /// both calibration and test predictions come from `predict(x)` without
+    /// coordinates, so no spatially-local correction is involved. For
+    /// conformalized spatial predictions, compute `predict(x, coords)` on a
+    /// held-out calibration set yourself and calibrate with
+    /// `smelt.SplitConformal` -- that is the flow the PM2.5 replication
+    /// uses (calibrate on `predict_spatial` residuals, then wrap the test
+    /// `predict_spatial` output in intervals).
     #[pyo3(signature = (x_cal, y_cal, x_test, alpha=0.1))]
     fn conformal_predict<'py>(
         &self,
@@ -733,6 +744,7 @@ impl KrigingHybrid {
             )));
         }
         let model_kind = resolve_variogram_model(&self.variogram_model)?;
+        crate::common::check_finite_target(&y)?;
         let task =
             smelt_ml::task::RegressionTask::new("kriging_hybrid", features, y).map_err(smelt_err)?;
         let base = self.base.clone();
@@ -822,20 +834,67 @@ declare_support!(XGBoost,  classif = true, regress = true);
 declare_support!(CatBoost, classif = true, regress = true);
 declare_support!(LightGBM, classif = true, regress = true);
 
-declare_params!(XGBoost, {
-    n_estimators => "n_estimators",
-    max_depth => "max_depth",
-    learning_rate => "learning_rate",
-    lambda => "lambda_",
-    alpha => "alpha",
-    gamma => "gamma",
-    subsample => "subsample",
-    colsample_bytree => "colsample_bytree",
-    seed => "seed",
-    monotone_constraints => "monotone_constraints",
-    objective => "objective",
-    huber_delta => "huber_delta",
-});
+// XGBoost's get_params/set_params are hand-written (not `declare_params!`)
+// so `set_params(objective=...)` can re-run `resolve_objective` eagerly,
+// exactly like `new()` does -- the macro can't express per-key validation
+// (same reason KrigingHybrid below and Bagging/Stacking in `ensemble.rs`
+// hand-write theirs).
+#[pymethods]
+impl XGBoost {
+    /// Return constructor hyperparameters as a dict (sklearn-style `get_params`).
+    fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("n_estimators", self.n_estimators)?;
+        dict.set_item("max_depth", self.max_depth)?;
+        dict.set_item("learning_rate", self.learning_rate)?;
+        dict.set_item("lambda_", self.lambda)?;
+        dict.set_item("alpha", self.alpha)?;
+        dict.set_item("gamma", self.gamma)?;
+        dict.set_item("subsample", self.subsample)?;
+        dict.set_item("colsample_bytree", self.colsample_bytree)?;
+        dict.set_item("seed", self.seed)?;
+        dict.set_item("monotone_constraints", self.monotone_constraints.clone())?;
+        dict.set_item("objective", self.objective.clone())?;
+        dict.set_item("huber_delta", self.huber_delta)?;
+        Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+
+    /// Update hyperparameters in place (sklearn-style `set_params`); unknown
+    /// keys raise `ValueError`. Does not affect an already-fitted model.
+    #[pyo3(signature = (**kwargs))]
+    fn set_params(&mut self, kwargs: Option<&Bound<'_, pyo3::types::PyDict>>) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                let key: String = k.extract()?;
+                match key.as_str() {
+                    "n_estimators" => self.n_estimators = v.extract()?,
+                    "max_depth" => self.max_depth = v.extract()?,
+                    "learning_rate" => self.learning_rate = v.extract()?,
+                    "lambda_" => self.lambda = v.extract()?,
+                    "alpha" => self.alpha = v.extract()?,
+                    "gamma" => self.gamma = v.extract()?,
+                    "subsample" => self.subsample = v.extract()?,
+                    "colsample_bytree" => self.colsample_bytree = v.extract()?,
+                    "seed" => self.seed = v.extract()?,
+                    "monotone_constraints" => self.monotone_constraints = v.extract()?,
+                    "objective" => {
+                        let obj: String = v.extract()?;
+                        // Same eager validation as `new()`.
+                        resolve_objective(&obj, self.huber_delta)?;
+                        self.objective = obj;
+                    }
+                    "huber_delta" => self.huber_delta = v.extract()?,
+                    other => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "invalid parameter '{other}' for this estimator"
+                        )))
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 declare_params!(CatBoost, {
     n_estimators => "n_estimators",

@@ -12,6 +12,7 @@
 mod causal;
 mod cluster;
 mod common;
+mod conformal;
 mod data;
 mod feature_selection;
 mod learners;
@@ -25,6 +26,7 @@ use pyo3::prelude::*;
 
 use causal::{DrLearner, RLearner, SLearner, TLearner, XLearner};
 use cluster::{DBSCAN, IsolationForest, KMeans};
+use conformal::SplitConformal;
 use data::CsvLoader;
 #[cfg(feature = "parquet")]
 use data::ParquetLoader;
@@ -108,6 +110,9 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<CsvLoader>()?;
     #[cfg(feature = "parquet")]
     m.add_class::<ParquetLoader>()?;
+
+    // Conformal prediction
+    m.add_class::<SplitConformal>()?;
 
     // Preprocessing
     m.add_class::<StandardScaler>()?;
