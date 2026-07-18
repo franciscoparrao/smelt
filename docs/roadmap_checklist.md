@@ -1,7 +1,7 @@
 # smelt-ml Roadmap Checklist
 
 *Basado en análisis de 23,045 papers de Web of Science (2006-2026)*
-*Última actualización: 2026-03-30*
+*Última actualización: 2026-07-17*
 
 ---
 
@@ -56,15 +56,15 @@
 - [ ] **Adversarial Random Forests** — Density estimation generativa con RF. ~250 líneas.
 - [ ] **Fairness Metrics** — Disparate impact, equalized odds, demographic parity. ~150 líneas.
 - [ ] **OpenML Integration** — Cargar datasets de OpenML por ID. ~100 líneas.
-- [ ] **Parquet Loading** — Requiere dep pesada (arrow-rs). ~200 líneas.
+- [x] **Parquet Loading** — `ParquetLoader` detrás del feature opcional `parquet` (dep polars, zero-cost apagado). ✅ `src/data/parquet.rs` (2026-07-03)
 
 ## Infraestructura pendiente
 
-- [ ] **Python bindings (PyO3)** — Crate separado `smelt-py`. Mayor multiplicador de usuarios.
+- [x] **Python bindings (PyO3)** — Crate separado `smelt-py`, publicado en PyPI como `smelt-ml` (v0.7.0), 30+ learners + preprocessing + tuning + stats. ✅ (bindings iniciales 2026, cierre de paridad de learners 2026-07-03)
 - [ ] **Paper JOSS** — Journal of Open Source Software. Requiere tracción.
-- [ ] **Cargo doc completo** — Doc comments en todos los módulos públicos.
+- [x] **Cargo doc completo** — `#![warn(missing_docs)]` activo en `src/lib.rs`; las 330 advertencias cerradas. ✅ (2026-07-03, ver `docs/missing_docs_2026-07-03.md`)
 - [ ] **Benchmarks OpenML** — Evaluar en 30+ datasets estándar de OpenML.
-- [ ] **CI/CD** — GitHub Actions con tests automáticos.
+- [x] **CI/CD** — GitHub Actions: `ci.yml` (cargo test + parquet + clippy -D warnings + smoke pytest de smelt-py, 2026-07-10) y `release.yml` (wheels multiplataforma + sdist + publish a PyPI, con gate de tests en el ref del tag desde 2026-07-17). ✅
 
 ---
 
