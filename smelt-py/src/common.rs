@@ -125,18 +125,62 @@ pub(crate) fn check_finite_target(target: &[f64]) -> PyResult<()> {
     Ok(())
 }
 
+/// Validate a Python-side `sample_weight` before it ever reaches
+/// `Task::with_weights`. `with_weights` PANICS (by documented contract) on
+/// invalid weights -- a `pyo3_runtime.PanicException` escaping to Python
+/// would violate this project's zero-panic standard -- so every condition
+/// it panics on (length mismatch, non-finite, negative, all-zero) is
+/// re-checked here first as a clean `ValueError`.
+pub(crate) fn validate_sample_weight(weights: &[f64], n_samples: usize) -> PyResult<()> {
+    use pyo3::exceptions::PyValueError;
+    if weights.len() != n_samples {
+        return Err(PyValueError::new_err(format!(
+            "sample_weight has {} element(s) but x has {} sample(s); one weight per sample is required",
+            weights.len(),
+            n_samples
+        )));
+    }
+    for (i, &w) in weights.iter().enumerate() {
+        if !w.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "sample_weight[{i}] is {w}; all sample weights must be finite (no NaN/inf)"
+            )));
+        }
+        if w < 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "sample_weight[{i}] is {w}; sample weights must be >= 0"
+            )));
+        }
+    }
+    if weights.iter().all(|&w| w == 0.0) {
+        return Err(PyValueError::new_err(format!(
+            "all {} sample weights are zero; at least one sample must have positive weight",
+            weights.len()
+        )));
+    }
+    Ok(())
+}
+
 /// Train a learner, releasing the GIL for the (rayon-parallel, potentially
 /// long-running) training call. `y` is extracted into an owned Rust value
 /// first since that requires the GIL; the actual `train_classif`/
 /// `train_regress` call runs under `py.allow_threads` so it doesn't block
 /// other Python threads (e.g. a Jupyter kernel) or Ctrl+C for the duration.
+///
+/// `sample_weight` (sklearn-convention `fit` kwarg) is validated here
+/// ([`validate_sample_weight`]) and attached to the `Task` via
+/// `with_weights`; a learner whose `supports_weights()` is `false` then
+/// rejects the weighted task with a clear `InvalidParameter` naming itself
+/// (the Rust-side `check_no_weights` guard), which `smelt_err` maps to
+/// `ValueError`.
 pub(crate) fn fit_learner(
     py: Python<'_>,
     learner: &mut dyn Learner,
     features: Array2<f64>,
     y: &Bound<'_, PyAny>,
+    sample_weight: Option<Vec<f64>>,
 ) -> PyResult<(Box<dyn TrainedModel>, bool)> {
-    fit_learner_cat(py, learner, features, y, None)
+    fit_learner_cat(py, learner, features, y, None, sample_weight)
 }
 
 /// Like `fit_learner`, but declares `cat_features` (column indices) as
@@ -150,13 +194,22 @@ pub(crate) fn fit_learner_cat(
     features: Array2<f64>,
     y: &Bound<'_, PyAny>,
     cat_features: Option<Vec<usize>>,
+    sample_weight: Option<Vec<f64>>,
 ) -> PyResult<(Box<dyn TrainedModel>, bool)> {
+    // Validate BEFORE any Task construction: with_weights would panic on
+    // exactly these conditions (see validate_sample_weight's docs).
+    if let Some(w) = &sample_weight {
+        validate_sample_weight(w, features.nrows())?;
+    }
     if is_integer(y) {
         let target = extract_class_labels(y)?;
         let mut task = smelt_ml::task::ClassificationTask::new("py", features, target)
             .map_err(smelt_err)?;
         if let Some(cats) = cat_features {
             task = task.with_categorical_features(&cats).map_err(smelt_err)?;
+        }
+        if let Some(w) = sample_weight {
+            task = task.with_weights(w);
         }
         let model = py
             .allow_threads(|| learner.train_classif(&task))
@@ -169,6 +222,9 @@ pub(crate) fn fit_learner_cat(
             smelt_ml::task::RegressionTask::new("py", features, target).map_err(smelt_err)?;
         if let Some(cats) = cat_features {
             task = task.with_categorical_features(&cats).map_err(smelt_err)?;
+        }
+        if let Some(w) = sample_weight {
+            task = task.with_weights(w);
         }
         let model = py
             .allow_threads(|| learner.train_regress(&task))
@@ -562,17 +618,32 @@ macro_rules! define_learner {
                 Self { trained: None, is_classif: false, $( $field ),* }
             }
 
+            /// `sample_weight` (sklearn convention): optional per-sample
+            /// weights, validated in the binding (length == n_samples,
+            /// finite, >= 0, not all zero) before training; learners without
+            /// weight support reject it with a clear ValueError.
+            #[pyo3(signature = (x, y, sample_weight=None))]
             fn fit(
                 &mut self,
                 py: pyo3::Python<'_>,
                 x: numpy::PyReadonlyArray2<'_, f64>,
                 y: &pyo3::Bound<'_, pyo3::PyAny>,
+                sample_weight: Option<Vec<f64>>,
             ) -> pyo3::PyResult<()> {
                 let mut learner = { let $slf = &*self; $ctor_expr };
-                let (model, is_classif) = crate::common::fit_learner(py, &mut learner, crate::common::to_array2(x), y)?;
+                let (model, is_classif) = crate::common::fit_learner(py, &mut learner, crate::common::to_array2(x), y, sample_weight)?;
                 self.trained = Some(model);
                 self.is_classif = is_classif;
                 Ok(())
+            }
+
+            /// Whether `fit(..., sample_weight=...)` is actually consumed by
+            /// this learner (queried from the Rust `Learner::supports_weights`;
+            /// passing weights to a non-supporting learner raises ValueError).
+            #[getter]
+            fn supports_sample_weight(&self) -> bool {
+                let learner = { let $slf = &*self; $ctor_expr };
+                smelt_ml::learner::Learner::supports_weights(&learner)
             }
 
             fn predict<'py>(
@@ -749,6 +820,33 @@ macro_rules! declare_support {
     };
 }
 pub(crate) use declare_support;
+
+/// Declares a `supports_sample_weight` getter for a hand-written learner
+/// wrapper struct (one that doesn't go through `define_learner!`, which
+/// generates its own getter from the ctor expression). `$ctor` is any
+/// expression building a default-configured instance of the wrapped Rust
+/// learner -- `Learner::supports_weights` is a per-type property, so
+/// hyperparameters don't matter. Querying the Rust trait instead of
+/// hardcoding a boolean keeps this getter from drifting when a learner
+/// gains weight support in the core. Invoke this in the same file that
+/// defines the struct.
+macro_rules! declare_weight_support {
+    ($($name:ident => $ctor:expr),+ $(,)?) => {
+        $(
+            #[pyo3::pymethods]
+            impl $name {
+                /// Whether `fit(..., sample_weight=...)` is actually consumed by
+                /// this learner (queried from the Rust `Learner::supports_weights`;
+                /// passing weights to a non-supporting learner raises ValueError).
+                #[getter]
+                fn supports_sample_weight(&self) -> bool {
+                    smelt_ml::learner::Learner::supports_weights(&$ctor)
+                }
+            }
+        )+
+    };
+}
+pub(crate) use declare_weight_support;
 
 /// Declares sklearn-style `get_params`/`set_params` for a hand-written learner
 /// wrapper struct (one that doesn't go through `define_learner!`). Each

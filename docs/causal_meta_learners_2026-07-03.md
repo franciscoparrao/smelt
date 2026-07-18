@@ -144,3 +144,32 @@ seguimiento — `smelt-py/src/causal.rs` (nuevo módulo), con `TLearner`,
   de `set_params` desconocida, tratamiento no-binario) — todos fallan
   limpio, no panic. `cargo test -p smelt-ml --lib`/`--test integration`
   siguen en 95/272 verdes, sin regresiones.
+
+## Addendum 2026-07-18 — R-loss exacto en el R-learner
+
+Con el soporte genérico de pesos por muestra ya aterrizado en el motor
+(`RegressionTask::with_weights` + `Learner::supports_weights`), la
+limitación del punto 4 de arriba ("regresión no ponderada / aproximación
+por replicación de filas") dejó de ser incondicional:
+
+- `RLearner::estimate` ahora decide **por introspección** sobre una
+  instancia fresca de `effect_factory`: si `supports_weights()` es `true`
+  (decision tree, RF, extra trees, GBM, XGBoost, LightGBM, CatBoost, OLS,
+  Ridge, Lasso, ElasticNet, ELM), regresa el pseudo-target `Ỹ/T̃` con pesos
+  por muestra `T̃²` — el R-loss exacto de Nie & Wager (2021), sin
+  aproximación. Si es `false` (p. ej. KNN), conserva la aproximación por
+  replicación de filas previa sin cambios, verificada **bit-idéntica**
+  contra predicciones de referencia capturadas antes del cambio.
+- Exclusión numérica: además del `residual_clip` del usuario (default
+  0.05), aplica un piso absoluto `|T̃| >= 1e-8` (`T_RESID_EPS`): bajo eso
+  el pseudo-target `Ỹ/T̃` desborda a ±inf/NaN y rompería la validación de
+  la task, aunque el peso `T̃² <= 1e-16` de esa fila sea numéricamente
+  despreciable de todas formas. Si todas las filas quedan excluidas
+  (propensity degenerado), `estimate` retorna `Err` claro en vez de
+  ajustar sobre nada.
+- Evidencia en tests (`r_learner.rs`): con residuos de tratamiento
+  heteroscedásticos (propensity casi determinista en los extremos), el
+  camino exacto mejora el PEHE frente a la replicación con la misma base
+  OLS (0.272 vs 0.318, seeds fijas); con `T̃` constante (RCT balanceado +
+  propensity exacta de 0.5) ambos caminos coinciden a tolerancia del
+  solver (< 1e-8 por unidad).

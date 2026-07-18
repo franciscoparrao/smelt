@@ -311,6 +311,14 @@ impl RLearner {
     /// `outcome`: model for `m(x)=E[Y|X]`. `propensity`: classifier for
     /// `e(x)=E[T|X]`. `effect`: final model regressing the residual-ratio
     /// pseudo-target on `X`.
+    ///
+    /// If the `effect` learner consumes per-sample weights (e.g.
+    /// "linear_regression", "ridge", "lasso", "elastic_net",
+    /// "decision_tree", "random_forest", "extra_trees", "gradient_boosting",
+    /// "xgboost", "lightgbm", "catboost", "elm"), the estimator uses the
+    /// exact treatment-residual-squared-weighted R-loss of Nie & Wager
+    /// (2021); weight-blind effect learners (e.g. "knn") fall back to the
+    /// documented row-replication approximation of those weights.
     #[new]
     #[pyo3(signature = (outcome, propensity, effect, cv_folds=5, cv_seed=42, residual_clip=0.05))]
     fn new(

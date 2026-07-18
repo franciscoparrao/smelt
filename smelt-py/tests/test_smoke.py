@@ -92,6 +92,50 @@ def test_save_load_rejects_wrong_type(tmp_path):
         smelt.XGBoost.load(path)
 
 
+def test_sample_weight_roundtrip_random_forest():
+    """fit(x, y, sample_weight=...): all-ones must match unweighted exactly
+    (the Rust weighted paths are written to be bit-identical for uniform
+    weights), and a skewed weighting must actually change predictions."""
+    x, y = _regress_data(seed=6)
+    unweighted = smelt.RandomForest(n_estimators=25, max_depth=6, seed=7)
+    unweighted.fit(x[:90], y[:90])
+    ones = smelt.RandomForest(n_estimators=25, max_depth=6, seed=7)
+    ones.fit(x[:90], y[:90], sample_weight=np.ones(90))
+    np.testing.assert_array_equal(unweighted.predict(x[90:]), ones.predict(x[90:]))
+
+    skewed_w = np.ones(90)
+    skewed_w[:30] = 50.0
+    skewed = smelt.RandomForest(n_estimators=25, max_depth=6, seed=7)
+    skewed.fit(x[:90], y[:90], sample_weight=skewed_w)
+    assert not np.array_equal(unweighted.predict(x[90:]), skewed.predict(x[90:]))
+
+    assert smelt.RandomForest().supports_sample_weight is True
+
+
+def test_sample_weight_invalid_inputs_raise_value_error():
+    """Invalid sample_weight must raise ValueError from the binding's own
+    validation (never a pyo3 PanicException from Task::with_weights), and a
+    weight-blind learner (KNN) must reject weights with a clear ValueError
+    naming itself."""
+    x, y = _regress_data(seed=7)
+    model = smelt.RandomForest(n_estimators=5)
+    with pytest.raises(ValueError, match="one weight per sample"):
+        model.fit(x, y, sample_weight=np.ones(10))
+    with pytest.raises(ValueError, match="finite"):
+        model.fit(x, y, sample_weight=np.full(len(y), np.nan))
+    with pytest.raises(ValueError, match=">= 0"):
+        w = np.ones(len(y))
+        w[3] = -1.0
+        model.fit(x, y, sample_weight=w)
+    with pytest.raises(ValueError, match="at least one"):
+        model.fit(x, y, sample_weight=np.zeros(len(y)))
+
+    knn = smelt.KNearestNeighbors(k=3)
+    assert knn.supports_sample_weight is False
+    with pytest.raises(ValueError, match="does not support sample weights"):
+        knn.fit(x, y, sample_weight=np.ones(len(y)))
+
+
 def test_bayesian_optimizer_short_run():
     x, y = _classif_data(seed=5)
     bo = smelt.BayesianOptimizer(n_iter=4, n_initial=2, seed=11)

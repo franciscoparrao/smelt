@@ -6,7 +6,7 @@ use crate::common::{
     predict_proba_values, predict_values, shap_impl, smelt_err, to_array2, conformal_predict_impl,
     EvalKind,
 };
-use crate::common::{add_explain_methods, add_persistence_methods, declare_support, declare_params};
+use crate::common::{add_explain_methods, add_persistence_methods, declare_support, declare_params, declare_weight_support};
 use crate::learners::ensemble::validate_learner_id;
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::PyRuntimeError;
@@ -119,7 +119,7 @@ impl XGBoost {
     /// splits instead of numeric thresholds). `eval_set`: `(x_val, y_val)`
     /// held out for `early_stopping_rounds` to monitor; without it, early
     /// stopping watches training loss, which rarely plateaus under boosting.
-    #[pyo3(signature = (x, y, cat_features=None, eval_set=None, early_stopping_rounds=None))]
+    #[pyo3(signature = (x, y, cat_features=None, eval_set=None, early_stopping_rounds=None, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
@@ -128,6 +128,7 @@ impl XGBoost {
         cat_features: Option<Vec<usize>>,
         eval_set: Option<(PyReadonlyArray2<'_, f64>, Bound<'_, PyAny>)>,
         early_stopping_rounds: Option<usize>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::XGBoost::new()
             .with_n_estimators(self.n_estimators)
@@ -153,7 +154,7 @@ impl XGBoost {
             };
         }
         let (model, is_classif) =
-            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features)?;
+            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -219,7 +220,7 @@ impl CatBoost {
     /// target-statistic splits, falling back to whichever columns are passed
     /// here since this wrapper always trains against a plain `Task`).
     /// `eval_set`: `(x_val, y_val)` held out for `early_stopping_rounds`.
-    #[pyo3(signature = (x, y, cat_features=None, eval_set=None, early_stopping_rounds=None))]
+    #[pyo3(signature = (x, y, cat_features=None, eval_set=None, early_stopping_rounds=None, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
@@ -228,6 +229,7 @@ impl CatBoost {
         cat_features: Option<Vec<usize>>,
         eval_set: Option<(PyReadonlyArray2<'_, f64>, Bound<'_, PyAny>)>,
         early_stopping_rounds: Option<usize>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::CatBoost::new()
             .with_n_estimators(self.n_estimators)
@@ -245,7 +247,7 @@ impl CatBoost {
             };
         }
         let (model, is_classif) =
-            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features)?;
+            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -332,7 +334,7 @@ impl LightGBM {
     /// `cat_features`: column indices to treat as categorical (native Fisher
     /// splits). `eval_set`: `(x_val, y_val)` held out for
     /// `early_stopping_rounds`.
-    #[pyo3(signature = (x, y, cat_features=None, eval_set=None, early_stopping_rounds=None))]
+    #[pyo3(signature = (x, y, cat_features=None, eval_set=None, early_stopping_rounds=None, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
@@ -341,6 +343,7 @@ impl LightGBM {
         cat_features: Option<Vec<usize>>,
         eval_set: Option<(PyReadonlyArray2<'_, f64>, Bound<'_, PyAny>)>,
         early_stopping_rounds: Option<usize>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::LightGBM::new()
             .with_n_estimators(self.n_estimators)
@@ -362,7 +365,7 @@ impl LightGBM {
             };
         }
         let (model, is_classif) =
-            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features)?;
+            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -829,6 +832,12 @@ impl KrigingHybrid {
 }
 
 add_explain_methods!(XGBoost, CatBoost, LightGBM);
+
+declare_weight_support!(
+    XGBoost  => smelt_ml::prelude::XGBoost::new(),
+    CatBoost => smelt_ml::prelude::CatBoost::new(),
+    LightGBM => smelt_ml::prelude::LightGBM::new(),
+);
 
 declare_support!(XGBoost,  classif = true, regress = true);
 declare_support!(CatBoost, classif = true, regress = true);

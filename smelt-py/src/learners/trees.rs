@@ -2,7 +2,7 @@
 //! GradientBoosting, HoeffdingTree, AdaptiveRandomForest, ObliqueTree,
 //! ObliqueForest.
 
-use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params};
+use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params, declare_weight_support};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
@@ -53,17 +53,23 @@ impl RandomForest {
         }
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::RandomForest::new()
             .with_n_estimators(self.n_estimators)
             .with_seed(self.seed);
         learner = apply_max_depth(learner, self.max_depth, |l, d| l.with_max_depth(d))?;
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -112,17 +118,23 @@ impl ExtraTrees {
         Self { trained: None, is_classif: false, n_estimators, max_depth, seed }
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::ExtraTrees::new()
             .with_n_estimators(self.n_estimators)
             .with_seed(self.seed);
         learner = apply_max_depth(learner, self.max_depth, |l, d| l.with_max_depth(d))?;
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -156,18 +168,24 @@ impl DecisionTree {
         }
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = apply_max_depth(
             smelt_ml::prelude::DecisionTree::default(),
             self.max_depth,
             |l, d| l.with_max_depth(d),
         )?;
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -324,6 +342,12 @@ declare_support!(DeepForest,        classif = true,  regress = false);
 declare_support!(MondrianForest,    classif = true,  regress = true);
 declare_support!(ObliqueTree,       classif = true,  regress = true);
 declare_support!(ObliqueForest,     classif = true,  regress = true);
+
+declare_weight_support!(
+    RandomForest => smelt_ml::prelude::RandomForest::new(),
+    ExtraTrees   => smelt_ml::prelude::ExtraTrees::new(),
+    DecisionTree => smelt_ml::prelude::DecisionTree::default(),
+);
 
 declare_params!(RandomForest, { n_estimators => "n_estimators", max_depth => "max_depth", seed => "seed" });
 declare_params!(ExtraTrees,   { n_estimators => "n_estimators", max_depth => "max_depth", seed => "seed" });

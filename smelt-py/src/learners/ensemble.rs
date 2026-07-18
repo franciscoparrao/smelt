@@ -64,11 +64,17 @@ impl Bagging {
         })
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let base = self.base.clone();
         let mut learner = smelt_ml::prelude::Bagging::new(move || {
@@ -76,7 +82,7 @@ impl Bagging {
         })
         .with_n_estimators(self.n_estimators)
         .with_seed(self.seed);
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -134,11 +140,17 @@ impl CostSensitiveClassifier {
         })
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let base = self.base.clone();
         let cost_matrix = self.cost_matrix.clone();
@@ -146,7 +158,7 @@ impl CostSensitiveClassifier {
             move || smelt_ml::prelude::learner_from_id(&base).expect("validated in CostSensitiveClassifier::new"),
             cost_matrix,
         );
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -224,11 +236,17 @@ impl TargetTransformRegressor {
         })
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let base = self.base.clone();
         let transform = resolve_transform(&self.transform)?;
@@ -243,7 +261,7 @@ impl TargetTransformRegressor {
         // Rust wrapper rejects with a clear regression-only error; a float
         // `y` goes through `check_finite_target` (5th audit M-4) before the
         // wrapper's own domain validation.
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -309,11 +327,17 @@ impl Stacking {
         })
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let base_factories: Vec<Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>> =
             self.base_learners
@@ -331,7 +355,7 @@ impl Stacking {
         })
         .with_cv_folds(self.cv_folds)
         .with_cv_seed(self.cv_seed);
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -392,11 +416,17 @@ impl DynamicEnsemble {
         })
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let base_factories: Vec<Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>> =
             self.base_learners
@@ -413,7 +443,7 @@ impl DynamicEnsemble {
             .with_k_neighbors(self.k_neighbors)
             .with_dsel_fraction(self.dsel_fraction)
             .with_seed(self.seed);
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())

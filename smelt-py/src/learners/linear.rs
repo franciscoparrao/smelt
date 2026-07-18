@@ -1,7 +1,7 @@
 //! Linear learners: LogisticRegression, LinearRegression, Ridge, Lasso,
 //! ElasticNet, LinearSVM.
 
-use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params};
+use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params, declare_weight_support};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
@@ -23,14 +23,20 @@ impl LogisticRegression {
         Self { trained: None, is_classif: false }
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::LogisticRegression::new();
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -70,14 +76,20 @@ impl LinearRegression {
         Self { trained: None, is_classif: false }
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::LinearRegression::new();
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -107,14 +119,20 @@ impl Ridge {
         Self { trained: None, is_classif: false, alpha }
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::Ridge::new(self.alpha);
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -165,6 +183,12 @@ declare_support!(Ridge,              classif = false, regress = true);
 declare_support!(Lasso,              classif = false, regress = true);
 declare_support!(ElasticNet,         classif = false, regress = true);
 declare_support!(LinearSVM,          classif = true,  regress = false);
+
+declare_weight_support!(
+    LogisticRegression => smelt_ml::prelude::LogisticRegression::new(),
+    LinearRegression   => smelt_ml::prelude::LinearRegression::new(),
+    Ridge              => smelt_ml::prelude::Ridge::new(1.0),
+);
 
 declare_params!(LogisticRegression, {});
 declare_params!(LinearRegression,   {});

@@ -1,7 +1,7 @@
 //! Miscellaneous learners: KNearestNeighbors, GaussianNB, AdaBoost, EBM,
 //! QuantileForest, QuantileGB, ExtremeLearningMachine.
 
-use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params};
+use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params, declare_weight_support};
 use crate::common::{load_model_checked, save_model};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
@@ -39,14 +39,20 @@ impl KNearestNeighbors {
         Self { trained: None, is_classif: false, k }
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::KNearestNeighbors::new(self.k);
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -100,14 +106,20 @@ impl GaussianNB {
         Self { trained: None, is_classif: false }
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::GaussianNB::new();
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -394,18 +406,24 @@ impl ExtremeLearningMachine {
         })
     }
 
+    /// `sample_weight` (sklearn convention): optional per-sample weights,
+    /// validated in the binding (length == n_samples, finite, >= 0, not all
+    /// zero) before training; learners without weight support reject it
+    /// with a clear ValueError.
+    #[pyo3(signature = (x, y, sample_weight=None))]
     fn fit(
         &mut self,
         py: Python<'_>,
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
+        sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let mut learner = smelt_ml::prelude::ExtremeLearningMachine::new()
             .with_n_hidden(self.n_hidden)
             .with_activation(resolve_activation(&self.activation)?)
             .with_regularization(self.regularization)
             .with_seed(self.seed);
-        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y)?;
+        let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -466,6 +484,13 @@ declare_support!(EBM,               classif = true,  regress = true);
 declare_support!(QuantileForest,    classif = false, regress = true);
 declare_support!(QuantileGB,        classif = false, regress = true);
 declare_support!(ExtremeLearningMachine, classif = true, regress = true);
+
+declare_weight_support!(
+    KNearestNeighbors      => smelt_ml::prelude::KNearestNeighbors::new(5),
+    GaussianNB             => smelt_ml::prelude::GaussianNB::new(),
+    ExtremeLearningMachine => smelt_ml::prelude::ExtremeLearningMachine::new(),
+    QuantileForest         => smelt_ml::prelude::QuantileForest::default(),
+);
 
 declare_params!(KNearestNeighbors, { k => "k" });
 declare_params!(GaussianNB,        {});
