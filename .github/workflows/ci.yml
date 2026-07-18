@@ -1,8 +1,12 @@
 name: CI
 
 # Tests + lint on every push/PR. Before this workflow existed the 584-test
-# suite only ran when someone ran it locally, and a tag could publish
-# wheels to PyPI (release.yml) from a red tree.
+# suite only ran when someone ran it locally. Note this workflow does NOT
+# run on tags: the release gate (tests blocking a PyPI publish from a red
+# tree) lives in release.yml's own `test` job, which `publish` depends on.
+#
+# Actions are pinned by commit SHA (tag in the trailing comment) so a
+# moved/compromised tag can't silently change what runs here.
 
 on:
   push:
@@ -21,18 +25,24 @@ jobs:
     name: cargo test (default features)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch (2026-07-17)
+        with:
+          # Pinned by SHA, so the ref name no longer selects the toolchain;
+          # this input does instead.
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo test
 
   test-parquet:
     name: cargo test --features parquet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch (2026-07-17)
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: parquet
       - run: cargo test --features parquet
@@ -41,11 +51,12 @@ jobs:
     name: clippy (workspace, deny warnings)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch (2026-07-17)
         with:
+          toolchain: stable
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: lint
       # Enforcing since 2026-07-17: the legacy --all-targets debt (tests +
@@ -54,3 +65,30 @@ jobs:
       # crate's API, which is what the old `cargo check -p smelt-py` step
       # was for.
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # Exercises the actual Python surface (audit 5a, M-10): before this job
+  # existed, CI compiled smelt-py (via clippy --workspace) but never
+  # imported it, so a broken wheel / broken binding could only be caught
+  # by hand. Builds the real wheel with maturin and runs the permanent
+  # smoke tests in smelt-py/tests/.
+  python-smoke:
+    name: python smoke (maturin build + pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch (2026-07-17)
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: python-smoke
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install maturin pytest numpy
+      - name: Build wheel
+        run: maturin build --release -m smelt-py/Cargo.toml -o dist
+      - name: Install wheel
+        run: pip install dist/*.whl
+      - name: Run smoke tests
+        run: pytest smelt-py/tests/ -v
