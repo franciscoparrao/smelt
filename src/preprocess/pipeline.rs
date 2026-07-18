@@ -108,6 +108,18 @@ impl Learner for Pipeline {
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let resampled;
         let task = if let Some(resampler) = &self.resampler {
+            // A weighted task cannot pass through a resampler stage: the
+            // synthetic samples' weights are undefined. The resampler itself
+            // (Smote/Adasyn) also rejects, but check here too so the error
+            // surfaces even if a future Resampler forgets its own guard.
+            if task.weights().is_some() {
+                return Err(SmeltError::InvalidParameter(
+                    "resampling a weighted task is not supported; the synthetic samples' \
+                     weights are undefined — remove with_weights() or drop the Pipeline's \
+                     resampler stage"
+                        .into(),
+                ));
+            }
             resampled = resampler.resample(task)?;
             &resampled
         } else {
@@ -139,11 +151,20 @@ impl Learner for Pipeline {
         // boosting engines' categorical split finding even with zero
         // transformers -- each transformer maps them via `transform_types`,
         // the type-level analogue of `transform_names`.
-        let transformed_task =
+        let mut transformed_task =
             ClassificationTask::new(task.id(), features, task.target().to_vec())?
                 .with_feature_names(names)?
                 .with_feature_types(types)?
                 .with_class_names(task.class_names().to_vec());
+        // Propagate sample weights unchanged: every Transformer stage is
+        // row-preserving (scalers/encoders/imputers/selectors/PCA change
+        // columns, never rows), so the weights stay aligned. Same
+        // metadata-propagation lesson as feature_names/feature_types (M-3).
+        // The Pipeline itself takes no stance on weight support — the inner
+        // learner's own check_no_weights guard decides.
+        if let Some(w) = task.weights() {
+            transformed_task = transformed_task.with_weights(w.to_vec());
+        }
 
         let model = self.learner.train_classif(&transformed_task)?;
 
@@ -178,9 +199,15 @@ impl Learner for Pipeline {
 
         // feature_types propagated for the same reason as in train_classif
         // (5th audit, M-3).
-        let transformed_task = RegressionTask::new(task.id(), features, task.target().to_vec())?
+        let mut transformed_task = RegressionTask::new(task.id(), features, task.target().to_vec())?
             .with_feature_names(names)?
             .with_feature_types(types)?;
+        // Weights propagated unchanged for the same reason as in
+        // train_classif: transformer stages are row-preserving, and the
+        // inner learner's guard decides whether weights are supported.
+        if let Some(w) = task.weights() {
+            transformed_task = transformed_task.with_weights(w.to_vec());
+        }
 
         let model = self.learner.train_regress(&transformed_task)?;
 

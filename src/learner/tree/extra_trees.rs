@@ -19,6 +19,10 @@ use serde::{Deserialize, Serialize};
 ///
 /// Often faster than RF and can achieve better generalization.
 ///
+/// Supports per-sample weights: weights enter each tree's impurity and leaf
+/// values (sklearn convention); a weight of `0.0` excludes the sample and
+/// `min_samples_*` count rows, not total weight.
+///
 /// # Examples
 ///
 /// ```
@@ -196,16 +200,27 @@ impl Learner for ExtraTrees {
         "extra_trees"
     }
 
+    /// `true`: weights enter each tree's impurity and leaf values (sklearn
+    /// convention); a weight of 0.0 excludes the sample from every tree
+    /// (Extra Trees has no bootstrap, so exclusion is exact and ensemble-wide).
+    fn supports_weights(&self) -> bool {
+        true
+    }
+
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
+        let weights = task.weights();
         let n_samples = task.n_samples();
         let n_features = task.n_features();
         let n_classes = task.n_classes();
         let max_feat = self.max_features.resolve(n_features, true);
-        // No bootstrap — use all samples
-        let indices: Vec<usize> = (0..n_samples).collect();
+        // No bootstrap — use all samples (minus weight-0 exclusions).
+        let indices: Vec<usize> = match weights {
+            None => (0..n_samples).collect(),
+            Some(w) => super::retain_positive_weight((0..n_samples).collect(), w, n_samples),
+        };
 
         let results: Vec<(Node, Vec<f64>)> = (0..self.n_estimators)
             .into_par_iter()
@@ -219,14 +234,25 @@ impl Learner for ExtraTrees {
                     n_features,
                 )
                 .with_random_splits(true);
-                let root = builder.build_classifier(
-                    &features.view(),
-                    target,
-                    &indices,
-                    n_classes,
-                    0,
-                    &mut rng,
-                );
+                let root = match weights {
+                    None => builder.build_classifier(
+                        &features.view(),
+                        target,
+                        &indices,
+                        n_classes,
+                        0,
+                        &mut rng,
+                    ),
+                    Some(w) => builder.build_classifier_weighted(
+                        &features.view(),
+                        target,
+                        w,
+                        &indices,
+                        n_classes,
+                        0,
+                        &mut rng,
+                    ),
+                };
                 (root, builder.feature_importances)
             })
             .collect();
@@ -253,10 +279,14 @@ impl Learner for ExtraTrees {
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
+        let weights = task.weights();
         let n_samples = task.n_samples();
         let n_features = task.n_features();
         let max_feat = self.max_features.resolve(n_features, false);
-        let indices: Vec<usize> = (0..n_samples).collect();
+        let indices: Vec<usize> = match weights {
+            None => (0..n_samples).collect(),
+            Some(w) => super::retain_positive_weight((0..n_samples).collect(), w, n_samples),
+        };
 
         let results: Vec<(Node, Vec<f64>)> = (0..self.n_estimators)
             .into_par_iter()
@@ -270,7 +300,19 @@ impl Learner for ExtraTrees {
                     n_features,
                 )
                 .with_random_splits(true);
-                let root = builder.build_regressor(&features.view(), target, &indices, 0, &mut rng);
+                let root = match weights {
+                    None => {
+                        builder.build_regressor(&features.view(), target, &indices, 0, &mut rng)
+                    }
+                    Some(w) => builder.build_regressor_weighted(
+                        &features.view(),
+                        target,
+                        w,
+                        &indices,
+                        0,
+                        &mut rng,
+                    ),
+                };
                 (root, builder.feature_importances)
             })
             .collect();

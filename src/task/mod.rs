@@ -55,6 +55,38 @@ fn build_feature_types(features: &Array2<f64>, columns: &[usize]) -> Result<Vec<
     Ok(types)
 }
 
+/// Validate sample weights for `with_weights`: the length must match the
+/// number of samples, every weight must be finite and `>= 0`, and at least
+/// one must be `> 0` (an individual weight of exactly `0.0` is valid and
+/// means "exclude this sample from training").
+///
+/// Panics with a clear message on the first violation — see
+/// `with_weights`'s `# Panics` section for why this is a panic rather than
+/// a `Result`.
+fn validate_weights(weights: &[f64], n_samples: usize) {
+    assert!(
+        weights.len() == n_samples,
+        "with_weights: {} weight(s) provided for {} sample(s) — one weight per sample is required",
+        weights.len(),
+        n_samples
+    );
+    for (i, &w) in weights.iter().enumerate() {
+        assert!(
+            w.is_finite(),
+            "with_weights: weight at index {i} is {w} — all sample weights must be finite"
+        );
+        assert!(
+            w >= 0.0,
+            "with_weights: weight at index {i} is {w} — sample weights must be >= 0"
+        );
+    }
+    assert!(
+        weights.iter().any(|&w| w > 0.0),
+        "with_weights: all {} weights are zero — at least one sample must have positive weight",
+        weights.len()
+    );
+}
+
 /// Core trait for all task types.
 pub trait Task {
     /// Task identifier.
@@ -93,6 +125,7 @@ pub struct ClassificationTask {
     feature_names: Vec<String>,
     class_names: Vec<String>,
     feature_types: Vec<FeatureType>,
+    weights: Option<Vec<f64>>,
 }
 
 impl ClassificationTask {
@@ -122,6 +155,7 @@ impl ClassificationTask {
             features,
             target,
             class_names: (0..n_classes).map(|i| format!("class_{i}")).collect(),
+            weights: None,
         })
     }
 
@@ -195,6 +229,46 @@ impl ClassificationTask {
         self
     }
 
+    /// Attach per-sample weights, one per sample.
+    ///
+    /// Weights are FREQUENCY / relative-importance weights for **training**:
+    /// a sample with weight `k` should influence a weight-aware learner's
+    /// fit like `k` copies of that row, and a weight of `0.0` excludes the
+    /// sample. They do not affect prediction or measures (for now). No
+    /// learner consumes them yet — every learner currently rejects a
+    /// weighted task with a clear error via
+    /// [`crate::validate::check_no_weights`] rather than silently ignoring
+    /// the weights; weight-aware learners land in a later phase.
+    ///
+    /// # Panics
+    ///
+    /// Panics immediately (same precedent as [`Self::with_class_names`]:
+    /// changing an existing builder chain to `Result` would be a breaking
+    /// API change, and an invalid weight vector is a programming error, not
+    /// a data condition) if:
+    /// - `weights.len() != n_samples`
+    /// - any weight is NaN or ±infinity
+    /// - any weight is negative
+    /// - **all** weights are zero (an individual `0.0` is valid = sample
+    ///   excluded; a task where every sample is excluded is not).
+    ///
+    /// Note for fold slicing: a subset of a validly-weighted task can be
+    /// all-zero (every positively-weighted row landed in the other folds);
+    /// re-attaching such a slice panics with the same message, which is the
+    /// honest outcome — training on an all-zero-weight fold is undefined.
+    pub fn with_weights(mut self, weights: Vec<f64>) -> Self {
+        validate_weights(&weights, self.features.nrows());
+        self.weights = Some(weights);
+        self
+    }
+
+    /// Per-sample training weights, if any were attached via
+    /// [`Self::with_weights`]. `None` means the unweighted default (every
+    /// sample counts once).
+    pub fn weights(&self) -> Option<&[f64]> {
+        self.weights.as_deref()
+    }
+
     /// Integer target labels, one per sample.
     pub fn target(&self) -> &[usize] {
         &self.target
@@ -232,6 +306,7 @@ pub struct RegressionTask {
     target: Vec<f64>,
     feature_names: Vec<String>,
     feature_types: Vec<FeatureType>,
+    weights: Option<Vec<f64>>,
 }
 
 impl RegressionTask {
@@ -259,6 +334,7 @@ impl RegressionTask {
             feature_types: vec![FeatureType::Numeric; n_features],
             features,
             target,
+            weights: None,
         })
     }
 
@@ -302,6 +378,47 @@ impl RegressionTask {
         Ok(self)
     }
 
+    /// Attach per-sample weights, one per sample.
+    ///
+    /// Weights are FREQUENCY / relative-importance weights for **training**:
+    /// a sample with weight `k` should influence a weight-aware learner's
+    /// fit like `k` copies of that row, and a weight of `0.0` excludes the
+    /// sample. They do not affect prediction or measures (for now). No
+    /// learner consumes them yet — every learner currently rejects a
+    /// weighted task with a clear error via
+    /// [`crate::validate::check_no_weights`] rather than silently ignoring
+    /// the weights; weight-aware learners land in a later phase.
+    ///
+    /// # Panics
+    ///
+    /// Panics immediately (same precedent as
+    /// [`ClassificationTask::with_class_names`]: changing an existing
+    /// builder chain to `Result` would be a breaking API change, and an
+    /// invalid weight vector is a programming error, not a data condition)
+    /// if:
+    /// - `weights.len() != n_samples`
+    /// - any weight is NaN or ±infinity
+    /// - any weight is negative
+    /// - **all** weights are zero (an individual `0.0` is valid = sample
+    ///   excluded; a task where every sample is excluded is not).
+    ///
+    /// Note for fold slicing: a subset of a validly-weighted task can be
+    /// all-zero (every positively-weighted row landed in the other folds);
+    /// re-attaching such a slice panics with the same message, which is the
+    /// honest outcome — training on an all-zero-weight fold is undefined.
+    pub fn with_weights(mut self, weights: Vec<f64>) -> Self {
+        validate_weights(&weights, self.features.nrows());
+        self.weights = Some(weights);
+        self
+    }
+
+    /// Per-sample training weights, if any were attached via
+    /// [`Self::with_weights`]. `None` means the unweighted default (every
+    /// sample counts once).
+    pub fn weights(&self) -> Option<&[f64]> {
+        self.weights.as_deref()
+    }
+
     /// Continuous target values, one per sample.
     pub fn target(&self) -> &[f64] {
         &self.target
@@ -320,5 +437,73 @@ impl Task for RegressionTask {
     }
     fn feature_types(&self) -> &[FeatureType] {
         &self.feature_types
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    fn classif_task() -> ClassificationTask {
+        let features = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]];
+        ClassificationTask::new("t", features, vec![0, 1, 0, 1]).unwrap()
+    }
+
+    fn regress_task() -> RegressionTask {
+        let features = array![[1.0], [2.0], [3.0], [4.0]];
+        RegressionTask::new("t", features, vec![1.0, 2.0, 3.0, 4.0]).unwrap()
+    }
+
+    #[test]
+    fn weights_default_to_none() {
+        assert_eq!(classif_task().weights(), None);
+        assert_eq!(regress_task().weights(), None);
+    }
+
+    #[test]
+    fn with_weights_attaches_and_accessor_returns_them() {
+        let w = vec![1.0, 0.5, 2.0, 0.25];
+        let ct = classif_task().with_weights(w.clone());
+        assert_eq!(ct.weights(), Some(w.as_slice()));
+        let rt = regress_task().with_weights(w.clone());
+        assert_eq!(rt.weights(), Some(w.as_slice()));
+    }
+
+    #[test]
+    fn an_individual_zero_weight_is_valid() {
+        // weight 0 = "sample excluded" — only ALL-zero is invalid
+        let ct = classif_task().with_weights(vec![0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(ct.weights(), Some([0.0, 1.0, 0.0, 1.0].as_slice()));
+    }
+
+    #[test]
+    #[should_panic(expected = "one weight per sample is required")]
+    fn with_weights_panics_on_length_mismatch() {
+        classif_task().with_weights(vec![1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "must be finite")]
+    fn with_weights_panics_on_nan() {
+        classif_task().with_weights(vec![1.0, f64::NAN, 1.0, 1.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "must be finite")]
+    fn with_weights_panics_on_infinity() {
+        regress_task().with_weights(vec![1.0, f64::INFINITY, 1.0, 1.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "must be >= 0")]
+    fn with_weights_panics_on_negative_weight() {
+        regress_task().with_weights(vec![1.0, -0.5, 1.0, 1.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "at least one sample must have positive weight")]
+    fn with_weights_panics_when_all_weights_are_zero() {
+        classif_task().with_weights(vec![0.0, 0.0, 0.0, 0.0]);
     }
 }

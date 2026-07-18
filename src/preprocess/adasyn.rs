@@ -78,6 +78,17 @@ impl Adasyn {
                 "Adasyn k_neighbors must be >= 1, got 0".into(),
             ));
         }
+        // A weighted task cannot be resampled: a synthetic sample is an
+        // interpolation of two real ones, and there is no principled weight
+        // for it — any silent choice would corrupt the caller's weighting
+        // scheme (same guard as Smote/SpatialSmote).
+        if task.weights().is_some() {
+            return Err(crate::SmeltError::InvalidParameter(
+                "resampling a weighted task is not supported; the synthetic samples' \
+                 weights are undefined — remove with_weights() before ADASYN"
+                    .into(),
+            ));
+        }
         let features = task.features();
         let target = task.target();
         let n_classes = task.n_classes();

@@ -464,6 +464,366 @@ impl TreeBuilder {
     }
 }
 
+// --- Weighted tree building (Fase B1 of per-sample weights) ---
+//
+// Separate `*_weighted` twins of `build_classifier`/`build_regressor` and
+// their sweeps, dispatched once per training call on `task.weights()`. The
+// unweighted functions above are deliberately left byte-for-byte untouched:
+// the hot path carries no implicit-1.0 multiplications, no weight
+// allocations, and no per-sample branches (the sweep rewrite of 6c8f720
+// stays exactly as it was). The weighted twins follow the sklearn
+// convention:
+//
+// - weights enter the impurity (weighted Gini counts / weighted MSE sums)
+//   and the leaf values (weighted vote / weighted mean),
+// - `min_samples_split`/`min_samples_leaf` still count ROWS, not total
+//   weight (sklearn's `min_samples_*` semantics; a
+//   `min_weight_fraction_leaf`-style knob would be a separate parameter),
+// - a weight of exactly 0.0 means "sample excluded": callers filter
+//   zero-weight rows out of the root index set (see
+//   [`retain_positive_weight`]), which makes weight-0 bit-identical to
+//   deleting the row — including the candidate split thresholds, which a
+//   merely-zero-contribution row would otherwise still perturb.
+//
+// The weighted MSE sweep keeps the HIGH-1 lesson: sums are accumulated on
+// targets centered on the node's (now weighted) mean, so large additive
+// target offsets (UTM northings, timestamps) don't cancel catastrophically.
+// Products are ordered `w * y` and `w * (y * y)` — scaling the centered
+// value once per row — so integer weights reproduce repeated addition's
+// rounding (`fl(3y) = fl(y+y+y)`), which is what makes the
+// "integer weight k ≡ row duplicated k times" oracle exact.
+
+impl TreeBuilder {
+    pub(crate) fn build_classifier_weighted(
+        &mut self,
+        features: &ArrayView2<f64>,
+        target: &[usize],
+        weights: &[f64],
+        indices: &[usize],
+        n_classes: usize,
+        depth: usize,
+        rng: &mut impl Rng,
+    ) -> Node {
+        if indices.len() < self.min_samples_split
+            || self.max_depth.is_some_and(|d| depth >= d)
+            || all_same(indices, |i| target[i])
+        {
+            return Node::Leaf(classification_leaf_weighted(
+                target, weights, indices, n_classes,
+            ));
+        }
+
+        let candidates = self.candidate_features(rng);
+        if let Some((feat, threshold, left_idx, right_idx, gain)) = self
+            .best_split_classif_weighted(
+                features, target, weights, indices, n_classes, &candidates, rng,
+            )
+        {
+            if left_idx.len() < self.min_samples_leaf || right_idx.len() < self.min_samples_leaf {
+                return Node::Leaf(classification_leaf_weighted(
+                    target, weights, indices, n_classes,
+                ));
+            }
+
+            // Importance credit scales by the node's total weight — the
+            // weighted analogue of `gain * indices.len()` (with all-ones
+            // weights the two are bit-identical).
+            let node_weight: f64 = indices.iter().map(|&i| weights[i]).sum();
+            self.feature_importances[feat] += gain * node_weight;
+            let left = self.build_classifier_weighted(
+                features, target, weights, &left_idx, n_classes, depth + 1, rng,
+            );
+            let right = self.build_classifier_weighted(
+                features, target, weights, &right_idx, n_classes, depth + 1, rng,
+            );
+
+            Node::Split {
+                feature: feat,
+                threshold,
+                left: Box::new(left),
+                right: Box::new(right),
+            }
+        } else {
+            Node::Leaf(classification_leaf_weighted(
+                target, weights, indices, n_classes,
+            ))
+        }
+    }
+
+    pub(crate) fn build_regressor_weighted(
+        &mut self,
+        features: &ArrayView2<f64>,
+        target: &[f64],
+        weights: &[f64],
+        indices: &[usize],
+        depth: usize,
+        rng: &mut impl Rng,
+    ) -> Node {
+        if indices.len() < self.min_samples_split
+            || self.max_depth.is_some_and(|d| depth >= d)
+            || all_same(indices, |i| target[i].to_bits())
+        {
+            return Node::Leaf(regression_leaf_weighted(target, weights, indices));
+        }
+
+        let candidates = self.candidate_features(rng);
+        if let Some((feat, threshold, left_idx, right_idx, gain)) =
+            self.best_split_regress_weighted(features, target, weights, indices, &candidates, rng)
+        {
+            if left_idx.len() < self.min_samples_leaf || right_idx.len() < self.min_samples_leaf {
+                return Node::Leaf(regression_leaf_weighted(target, weights, indices));
+            }
+
+            let node_weight: f64 = indices.iter().map(|&i| weights[i]).sum();
+            self.feature_importances[feat] += gain * node_weight;
+            let left =
+                self.build_regressor_weighted(features, target, weights, &left_idx, depth + 1, rng);
+            let right = self
+                .build_regressor_weighted(features, target, weights, &right_idx, depth + 1, rng);
+
+            Node::Split {
+                feature: feat,
+                threshold,
+                left: Box::new(left),
+                right: Box::new(right),
+            }
+        } else {
+            Node::Leaf(regression_leaf_weighted(target, weights, indices))
+        }
+    }
+
+    /// Weighted twin of [`TreeBuilder::best_split_classif`]: identical sweep
+    /// structure, with per-class weight sums where the unweighted sweep has
+    /// integer counts. With all-ones weights every accumulated quantity is
+    /// the exact same f64 value the unweighted sweep computes (integer sums
+    /// are exact in f64), so the two return bit-identical splits.
+    fn best_split_classif_weighted(
+        &self,
+        features: &ArrayView2<f64>,
+        target: &[usize],
+        weights: &[f64],
+        indices: &[usize],
+        n_classes: usize,
+        candidate_features: &[usize],
+        rng: &mut impl Rng,
+    ) -> Option<(usize, f64, Vec<usize>, Vec<usize>, f64)> {
+        let parent_gini = gini_weighted(target, weights, indices, n_classes);
+        let n: f64 = indices.iter().map(|&i| weights[i]).sum();
+        let mut best_gain = 0.0;
+        let mut best = None;
+
+        for &feat in candidate_features {
+            let mut sorted: Vec<usize> = indices.to_vec();
+            sorted.sort_by(|&a, &b| {
+                features[[a, feat]]
+                    .partial_cmp(&features[[b, feat]])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            if self.random_splits {
+                let min_val = features[[sorted[0], feat]];
+                let max_val = features[[sorted[sorted.len() - 1], feat]];
+                if (max_val - min_val).abs() < f64::EPSILON {
+                    continue;
+                }
+                let threshold = rng.random_range(min_val..max_val);
+                let Some(pos @ 1..) = sorted
+                    .iter()
+                    .position(|&idx| features[[idx, feat]] > threshold)
+                else {
+                    continue;
+                };
+
+                let left_idx = &sorted[..pos];
+                let right_idx = &sorted[pos..];
+                let w_left: f64 = left_idx.iter().map(|&i| weights[i]).sum();
+                let w_right = n - w_left;
+                let gain = parent_gini
+                    - (w_left / n) * gini_weighted(target, weights, left_idx, n_classes)
+                    - (w_right / n) * gini_weighted(target, weights, right_idx, n_classes);
+
+                if gain > best_gain {
+                    best_gain = gain;
+                    let threshold_mid =
+                        (features[[sorted[pos - 1], feat]] + features[[sorted[pos], feat]]) / 2.0;
+                    best = Some((feat, threshold_mid, left_idx.to_vec(), right_idx.to_vec(), gain));
+                }
+                continue;
+            }
+
+            let mut left_counts = vec![0.0f64; n_classes];
+            let mut right_counts = vec![0.0f64; n_classes];
+            for &idx in &sorted {
+                right_counts[target[idx]] += weights[idx];
+            }
+
+            let mut w_left = 0.0;
+            for i in 1..sorted.len() {
+                let moved = sorted[i - 1];
+                let w = weights[moved];
+                left_counts[target[moved]] += w;
+                right_counts[target[moved]] -= w;
+                w_left += w;
+
+                if (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs()
+                    < f64::EPSILON
+                {
+                    continue;
+                }
+
+                let w_right = n - w_left;
+                let gain = parent_gini
+                    - (w_left / n) * gini_from_weighted_counts(&left_counts, w_left)
+                    - (w_right / n) * gini_from_weighted_counts(&right_counts, w_right);
+
+                if gain > best_gain {
+                    best_gain = gain;
+                    let threshold =
+                        (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
+                    best = Some((
+                        feat,
+                        threshold,
+                        sorted[..i].to_vec(),
+                        sorted[i..].to_vec(),
+                        gain,
+                    ));
+                }
+            }
+        }
+
+        best
+    }
+
+    /// Weighted twin of [`TreeBuilder::best_split_regress`]. Keeps the
+    /// centered accumulation (the shift is now the node's *weighted* mean),
+    /// so the HIGH-1 offset-invariance property holds for weighted trees
+    /// too.
+    fn best_split_regress_weighted(
+        &self,
+        features: &ArrayView2<f64>,
+        target: &[f64],
+        weights: &[f64],
+        indices: &[usize],
+        candidate_features: &[usize],
+        rng: &mut impl Rng,
+    ) -> Option<(usize, f64, Vec<usize>, Vec<usize>, f64)> {
+        let parent_mse = wmse(target, weights, indices);
+        let n: f64 = indices.iter().map(|&i| weights[i]).sum();
+        let shift = indices.iter().map(|&i| weights[i] * target[i]).sum::<f64>() / n;
+        let mut best_gain = 0.0;
+        let mut best = None;
+
+        for &feat in candidate_features {
+            let mut sorted: Vec<usize> = indices.to_vec();
+            sorted.sort_by(|&a, &b| {
+                features[[a, feat]]
+                    .partial_cmp(&features[[b, feat]])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            if self.random_splits {
+                let min_val = features[[sorted[0], feat]];
+                let max_val = features[[sorted[sorted.len() - 1], feat]];
+                if (max_val - min_val).abs() < f64::EPSILON {
+                    continue;
+                }
+                let threshold = rng.random_range(min_val..max_val);
+                let Some(pos @ 1..) = sorted
+                    .iter()
+                    .position(|&idx| features[[idx, feat]] > threshold)
+                else {
+                    continue;
+                };
+
+                let left_idx = &sorted[..pos];
+                let right_idx = &sorted[pos..];
+                let w_left: f64 = left_idx.iter().map(|&i| weights[i]).sum();
+                let w_right = n - w_left;
+                let gain = parent_mse
+                    - (w_left / n) * wmse(target, weights, left_idx)
+                    - (w_right / n) * wmse(target, weights, right_idx);
+
+                if gain > best_gain {
+                    best_gain = gain;
+                    let threshold_mid =
+                        (features[[sorted[pos - 1], feat]] + features[[sorted[pos], feat]]) / 2.0;
+                    best = Some((feat, threshold_mid, left_idx.to_vec(), right_idx.to_vec(), gain));
+                }
+                continue;
+            }
+
+            let mut left_sum = 0.0;
+            let mut left_sq = 0.0;
+            let mut right_sum = 0.0;
+            let mut right_sq = 0.0;
+            for &idx in &sorted {
+                let y = target[idx] - shift;
+                let w = weights[idx];
+                right_sum += w * y;
+                right_sq += w * (y * y);
+            }
+
+            let mut w_left = 0.0;
+            for i in 1..sorted.len() {
+                let moved = sorted[i - 1];
+                let y = target[moved] - shift;
+                let w = weights[moved];
+                let wy = w * y;
+                let wyy = w * (y * y);
+                left_sum += wy;
+                left_sq += wyy;
+                right_sum -= wy;
+                right_sq -= wyy;
+                w_left += w;
+
+                if (features[[sorted[i], feat]] - features[[sorted[i - 1], feat]]).abs()
+                    < f64::EPSILON
+                {
+                    continue;
+                }
+
+                let w_right = n - w_left;
+                let gain = parent_mse
+                    - (w_left / n) * mse_from_sums(left_sum, left_sq, w_left)
+                    - (w_right / n) * mse_from_sums(right_sum, right_sq, w_right);
+
+                if gain > best_gain {
+                    best_gain = gain;
+                    let threshold =
+                        (features[[sorted[i - 1], feat]] + features[[sorted[i], feat]]) / 2.0;
+                    best = Some((
+                        feat,
+                        threshold,
+                        sorted[..i].to_vec(),
+                        sorted[i..].to_vec(),
+                        gain,
+                    ));
+                }
+            }
+        }
+
+        best
+    }
+}
+
+/// Filters an index set down to rows with positive weight (weight 0.0 means
+/// "sample excluded" — Fase A's validated semantics). If filtering empties
+/// the set (a degenerate bootstrap/subsample that drew only excluded rows),
+/// falls back to every positive-weight row of the training set so the tree
+/// still trains on something honoring the weights, rather than panicking on
+/// an empty node.
+pub(crate) fn retain_positive_weight(
+    indices: Vec<usize>,
+    weights: &[f64],
+    n_samples: usize,
+) -> Vec<usize> {
+    let filtered: Vec<usize> = indices.into_iter().filter(|&i| weights[i] > 0.0).collect();
+    if !filtered.is_empty() {
+        return filtered;
+    }
+    (0..n_samples).filter(|&i| weights[i] > 0.0).collect()
+}
+
 // --- Free functions ---
 
 pub(crate) fn all_same<T: Eq>(indices: &[usize], val: impl Fn(usize) -> T) -> bool {
@@ -522,6 +882,93 @@ pub(crate) fn mse_from_sums(sum: f64, sum_sq: f64, n: f64) -> f64 {
     }
     let mean = sum / n;
     (sum_sq / n - mean * mean).max(0.0)
+}
+
+/// Weighted Gini impurity: per-class weight sums instead of counts. With
+/// all-ones weights this is bit-identical to [`gini`] (integer sums are
+/// exact in f64 and the final expression is the same).
+pub(crate) fn gini_weighted(
+    target: &[usize],
+    weights: &[f64],
+    indices: &[usize],
+    n_classes: usize,
+) -> f64 {
+    let mut counts = vec![0.0f64; n_classes];
+    let mut total = 0.0;
+    for &i in indices {
+        counts[target[i]] += weights[i];
+        total += weights[i];
+    }
+    gini_from_weighted_counts(&counts, total)
+}
+
+/// [`gini_from_counts`] over pre-aggregated per-class *weight* sums, for
+/// total weight `n` — the weighted sweep's O(n_classes) impurity.
+pub(crate) fn gini_from_weighted_counts(counts: &[f64], n: f64) -> f64 {
+    if n <= 0.0 {
+        return 0.0;
+    }
+    1.0 - counts.iter().map(|&c| (c / n).powi(2)).sum::<f64>()
+}
+
+/// Weighted MSE (weighted variance) around the weighted mean — the weighted
+/// twin of [`mse`], with the same accumulate-around-the-mean form (no
+/// E[y²]−E[y]² on raw targets; see the HIGH-1 note on [`mse_from_sums`]).
+pub(crate) fn wmse(target: &[f64], weights: &[f64], indices: &[usize]) -> f64 {
+    let mut sw = 0.0;
+    let mut swy = 0.0;
+    for &i in indices {
+        sw += weights[i];
+        swy += weights[i] * target[i];
+    }
+    let mean = swy / sw;
+    let mut acc = 0.0;
+    for &i in indices {
+        let d = target[i] - mean;
+        acc += weights[i] * (d * d);
+    }
+    acc / sw
+}
+
+/// Weighted classification leaf: probabilities are per-class weight shares
+/// and the predicted class is the weighted-majority vote. Tie-breaking
+/// matches [`classification_leaf`]'s `max_by_key` (last maximum wins), so
+/// all-ones weights produce a bit-identical leaf.
+pub(crate) fn classification_leaf_weighted(
+    target: &[usize],
+    weights: &[f64],
+    indices: &[usize],
+    n_classes: usize,
+) -> LeafValue {
+    let mut counts = vec![0.0f64; n_classes];
+    let mut total = 0.0;
+    for &i in indices {
+        counts[target[i]] += weights[i];
+        total += weights[i];
+    }
+    let probs: Vec<f64> = counts.iter().map(|&c| c / total).collect();
+    let predicted = counts
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap()
+        .0;
+    LeafValue::Class(predicted, probs)
+}
+
+/// Weighted regression leaf: the weighted mean of the raw targets.
+pub(crate) fn regression_leaf_weighted(
+    target: &[f64],
+    weights: &[f64],
+    indices: &[usize],
+) -> LeafValue {
+    let mut sw = 0.0;
+    let mut swy = 0.0;
+    for &i in indices {
+        sw += weights[i];
+        swy += weights[i] * target[i];
+    }
+    LeafValue::Value(swy / sw)
 }
 
 pub(crate) fn classification_leaf(

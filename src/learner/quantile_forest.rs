@@ -399,6 +399,9 @@ impl QuantileForest {
     /// trait" shape as `DeepForest::fit`/`GeoXGBoost::train_geo`.
     /// [`Learner::train_regress`] just boxes this.
     pub fn fit(&mut self, task: &RegressionTask) -> Result<TrainedQuantileForest> {
+        // Guard here (not in `Learner::train_regress`, which just boxes this)
+        // so BOTH public entry points reject weighted tasks.
+        crate::validate::check_no_weights(task.weights(), "QuantileForest")?;
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();

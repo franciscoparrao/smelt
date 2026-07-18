@@ -68,9 +68,19 @@ impl LogisticRegression {
 }
 
 /// Train a single binary logistic regression (positive class vs rest).
+///
+/// With per-sample `weights`, each sample's gradient contribution is
+/// multiplied by its weight and the gradient is normalized by the TOTAL
+/// weight `Σ w_i` instead of the row count, so an integer weight `k` is
+/// equivalent to duplicating the row `k` times (up to floating-point
+/// round-off; gradient descent is deterministic, so the two trajectories
+/// only differ at the ulp level). When `weights` is `None` the multiplier
+/// is the constant `1.0` and the normalizer is `n as f64` — both exact —
+/// so the unweighted path is bit-identical to the historical code.
 fn train_binary(
     x: &Array2<f64>,
     y_binary: &[f64], // 1.0 for positive, 0.0 for negative
+    weights: Option<&[f64]>,
     lr: f64,
     max_iter: usize,
     tol: f64,
@@ -79,6 +89,8 @@ fn train_binary(
     let p = x.ncols();
     // weights = [w1, ..., wp, bias]
     let mut w = Array1::zeros(p + 1);
+    // Sequential sum of ones equals `n as f64` exactly (n << 2^53).
+    let total_weight = weights.map_or(n as f64, |sw| sw.iter().sum());
 
     for _ in 0..max_iter {
         let mut grad: Array1<f64> = Array1::zeros(p + 1);
@@ -90,16 +102,17 @@ fn train_binary(
                 z += x[[i, j]] * w[j];
             }
             let pred = sigmoid(z);
-            let err = pred - y_binary[i];
+            // 1.0 * err == err exactly, so None ≡ the pre-weights code.
+            let err = weights.map_or(1.0, |sw| sw[i]) * (pred - y_binary[i]);
             for j in 0..p {
                 grad[j] += err * x[[i, j]];
             }
             grad[p] += err; // bias gradient
         }
 
-        // Average and update
+        // Average (by total weight) and update
         for j in 0..=p {
-            grad[j] /= n as f64;
+            grad[j] /= total_weight;
             max_grad = max_grad.max(grad[j].abs());
             w[j] -= lr * grad[j];
         }
@@ -230,6 +243,10 @@ impl Learner for LogisticRegression {
         "logistic_regression"
     }
 
+    fn supports_weights(&self) -> bool {
+        true
+    }
+
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_nan(task.features())?;
         let x = task.features();
@@ -237,16 +254,43 @@ impl Learner for LogisticRegression {
         let n_classes = task.n_classes();
         let n_features = task.n_features();
         let n_samples = task.n_samples() as f64;
+        let sample_weights = task.weights();
 
-        // Auto-scale features (standardization)
+        // Auto-scale features (standardization). With per-sample weights
+        // the statistics must be WEIGHTED (mean = Σ w·v / Σw, var =
+        // Σ w·(v-mean)² / Σw): otherwise a weight of k and k duplicated
+        // rows would standardize the same data differently, breaking the
+        // duplication equivalence before the gradient even runs. The
+        // unweighted branch is the historical code, untouched.
         let mut means = vec![0.0; n_features];
         let mut stds = vec![0.0; n_features];
-        for j in 0..n_features {
-            let col = x.column(j);
-            let mean = col.sum() / n_samples;
-            let var = col.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n_samples;
-            means[j] = mean;
-            stds[j] = if var > 0.0 { var.sqrt() } else { 1.0 };
+        match sample_weights {
+            None => {
+                for j in 0..n_features {
+                    let col = x.column(j);
+                    let mean = col.sum() / n_samples;
+                    let var =
+                        col.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n_samples;
+                    means[j] = mean;
+                    stds[j] = if var > 0.0 { var.sqrt() } else { 1.0 };
+                }
+            }
+            Some(w) => {
+                let total: f64 = w.iter().sum();
+                for j in 0..n_features {
+                    let col = x.column(j);
+                    let mean =
+                        col.iter().zip(w).map(|(&v, &wi)| wi * v).sum::<f64>() / total;
+                    let var = col
+                        .iter()
+                        .zip(w)
+                        .map(|(&v, &wi)| wi * (v - mean).powi(2))
+                        .sum::<f64>()
+                        / total;
+                    means[j] = mean;
+                    stds[j] = if var > 0.0 { var.sqrt() } else { 1.0 };
+                }
+            }
         }
 
         // Create scaled feature matrix
@@ -265,6 +309,7 @@ impl Learner for LogisticRegression {
             vec![train_binary(
                 &x_scaled,
                 &y_binary,
+                sample_weights,
                 self.learning_rate,
                 self.max_iter,
                 self.tol,
@@ -279,6 +324,7 @@ impl Learner for LogisticRegression {
                     train_binary(
                         &x_scaled,
                         &y_binary,
+                        sample_weights,
                         self.learning_rate,
                         self.max_iter,
                         self.tol,

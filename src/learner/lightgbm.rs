@@ -34,6 +34,21 @@ use super::histogram::{HistBins, NAN_BIN, accumulate_histogram, best_categorical
 /// Ke et al. (2017). Does not include Exclusive Feature Bundling (EFB)
 /// or weighted GOSS histograms.
 ///
+/// # Sample weights
+///
+/// Per-sample weights attached via `Task::with_weights` scale each sample's
+/// gradient and hessian *before* any accumulation (histograms, split gains,
+/// leaf values, the initial score, and the train-loss early-stopping
+/// monitor). GOSS therefore operates on the already-weighted gradients —
+/// its top-|gradient| selection sees `|w_i * g_i|` — matching the official
+/// implementation, and its own amplification weights multiply *on top of*
+/// the sample weights in the histogram accumulation. The same compounding
+/// applies to `with_subsample` row bagging (itself a documented divergence
+/// from the official library, which forbids bagging+GOSS): bagging selects
+/// rows uniformly regardless of weight; dropped rows simply contribute
+/// nothing that tree. The eval-set early-stopping metric is NOT weighted —
+/// weights belong to training rows; an eval row has no weight.
+///
 /// # Examples
 ///
 /// ```
@@ -863,9 +878,18 @@ impl Learner for LightGBM {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
+        let sw = task.weights();
         let eval = validate_eval_regress(&self.eval_set, nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
-        let initial = target.iter().sum::<f64>() / ns as f64;
+        // Weighted mean as the initial prediction when sample weights are set
+        // (wsum > 0 is guaranteed by Task::with_weights validation).
+        let initial = match sw {
+            Some(w) => {
+                let wsum: f64 = w.iter().sum();
+                target.iter().zip(w).map(|(y, wi)| y * wi).sum::<f64>() / wsum
+            }
+            None => target.iter().sum::<f64>() / ns as f64,
+        };
         let mut preds = vec![initial; ns];
         let mut eval_preds = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
         let mut trees = Vec::with_capacity(self.n_estimators);
@@ -874,8 +898,16 @@ impl Learner for LightGBM {
         let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
-            let grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
-            let hess = vec![1.0; ns];
+            let mut grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
+            let mut hess = vec![1.0; ns];
+            if let Some(w) = sw {
+                // Weights scale gradient AND hessian before any accumulation;
+                // GOSS below then samples on the weighted |gradient|.
+                for i in 0..ns {
+                    grads[i] *= w[i];
+                    hess[i] *= w[i];
+                }
+            }
 
             let bag = self.sample_rows(&mut rng, ns);
             let (selected, weights) =
@@ -907,11 +939,27 @@ impl Learner for LightGBM {
             trees.push(tree);
 
             if stopper.is_active() {
-                // MSE on the held-out set when provided, else on train.
+                // MSE on the held-out set when provided (unweighted: weights
+                // are a training-row property), else (weighted) MSE on train.
                 let loss = if let (Some(ep), Some((_, et))) = (&eval_preds, eval) {
                     ep.iter().zip(et).map(|(p, y)| (p - y).powi(2)).sum::<f64>() / ep.len() as f64
                 } else {
-                    preds.iter().zip(target).map(|(p, y)| (p - y).powi(2)).sum::<f64>() / ns as f64
+                    match sw {
+                        Some(w) => {
+                            let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                            preds
+                                .iter()
+                                .zip(target)
+                                .zip(w)
+                                .map(|((p, y), wi)| wi * (p - y).powi(2))
+                                .sum::<f64>()
+                                / wsum
+                        }
+                        None => {
+                            preds.iter().zip(target).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+                                / ns as f64
+                        }
+                    }
                 };
                 if let Some(best_n) = stopper.update(loss, trees.len()) {
                     trees.truncate(best_n);
@@ -938,6 +986,13 @@ impl Learner for LightGBM {
             self.train_multiclass(task)
         }
     }
+
+    /// LightGBM consumes `Task::with_weights`: gradients and hessians are
+    /// scaled per sample before GOSS sampling and histogram accumulation
+    /// (see the struct-level "Sample weights" doc for the GOSS interaction).
+    fn supports_weights(&self) -> bool {
+        true
+    }
 }
 
 impl LightGBM {
@@ -945,9 +1000,23 @@ impl LightGBM {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
+        let sw = task.weights();
         let eval = validate_eval_classif(&self.eval_set, nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
-        let p_pos = target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64;
+        // Weighted positive-class fraction as the initial log-odds when
+        // sample weights are set.
+        let p_pos = match sw {
+            Some(w) => {
+                let wsum: f64 = w.iter().sum();
+                target
+                    .iter()
+                    .zip(w)
+                    .map(|(&t, wi)| if t == 1 { *wi } else { 0.0 })
+                    .sum::<f64>()
+                    / wsum
+            }
+            None => target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64,
+        };
         let initial = (p_pos / (1.0 - p_pos).max(1e-15)).ln();
         let mut fv = vec![initial; ns];
         let mut eval_fv = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
@@ -957,13 +1026,21 @@ impl LightGBM {
         let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
-            let grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
-            let hess: Vec<f64> = (0..ns)
+            let mut grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
+            let mut hess: Vec<f64> = (0..ns)
                 .map(|i| {
                     let p = sigmoid(fv[i]);
                     p * (1.0 - p).max(1e-15)
                 })
                 .collect();
+            if let Some(w) = sw {
+                // Weights scale gradient AND hessian before any accumulation;
+                // GOSS below then samples on the weighted |gradient|.
+                for i in 0..ns {
+                    grads[i] *= w[i];
+                    hess[i] *= w[i];
+                }
+            }
             let bag = self.sample_rows(&mut rng, ns);
             let (selected, weights) =
                 goss_sample(&grads, &hess, &bag, self.top_rate, self.other_rate, &mut rng);
@@ -1000,11 +1077,28 @@ impl LightGBM {
                     let y = y as f64;
                     -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
                 };
+                // Eval-set metric unweighted (weights are a training-row
+                // property); train-loss fallback weighted to track the
+                // weighted objective actually being fit.
                 let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
                     efv.iter().zip(et).map(|(&f, &y)| logloss(f, y)).sum::<f64>()
                         / efv.len() as f64
                 } else {
-                    fv.iter().zip(target).map(|(&f, &y)| logloss(f, y)).sum::<f64>() / ns as f64
+                    match sw {
+                        Some(w) => {
+                            let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                            fv.iter()
+                                .zip(target)
+                                .zip(w)
+                                .map(|((&f, &y), wi)| wi * logloss(f, y))
+                                .sum::<f64>()
+                                / wsum
+                        }
+                        None => {
+                            fv.iter().zip(target).map(|(&f, &y)| logloss(f, y)).sum::<f64>()
+                                / ns as f64
+                        }
+                    }
                 };
                 if let Some(best_n) = stopper.update(loss, trees.len()) {
                     trees.truncate(best_n);
@@ -1027,16 +1121,30 @@ impl LightGBM {
         let features = task.features();
         let target = task.target();
         let (ns, nf, nc) = (task.n_samples(), task.n_features(), task.n_classes());
+        let sw = task.weights();
         let eval = validate_eval_classif(&self.eval_set, nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
-        let mut cc = vec![0usize; nc];
-        for &t in target {
-            cc[t] += 1;
-        }
-        let initial: Vec<f64> = cc
-            .iter()
-            .map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln())
-            .collect();
+        // Weighted per-class frequency as the initial log-prior when sample
+        // weights are set.
+        let initial: Vec<f64> = match sw {
+            Some(w) => {
+                let mut wc = vec![0.0; nc];
+                for (&t, &wi) in target.iter().zip(w) {
+                    wc[t] += wi;
+                }
+                let wsum: f64 = w.iter().sum::<f64>().max(1e-15);
+                wc.iter().map(|&c| (c / wsum).max(1e-15).ln()).collect()
+            }
+            None => {
+                let mut cc = vec![0usize; nc];
+                for &t in target {
+                    cc[t] += 1;
+                }
+                cc.iter()
+                    .map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln())
+                    .collect()
+            }
+        };
         let mut fv: Vec<Vec<f64>> = (0..ns).map(|_| initial.clone()).collect();
         let mut eval_fv: Option<Vec<Vec<f64>>> =
             eval.map(|(ef, _)| (0..ef.nrows()).map(|_| initial.clone()).collect());
@@ -1050,12 +1158,20 @@ impl LightGBM {
             let cols = self.sample_cols(&mut rng, nf);
             let bag = self.sample_rows(&mut rng, ns);
             for c in 0..nc {
-                let grads: Vec<f64> = (0..ns)
+                let mut grads: Vec<f64> = (0..ns)
                     .map(|i| probs[i][c] - if target[i] == c { 1.0 } else { 0.0 })
                     .collect();
-                let hess: Vec<f64> = (0..ns)
+                let mut hess: Vec<f64> = (0..ns)
                     .map(|i| (probs[i][c] * (1.0 - probs[i][c])).max(1e-15))
                     .collect();
+                if let Some(w) = sw {
+                    // Weights scale gradient AND hessian before accumulation;
+                    // GOSS below samples on the weighted |gradient|.
+                    for i in 0..ns {
+                        grads[i] *= w[i];
+                        hess[i] *= w[i];
+                    }
+                }
                 let (selected, weights) =
                     goss_sample(&grads, &hess, &bag, self.top_rate, self.other_rate, &mut rng);
                 let tree = build_leaf_wise_tree(
@@ -1084,13 +1200,21 @@ impl LightGBM {
 
             if stopper.is_active() {
                 let eps = 1e-15;
+                // Eval-set metric unweighted; weighted train-loss fallback.
                 let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
                     let ep: Vec<Vec<f64>> = efv.iter().map(|f| softmax(f)).collect();
                     (0..et.len()).map(|i| -ep[i][et[i]].max(eps).ln()).sum::<f64>()
                         / et.len() as f64
                 } else {
                     let pn: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
-                    (0..ns).map(|i| -pn[i][target[i]].max(eps).ln()).sum::<f64>() / ns as f64
+                    let per_point = |i: usize| -pn[i][target[i]].max(eps).ln();
+                    match sw {
+                        Some(w) => {
+                            let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                            (0..ns).map(|i| w[i] * per_point(i)).sum::<f64>() / wsum
+                        }
+                        None => (0..ns).map(per_point).sum::<f64>() / ns as f64,
+                    }
                 };
                 if let Some(best_n) = stopper.update(loss, trees.len()) {
                     trees.truncate(best_n);

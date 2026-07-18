@@ -66,6 +66,36 @@ fn standardize_fit(features: &Array2<f64>) -> (Array2<f64>, Array1<f64>, Array1<
     (standardized, mean, std)
 }
 
+/// Sample-weighted variant of [`standardize_fit`]: mean `Σ w·v / Σw` and
+/// variance `Σ w·(v-mean)² / Σw` per column. With per-sample weights the
+/// standardization statistics must be weighted, or a weight of `k` and `k`
+/// duplicated rows would standardize the same data differently — breaking
+/// the weight-k ≡ k-duplicates equivalence before the output solve runs.
+/// The unweighted path keeps calling [`standardize_fit`] untouched.
+fn standardize_fit_weighted(
+    features: &Array2<f64>,
+    weights: &[f64],
+) -> (Array2<f64>, Array1<f64>, Array1<f64>) {
+    let total: f64 = weights.iter().sum();
+    let n_features = features.ncols();
+    let mut mean = Array1::zeros(n_features);
+    let mut std = Array1::zeros(n_features);
+    for j in 0..n_features {
+        let col = features.column(j);
+        let m = col.iter().zip(weights).map(|(&v, &w)| w * v).sum::<f64>() / total;
+        let var = col
+            .iter()
+            .zip(weights)
+            .map(|(&v, &w)| w * (v - m).powi(2))
+            .sum::<f64>()
+            / total;
+        mean[j] = m;
+        std[j] = if var.sqrt() < 1e-12 { 1.0 } else { var.sqrt() };
+    }
+    let standardized = standardize_apply(features, &mean, &std);
+    (standardized, mean, std)
+}
+
 /// Applies a previously-fit `(mean, std)` standardization to `features`.
 /// Used both to finish [`standardize_fit`] and, at predict time, to apply
 /// the exact same transform the model was trained on.
@@ -228,15 +258,35 @@ impl ExtremeLearningMachine {
         h
     }
 
-    /// Solves `(HᵀH + λI) β = Hᵀ T` one output column at a time.
-    fn solve_output_weights(&self, h: &Array2<f64>, targets: &Array2<f64>) -> Result<Array2<f64>> {
+    /// Solves `(HᵀH + λI) β = Hᵀ T` one output column at a time — or, with
+    /// per-sample weights, the weighted ridge system `(HᵀWH + λI) β = HᵀWT`
+    /// with `W = diag(weights)`. The ridge penalty `λ` is NOT scaled by the
+    /// total weight, so an integer weight `k` is exactly equivalent to
+    /// duplicating that row `k` times (same convention as [`super::Ridge`]).
+    /// `W` is applied by scaling the rows of one copy of `H` ((WH)ᵀH =
+    /// HᵀWH), so the unweighted path is bit-identical to the historical
+    /// code and all-ones weights reproduce it exactly.
+    fn solve_output_weights(
+        &self,
+        h: &Array2<f64>,
+        targets: &Array2<f64>,
+        weights: Option<&[f64]>,
+    ) -> Result<Array2<f64>> {
         let n_hidden = h.ncols();
         let n_outputs = targets.ncols();
-        let mut hth = h.t().dot(h);
+        let (mut hth, hty) = match weights {
+            None => (h.t().dot(h), h.t().dot(targets)),
+            Some(w) => {
+                let mut hw = h.clone();
+                for (i, &wi) in w.iter().enumerate() {
+                    hw.row_mut(i).mapv_inplace(|v| wi * v);
+                }
+                (hw.t().dot(h), hw.t().dot(targets))
+            }
+        };
         for j in 0..n_hidden {
             hth[[j, j]] += self.regularization;
         }
-        let hty = h.t().dot(targets);
 
         let mut beta = Array2::zeros((n_hidden, n_outputs));
         for k in 0..n_outputs {
@@ -319,6 +369,10 @@ impl Learner for ExtremeLearningMachine {
         "elm"
     }
 
+    fn supports_weights(&self) -> bool {
+        true
+    }
+
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         self.check_n_hidden()?;
         crate::validate::check_no_nan(task.features())?;
@@ -326,8 +380,14 @@ impl Learner for ExtremeLearningMachine {
         let target = task.target();
         let n_classes = task.n_classes();
         let n_features = task.n_features();
+        let sample_weights = task.weights();
 
-        let (standardized, feature_mean, feature_std) = standardize_fit(features);
+        let (standardized, feature_mean, feature_std) = match sample_weights {
+            None => standardize_fit(features),
+            Some(sw) => standardize_fit_weighted(features, sw),
+        };
+        // The random projection depends only on the seed and n_features,
+        // never on the weights: same seed ⇒ same hidden layer.
         let (w, b) = self.random_hidden_layer(n_features);
         let h = self.hidden_output(&standardized, &w, &b);
 
@@ -336,7 +396,7 @@ impl Learner for ExtremeLearningMachine {
             one_hot[[i, label]] = 1.0;
         }
 
-        let output_weights = self.solve_output_weights(&h, &one_hot)?;
+        let output_weights = self.solve_output_weights(&h, &one_hot, sample_weights)?;
 
         Ok(Box::new(TrainedELM {
             input_weights: w,
@@ -356,14 +416,18 @@ impl Learner for ExtremeLearningMachine {
         let features = task.features();
         let target = task.target();
         let n_features = task.n_features();
+        let sample_weights = task.weights();
 
-        let (standardized, feature_mean, feature_std) = standardize_fit(features);
+        let (standardized, feature_mean, feature_std) = match sample_weights {
+            None => standardize_fit(features),
+            Some(sw) => standardize_fit_weighted(features, sw),
+        };
         let (w, b) = self.random_hidden_layer(n_features);
         let h = self.hidden_output(&standardized, &w, &b);
         let targets = Array2::from_shape_vec((target.len(), 1), target.to_vec())
             .expect("target length matches n_samples by construction");
 
-        let output_weights = self.solve_output_weights(&h, &targets)?;
+        let output_weights = self.solve_output_weights(&h, &targets, sample_weights)?;
 
         Ok(Box::new(TrainedELM {
             input_weights: w,

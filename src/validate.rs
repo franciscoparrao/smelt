@@ -38,6 +38,26 @@ pub fn check_non_empty(features: &Array2<f64>) -> Result<()> {
     Ok(())
 }
 
+/// Check that a task carries no sample weights, naming the learner that
+/// cannot honour them.
+///
+/// Every learner that does not consume per-sample weights calls this at the
+/// top of `train_classif`/`train_regress` (same mechanical pattern as
+/// [`check_no_nan`] in the non-NaN learners): a weighted task must fail
+/// loudly rather than have its weights silently ignored — silently dropping
+/// them would produce an unweighted fit the caller believes is weighted.
+/// Weight-aware learners (a later phase) remove this guard and override
+/// [`crate::learner::Learner::supports_weights`] instead.
+pub fn check_no_weights(weights: Option<&[f64]>, learner_name: &str) -> Result<()> {
+    if weights.is_some() {
+        return Err(SmeltError::InvalidParameter(format!(
+            "{learner_name} does not support sample weights yet; remove with_weights() \
+             or use a weight-aware learner"
+        )));
+    }
+    Ok(())
+}
+
 /// Check that every coordinate pair is finite (no NaN/±inf).
 ///
 /// The spatial learners compute pairwise distances from these: a single

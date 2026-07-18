@@ -220,6 +220,9 @@ impl DeepForest {
     /// truncated the cascade, the same "concrete type beyond the trait"
     /// shape as `TrainedKrigingHybrid`/`TrainedGeoXGBoost`.
     pub fn fit(&mut self, task: &ClassificationTask) -> Result<TrainedDeepForest> {
+        // Guard here (not in `Learner::train_classif`, which just boxes this)
+        // so BOTH public entry points reject weighted tasks.
+        crate::validate::check_no_weights(task.weights(), "DeepForest")?;
         crate::validate::check_no_nan(task.features())?;
         let original_features = task.features().clone();
         let target = task.target().to_vec();

@@ -46,10 +46,18 @@ pub fn resample_classif(
     for (train_idx, test_idx) in &splits {
         let train_features = features.select(Axis(0), train_idx);
         let train_target: Vec<usize> = train_idx.iter().map(|&i| target[i]).collect();
-        let train_task = ClassificationTask::new(task.id(), train_features, train_target)?
+        let mut train_task = ClassificationTask::new(task.id(), train_features, train_target)?
             .with_feature_names(task.feature_names().to_vec())?
             .with_feature_types(task.feature_types().to_vec())?
             .with_class_names(task.class_names().to_vec());
+        // Slice sample weights with the SAME indices as features/target, so
+        // each fold task stays row-aligned (same metadata-loss bug class as
+        // 5th audit M-3, where feature_types were dropped on fold rebuild).
+        // The test side needs no propagation: no test task is ever built —
+        // predictions run directly on the test feature matrix.
+        if let Some(w) = task.weights() {
+            train_task = train_task.with_weights(train_idx.iter().map(|&i| w[i]).collect());
+        }
 
         let model = learner.train_classif(&train_task)?;
 
@@ -85,9 +93,17 @@ pub fn resample_regress(
     for (train_idx, test_idx) in &splits {
         let train_features = features.select(Axis(0), train_idx);
         let train_target: Vec<f64> = train_idx.iter().map(|&i| target[i]).collect();
-        let train_task = RegressionTask::new(task.id(), train_features, train_target)?
+        let mut train_task = RegressionTask::new(task.id(), train_features, train_target)?
             .with_feature_names(task.feature_names().to_vec())?
             .with_feature_types(task.feature_types().to_vec())?;
+        // Slice sample weights with the SAME indices as features/target, so
+        // each fold task stays row-aligned (same metadata-loss bug class as
+        // 5th audit M-3, where feature_types were dropped on fold rebuild).
+        // The test side needs no propagation: no test task is ever built —
+        // predictions run directly on the test feature matrix.
+        if let Some(w) = task.weights() {
+            train_task = train_task.with_weights(train_idx.iter().map(|&i| w[i]).collect());
+        }
 
         let model = learner.train_regress(&train_task)?;
 

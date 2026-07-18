@@ -16,6 +16,12 @@ use rand::seq::SliceRandom;
 
 /// Gradient Boosting learner.
 ///
+/// Supports per-sample weights: the initial prediction is the weighted mean
+/// (regression) / weighted log-odds (classification), the residual trees
+/// train with the weights in their impurity and leaves, and the Newton leaf
+/// refit uses weighted gradient/hessian sums. Subsampling stays uniform; a
+/// weight of `0.0` excludes the sample.
+///
 /// # Examples
 ///
 /// ```
@@ -241,6 +247,15 @@ impl Learner for GradientBoosting {
         "gradient_boosting"
     }
 
+    /// `true`: the initial prediction is the weighted mean (regression) /
+    /// weighted log-odds (classification), every residual tree trains with
+    /// the weights in its impurity and leaves, and the Newton leaf refit
+    /// uses weighted gradient/hessian sums. Subsampling (like RF's
+    /// bootstrap) stays uniform; a weight of 0.0 excludes the sample.
+    fn supports_weights(&self) -> bool {
+        true
+    }
+
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_nan(task.features())?;
         let n_classes = task.n_classes();
@@ -255,10 +270,17 @@ impl Learner for GradientBoosting {
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
+        let weights = task.weights();
         let n_samples = task.n_samples();
         let n_features = task.n_features();
 
-        let initial = target.iter().sum::<f64>() / n_samples as f64;
+        // Initial prediction: the (weighted) target mean.
+        let initial = match weights {
+            None => target.iter().sum::<f64>() / n_samples as f64,
+            Some(w) => {
+                target.iter().zip(w).map(|(y, &wi)| wi * y).sum::<f64>() / w.iter().sum::<f64>()
+            }
+        };
         let mut current_preds = vec![initial; n_samples];
         let mut trees = Vec::with_capacity(self.n_estimators);
         let mut total_importances = vec![0.0; n_features];
@@ -271,7 +293,13 @@ impl Learner for GradientBoosting {
                 .map(|(y, p)| y - p)
                 .collect();
 
+            // Subsampling stays uniform under weights (same convention as
+            // RF's bootstrap); weight-0 rows are then excluded outright.
             let indices = self.subsample_indices(n_samples, &mut rng);
+            let indices = match weights {
+                None => indices,
+                Some(w) => super::retain_positive_weight(indices, w, n_samples),
+            };
 
             let mut builder = TreeBuilder::new(
                 self.max_depth,
@@ -280,7 +308,19 @@ impl Learner for GradientBoosting {
                 None,
                 n_features,
             );
-            let root = builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng);
+            let root = match weights {
+                None => {
+                    builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng)
+                }
+                Some(w) => builder.build_regressor_weighted(
+                    &features.view(),
+                    &residuals,
+                    w,
+                    &indices,
+                    0,
+                    &mut rng,
+                ),
+            };
 
             // Update predictions
             for i in 0..n_samples {
@@ -359,11 +399,23 @@ impl GradientBoosting {
     fn train_binary(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
         let target = task.target();
+        let weights = task.weights();
         let n_samples = task.n_samples();
         let n_features = task.n_features();
 
-        // Initial log-odds
-        let p_pos = target.iter().filter(|&&t| t == 1).count() as f64 / n_samples as f64;
+        // Initial log-odds (weighted positive share when weighted)
+        let p_pos = match weights {
+            None => target.iter().filter(|&&t| t == 1).count() as f64 / n_samples as f64,
+            Some(w) => {
+                let pos: f64 = target
+                    .iter()
+                    .zip(w)
+                    .filter(|&(&t, _)| t == 1)
+                    .map(|(_, &wi)| wi)
+                    .sum();
+                pos / w.iter().sum::<f64>()
+            }
+        };
         let initial = (p_pos / (1.0 - p_pos).max(1e-15)).ln();
         let mut current_f = vec![initial; n_samples];
         let mut trees = Vec::with_capacity(self.n_estimators);
@@ -379,6 +431,10 @@ impl GradientBoosting {
                 .collect();
 
             let indices = self.subsample_indices(n_samples, &mut rng);
+            let indices = match weights {
+                None => indices,
+                Some(w) => super::retain_positive_weight(indices, w, n_samples),
+            };
 
             let mut builder = TreeBuilder::new(
                 self.max_depth,
@@ -387,13 +443,25 @@ impl GradientBoosting {
                 None,
                 n_features,
             );
-            let mut root =
-                builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng);
+            let mut root = match weights {
+                None => {
+                    builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng)
+                }
+                Some(w) => builder.build_regressor_weighted(
+                    &features.view(),
+                    &residuals,
+                    w,
+                    &indices,
+                    0,
+                    &mut rng,
+                ),
+            };
 
             // Newton step (audit issue M7): correct each leaf's value using
             // the log-loss hessian p*(1-p) at the *current* ensemble
             // prediction, evaluated on the same subsample the tree was
-            // built on.
+            // built on. Under weights the leaf value is Σw·g / Σw·h, so
+            // gradient and hessian are pre-scaled per sample.
             let hess: Vec<f64> = current_f
                 .iter()
                 .map(|&f| {
@@ -401,7 +469,14 @@ impl GradientBoosting {
                     (p * (1.0 - p)).max(1e-15)
                 })
                 .collect();
-            refit_leaf_newton(&mut root, features, &indices, &residuals, &hess);
+            match weights {
+                None => refit_leaf_newton(&mut root, features, &indices, &residuals, &hess),
+                Some(w) => {
+                    let gw: Vec<f64> = residuals.iter().zip(w).map(|(&g, &wi)| wi * g).collect();
+                    let hw: Vec<f64> = hess.iter().zip(w).map(|(&h, &wi)| wi * h).collect();
+                    refit_leaf_newton(&mut root, features, &indices, &gw, &hw);
+                }
+            }
 
             for i in 0..n_samples {
                 if let LeafValue::Value(v) = root.predict_one(features.row(i)) {
@@ -428,19 +503,35 @@ impl GradientBoosting {
     fn train_multiclass(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
         let target = task.target();
+        let weights = task.weights();
         let n_samples = task.n_samples();
         let n_features = task.n_features();
         let n_classes = task.n_classes();
 
-        // Initial log-proportions per class
-        let mut class_counts = vec![0usize; n_classes];
-        for &t in target {
-            class_counts[t] += 1;
-        }
-        let initial: Vec<f64> = class_counts
-            .iter()
-            .map(|&c| ((c as f64 / n_samples as f64).max(1e-15)).ln())
-            .collect();
+        // Initial log-proportions per class (weighted shares when weighted)
+        let initial: Vec<f64> = match weights {
+            None => {
+                let mut class_counts = vec![0usize; n_classes];
+                for &t in target {
+                    class_counts[t] += 1;
+                }
+                class_counts
+                    .iter()
+                    .map(|&c| ((c as f64 / n_samples as f64).max(1e-15)).ln())
+                    .collect()
+            }
+            Some(w) => {
+                let mut class_w = vec![0.0f64; n_classes];
+                for (&t, &wi) in target.iter().zip(w) {
+                    class_w[t] += wi;
+                }
+                let total: f64 = w.iter().sum();
+                class_w
+                    .iter()
+                    .map(|&c| ((c / total).max(1e-15)).ln())
+                    .collect()
+            }
+        };
 
         // Current raw scores: [sample][class]
         let mut current_f: Vec<Vec<f64>> = (0..n_samples).map(|_| initial.clone()).collect();
@@ -454,6 +545,10 @@ impl GradientBoosting {
             let probs: Vec<Vec<f64>> = current_f.iter().map(|f| softmax(f)).collect();
 
             let indices = self.subsample_indices(n_samples, &mut rng);
+            let indices = match weights {
+                None => indices,
+                Some(w) => super::retain_positive_weight(indices, w, n_samples),
+            };
 
             // One tree per class
             for c in 0..n_classes {
@@ -472,16 +567,36 @@ impl GradientBoosting {
                     None,
                     n_features,
                 );
-                let mut root =
-                    builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng);
+                let mut root = match weights {
+                    None => {
+                        builder.build_regressor(&features.view(), &residuals, &indices, 0, &mut rng)
+                    }
+                    Some(w) => builder.build_regressor_weighted(
+                        &features.view(),
+                        &residuals,
+                        w,
+                        &indices,
+                        0,
+                        &mut rng,
+                    ),
+                };
 
                 // Newton step (audit issue M7): diagonal softmax hessian
                 // p_ic*(1-p_ic), the same per-class approximation used
                 // elsewhere for multiclass boosting (e.g. CatBoost's
-                // `train_multiclass`).
+                // `train_multiclass`). Weighted: Σw·g / Σw·h via pre-scaled
+                // per-sample gradient/hessian, as in `train_binary`.
                 let hess: Vec<f64> =
                     probs.iter().map(|p| (p[c] * (1.0 - p[c])).max(1e-15)).collect();
-                refit_leaf_newton(&mut root, features, &indices, &residuals, &hess);
+                match weights {
+                    None => refit_leaf_newton(&mut root, features, &indices, &residuals, &hess),
+                    Some(w) => {
+                        let gw: Vec<f64> =
+                            residuals.iter().zip(w).map(|(&g, &wi)| wi * g).collect();
+                        let hw: Vec<f64> = hess.iter().zip(w).map(|(&h, &wi)| wi * h).collect();
+                        refit_leaf_newton(&mut root, features, &indices, &gw, &hw);
+                    }
+                }
 
                 // Update scores for this class
                 for i in 0..n_samples {

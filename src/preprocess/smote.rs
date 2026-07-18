@@ -66,6 +66,17 @@ impl Smote {
     /// Balance the task by oversampling minority classes.
     /// Returns a new ClassificationTask with synthetic samples added.
     pub fn balance(&self, task: &ClassificationTask) -> Result<ClassificationTask> {
+        // A weighted task cannot be resampled: a synthetic sample is an
+        // interpolation of two real ones, and there is no principled weight
+        // for it (mean? min? the seed's?) — any silent choice would corrupt
+        // the caller's weighting scheme.
+        if task.weights().is_some() {
+            return Err(crate::SmeltError::InvalidParameter(
+                "resampling a weighted task is not supported; the synthetic samples' \
+                 weights are undefined — remove with_weights() before SMOTE"
+                    .into(),
+            ));
+        }
         let features = task.features();
         let target = task.target();
         let n_classes = task.n_classes();

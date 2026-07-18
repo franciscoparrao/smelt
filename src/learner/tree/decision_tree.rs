@@ -15,6 +15,13 @@ use rand::rngs::StdRng;
 ///
 /// Supports both classification (Gini impurity) and regression (MSE).
 ///
+/// Supports per-sample weights ([`ClassificationTask::with_weights`]/
+/// [`RegressionTask::with_weights`]): weights enter the impurity and the
+/// leaf values (sklearn convention). An integer weight `k` is exactly
+/// equivalent to duplicating the row `k` times, and a weight of `0.0`
+/// exactly excludes the sample. `min_samples_split`/`min_samples_leaf`
+/// count rows, not total weight.
+///
 /// # Examples
 ///
 /// ```
@@ -144,6 +151,13 @@ impl Learner for DecisionTree {
         "decision_tree"
     }
 
+    /// `true`: weights enter the Gini/MSE impurity and the leaf values
+    /// (sklearn convention); `min_samples_split`/`min_samples_leaf` still
+    /// count rows, and a weight of 0.0 excludes the sample entirely.
+    fn supports_weights(&self) -> bool {
+        true
+    }
+
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
@@ -164,8 +178,31 @@ impl Learner for DecisionTree {
         // nondeterministic the day TreeBuilder starts drawing from it (e.g.
         // if a max_features knob is ever wired up).
         let mut rng = StdRng::seed_from_u64(0);
-        let root =
-            builder.build_classifier(&features.view(), target, &indices, n_classes, 0, &mut rng);
+        let root = match task.weights() {
+            None => builder.build_classifier(
+                &features.view(),
+                target,
+                &indices,
+                n_classes,
+                0,
+                &mut rng,
+            ),
+            Some(w) => {
+                // Weight 0.0 = sample excluded: dropping the row here (not
+                // just letting it contribute nothing) keeps candidate split
+                // thresholds identical to actually deleting the row.
+                let indices = super::retain_positive_weight(indices, w, task.n_samples());
+                builder.build_classifier_weighted(
+                    &features.view(),
+                    target,
+                    w,
+                    &indices,
+                    n_classes,
+                    0,
+                    &mut rng,
+                )
+            }
+        };
 
         Ok(Box::new(TrainedDecisionTree {
             root,
@@ -191,7 +228,13 @@ impl Learner for DecisionTree {
         );
         // Same rationale as train_classif: keep the never-consumed rng seeded.
         let mut rng = StdRng::seed_from_u64(0);
-        let root = builder.build_regressor(&features.view(), target, &indices, 0, &mut rng);
+        let root = match task.weights() {
+            None => builder.build_regressor(&features.view(), target, &indices, 0, &mut rng),
+            Some(w) => {
+                let indices = super::retain_positive_weight(indices, w, task.n_samples());
+                builder.build_regressor_weighted(&features.view(), target, w, &indices, 0, &mut rng)
+            }
+        };
 
         Ok(Box::new(TrainedDecisionTree {
             root,

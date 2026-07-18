@@ -757,6 +757,7 @@ impl Learner for MondrianTree {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_weights(task.weights(), "MondrianTree")?;
         check_lifetime(self.lifetime)?;
         crate::validate::check_no_nan(task.features())?;
         self.fit_batch_classif(task.features(), task.target(), task.n_classes());
@@ -769,6 +770,7 @@ impl Learner for MondrianTree {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_weights(task.weights(), "MondrianTree")?;
         check_lifetime(self.lifetime)?;
         crate::validate::check_no_nan(task.features())?;
         self.fit_batch_regress(task.features(), task.target());
@@ -836,6 +838,7 @@ impl Learner for MondrianForest {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_weights(task.weights(), "MondrianForest")?;
         check_lifetime(self.lifetime)?;
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
@@ -866,6 +869,7 @@ impl Learner for MondrianForest {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_weights(task.weights(), "MondrianForest")?;
         check_lifetime(self.lifetime)?;
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();

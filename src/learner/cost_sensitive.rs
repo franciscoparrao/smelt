@@ -100,6 +100,7 @@ impl Learner for CostSensitiveClassifier {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_weights(task.weights(), "CostSensitiveClassifier")?;
         let n_classes = task.n_classes();
         if self.cost_matrix.len() != n_classes
             || self.cost_matrix.iter().any(|row| row.len() != n_classes)

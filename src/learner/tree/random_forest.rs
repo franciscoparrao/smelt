@@ -17,6 +17,11 @@ use rayon::prelude::*;
 /// subsets at each split. Predictions are aggregated by probability averaging
 /// (classification) or mean (regression).
 ///
+/// Supports per-sample weights: weights enter each tree's impurity and leaf
+/// values (sklearn convention), while the bootstrap remains uniform — the
+/// weights do not change which rows are sampled. A weight of `0.0` excludes
+/// the sample; `min_samples_*` count rows, not total weight.
+///
 /// # Examples
 ///
 /// ```
@@ -215,10 +220,19 @@ impl Learner for RandomForest {
         "random_forest"
     }
 
+    /// `true`: weights enter each tree's impurity and leaf values (sklearn
+    /// convention). The bootstrap stays **uniform** — weights do NOT change
+    /// the resampling probabilities (also sklearn's behavior); a weight of
+    /// 0.0 excludes the sample from every tree it is drawn into.
+    fn supports_weights(&self) -> bool {
+        true
+    }
+
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
+        let weights = task.weights();
         let n_samples = task.n_samples();
         let n_features = task.n_features();
         let n_classes = task.n_classes();
@@ -228,7 +242,9 @@ impl Learner for RandomForest {
             .into_par_iter()
             .map(|i| {
                 let mut rng = StdRng::seed_from_u64(self.seed.wrapping_add(i as u64));
-                // Bootstrap sample (with replacement)
+                // Bootstrap sample (with replacement). Deliberately uniform
+                // even when the task is weighted: weights change the
+                // impurity/leaf math, never the sampling distribution.
                 let indices: Vec<usize> = (0..n_samples)
                     .map(|_| rng.random_range(0..n_samples))
                     .collect();
@@ -240,14 +256,28 @@ impl Learner for RandomForest {
                     max_feat,
                     n_features,
                 );
-                let root = builder.build_classifier(
-                    &features.view(),
-                    target,
-                    &indices,
-                    n_classes,
-                    0,
-                    &mut rng,
-                );
+                let root = match weights {
+                    None => builder.build_classifier(
+                        &features.view(),
+                        target,
+                        &indices,
+                        n_classes,
+                        0,
+                        &mut rng,
+                    ),
+                    Some(w) => {
+                        let indices = super::retain_positive_weight(indices, w, n_samples);
+                        builder.build_classifier_weighted(
+                            &features.view(),
+                            target,
+                            w,
+                            &indices,
+                            n_classes,
+                            0,
+                            &mut rng,
+                        )
+                    }
+                };
                 (root, builder.feature_importances)
             })
             .collect();
@@ -274,6 +304,7 @@ impl Learner for RandomForest {
         crate::validate::check_no_nan(task.features())?;
         let features = task.features();
         let target = task.target();
+        let weights = task.weights();
         let n_samples = task.n_samples();
         let n_features = task.n_features();
         let max_feat = self.max_features.resolve(n_features, false);
@@ -293,7 +324,22 @@ impl Learner for RandomForest {
                     max_feat,
                     n_features,
                 );
-                let root = builder.build_regressor(&features.view(), target, &indices, 0, &mut rng);
+                let root = match weights {
+                    None => {
+                        builder.build_regressor(&features.view(), target, &indices, 0, &mut rng)
+                    }
+                    Some(w) => {
+                        let indices = super::retain_positive_weight(indices, w, n_samples);
+                        builder.build_regressor_weighted(
+                            &features.view(),
+                            target,
+                            w,
+                            &indices,
+                            0,
+                            &mut rng,
+                        )
+                    }
+                };
                 (root, builder.feature_importances)
             })
             .collect();

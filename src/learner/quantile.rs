@@ -127,6 +127,7 @@ impl Learner for QuantileGB {
 
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_weights(task.weights(), "QuantileGB")?;
         if !(self.quantile > 0.0 && self.quantile < 1.0) {
             return Err(crate::SmeltError::InvalidParameter(format!(
                 "quantile must be in (0, 1), got {}",

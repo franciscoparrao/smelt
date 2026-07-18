@@ -147,6 +147,10 @@ impl Learner for Ridge {
         "ridge"
     }
 
+    fn supports_weights(&self) -> bool {
+        true
+    }
+
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_nan(task.features())?;
         let x = task.features();
@@ -163,13 +167,29 @@ impl Learner for Ridge {
             x_aug[[i, p]] = 1.0;
         }
 
-        // (X'X + alpha*I)w = X'y  (don't penalize bias)
-        let mut xtx = x_aug.t().dot(&x_aug);
+        // (X'X + alpha*I)w = X'y  (don't penalize bias) — or, with
+        // per-sample weights, (X'WX + alpha*I)w = X'Wy, W = diag(weights).
+        // The penalty term is NOT scaled by the total weight: this is
+        // sklearn's `Ridge.fit(..., sample_weight=w)` objective
+        // (Σ w_i·r_i² + alpha·‖w‖²), so an integer weight k is exactly
+        // equivalent to duplicating that row k times. W is applied by
+        // scaling the rows of one copy of X ((WX)'X = X'WX), which keeps
+        // the unweighted path bit-identical and makes all-ones weights
+        // reproduce it exactly.
+        let y_arr = Array1::from_vec(y.to_vec());
+        let (mut xtx, xty) = match task.weights() {
+            None => (x_aug.t().dot(&x_aug), x_aug.t().dot(&y_arr)),
+            Some(w) => {
+                let mut xw = x_aug.clone();
+                for (i, &wi) in w.iter().enumerate() {
+                    xw.row_mut(i).mapv_inplace(|v| wi * v);
+                }
+                (xw.t().dot(&x_aug), xw.t().dot(&y_arr))
+            }
+        };
         for j in 0..p {
             xtx[[j, j]] += self.alpha;
         }
-        let y_arr = Array1::from_vec(y.to_vec());
-        let xty = x_aug.t().dot(&y_arr);
 
         let weights = solve(&xtx, &xty)
             .ok_or_else(|| SmeltError::NumericalError("Singular matrix in Ridge".into()))?;
@@ -244,9 +264,26 @@ fn soft_threshold(x: f64, lambda: f64) -> f64 {
     }
 }
 
+/// Coordinate descent for Lasso/Elastic Net, optionally sample-weighted.
+///
+/// Weighted convention: the data-fit term is normalized by the TOTAL weight
+/// `Σ w_i` (which is `n` when unweighted), i.e. the objective is
+/// `1/(2·Σw) Σ w_i·r_i² + alpha·penalty`. This is algebraically identical to
+/// sklearn's documented behaviour for `Lasso`/`ElasticNet.fit(...,
+/// sample_weight=w)` — sklearn rescales the weights to sum to `n_samples`,
+/// which yields the same `1/(2·Σw)` normalization — and it is the one form
+/// under which an integer weight `k` is exactly equivalent to duplicating
+/// the row `k` times (duplicating rows changes `n`, so normalizing by a raw
+/// row count would break that equivalence).
+///
+/// Per-coordinate update: `rho = Σ w_i·x_ij·r_i / Σw` and denominator
+/// `Σ w_i·x_ij² / Σw + alpha·(1-l1_ratio)`. When `weights` is `None` the
+/// multiplier is the constant `1.0`, which is exact in IEEE 754, so the
+/// unweighted path is bit-identical to the historical code.
 fn coordinate_descent(
     x: &Array2<f64>,
     y: &[f64],
+    weights: Option<&[f64]>,
     alpha: f64,
     l1_ratio: f64,
     max_iter: usize,
@@ -254,7 +291,10 @@ fn coordinate_descent(
 ) -> Array1<f64> {
     let n = x.nrows();
     let p = x.ncols(); // includes bias column
-    let n_f = n as f64;
+    // Total weight replaces the row count in every normalization; a
+    // sequential sum of ones equals `n as f64` exactly, so all-ones
+    // weights reproduce the unweighted normalizer bit-for-bit.
+    let norm = weights.map_or(n as f64, |w| w.iter().sum());
     let mut w = Array1::zeros(p);
 
     for _ in 0..max_iter {
@@ -266,23 +306,24 @@ fn coordinate_descent(
             let mut col_sq_sum = 0.0;
 
             for i in 0..n {
+                let wi = weights.map_or(1.0, |sw| sw[i]);
                 let pred: f64 = (0..p).map(|k| x[[i, k]] * w[k]).sum();
                 let residual = y[i] - pred + x[[i, j]] * w[j];
-                residual_sum += x[[i, j]] * residual;
-                col_sq_sum += x[[i, j]] * x[[i, j]];
+                residual_sum += wi * x[[i, j]] * residual;
+                col_sq_sum += wi * x[[i, j]] * x[[i, j]];
             }
 
             if col_sq_sum < 1e-12 {
                 continue;
             }
 
-            let rho = residual_sum / n_f;
+            let rho = residual_sum / norm;
             // Don't penalize bias (last column)
             w[j] = if j < p - 1 {
                 soft_threshold(rho, alpha * l1_ratio)
-                    / (col_sq_sum / n_f + alpha * (1.0 - l1_ratio))
+                    / (col_sq_sum / norm + alpha * (1.0 - l1_ratio))
             } else {
-                rho / (col_sq_sum / n_f)
+                rho / (col_sq_sum / norm)
             };
 
             max_change = max_change.max((w[j] - old_w).abs());
@@ -301,6 +342,10 @@ impl Learner for Lasso {
         "lasso"
     }
 
+    fn supports_weights(&self) -> bool {
+        true
+    }
+
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_nan(task.features())?;
         let x = task.features();
@@ -316,7 +361,15 @@ impl Learner for Lasso {
             x_aug[[i, p]] = 1.0;
         }
 
-        let weights = coordinate_descent(&x_aug, y, self.alpha, 1.0, self.max_iter, self.tol);
+        let weights = coordinate_descent(
+            &x_aug,
+            y,
+            task.weights(),
+            self.alpha,
+            1.0,
+            self.max_iter,
+            self.tol,
+        );
 
         Ok(Box::new(TrainedRegularizedRegression {
             weights,
@@ -386,6 +439,10 @@ impl Learner for ElasticNet {
         "elastic_net"
     }
 
+    fn supports_weights(&self) -> bool {
+        true
+    }
+
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_nan(task.features())?;
         let x = task.features();
@@ -404,6 +461,7 @@ impl Learner for ElasticNet {
         let weights = coordinate_descent(
             &x_aug,
             y,
+            task.weights(),
             self.alpha,
             self.l1_ratio,
             self.max_iter,

@@ -97,6 +97,23 @@ pub trait Learner: Send + Sync {
             self.id()
         )))
     }
+
+    /// Whether this learner consumes per-sample weights
+    /// ([`ClassificationTask::weights`]/[`RegressionTask::weights`]) during
+    /// training.
+    ///
+    /// `false` (the default) means the learner rejects a weighted task with
+    /// a clear error via [`crate::validate::check_no_weights`] instead of
+    /// silently ignoring the weights. Weight-aware learners override this to
+    /// `true` *and* drop the guard — the two must change together.
+    ///
+    /// This is the seam for the future queryable learner-properties
+    /// metadata (registry properties + contract autotest): callers can ask a
+    /// `dyn Learner` about weight support before building a weighted task,
+    /// the same way that metadata will answer "NaN? categorical? proba?".
+    fn supports_weights(&self) -> bool {
+        false
+    }
 }
 
 /// A trained model that can make predictions.

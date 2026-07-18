@@ -511,6 +511,7 @@ impl Learner for GeoXGBoost {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_weights(task.weights(), "GeoXGBoost")?;
         Ok(Box::new(self.train_geo_inner(task)?))
     }
 }

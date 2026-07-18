@@ -34,6 +34,19 @@ use std::collections::HashMap;
 /// Prokhorenkova et al. (2018). Does not include full ordered boosting
 /// (O(n²) per-sample models), GPU support, or distributed training.
 ///
+/// # Sample weights
+///
+/// Per-sample weights attached via `Task::with_weights` scale each sample's
+/// gradient and hessian before histogram accumulation, split gains, and
+/// leaf values, and weight the initial score. The ordered target statistics
+/// (and the final prediction-time encodings) are ALSO weighted — sums of
+/// `w·y` over weight-counts of `w`, with a weighted-mean prior — matching
+/// the official CatBoost, which weights its target statistics. The f32
+/// histogram accumulation is unchanged: weighted gradients are computed in
+/// f64 and cast per-bin exactly like unweighted ones. The eval-set
+/// early-stopping metric is NOT weighted — weights belong to training rows;
+/// an eval row has no weight.
+///
 /// # Examples
 ///
 /// ```
@@ -195,12 +208,20 @@ impl CatBoost {
 /// Encode categorical features using ordered target statistics.
 /// For each sample i in the random permutation, the encoding uses only
 /// targets from samples appearing before i in the permutation.
+///
+/// `weights`, when set, weights the running statistics — sums accumulate
+/// `w_i * y_i` and counts accumulate `w_i` — matching the official
+/// CatBoost, which weights its target statistics. The unweighted path is
+/// numerically identical to before weights existed (every `w_i = 1.0`
+/// reproduces the old integer counts exactly; small integers are exact in
+/// f64).
 fn ordered_target_encode(
     features: &Array2<f64>,
     target: &[f64],
     cat_features: &[usize],
     prior: f64,
     prior_strength: f64,
+    weights: Option<&[f64]>,
     rng: &mut StdRng,
 ) -> Array2<f64> {
     let n = features.nrows();
@@ -218,7 +239,7 @@ fn ordered_target_encode(
         // For each sample in permutation order, compute target statistic
         // using only previous samples with the same category value
         let mut sum_by_cat: HashMap<i64, f64> = HashMap::new();
-        let mut count_by_cat: HashMap<i64, usize> = HashMap::new();
+        let mut wcount_by_cat: HashMap<i64, f64> = HashMap::new();
 
         for &idx in &perm {
             let raw = features[[idx, cat_col]];
@@ -230,17 +251,18 @@ fn ordered_target_encode(
             }
             let cat_val = raw as i64; // discretize
 
-            let count = *count_by_cat.get(&cat_val).unwrap_or(&0);
+            let wcount = *wcount_by_cat.get(&cat_val).unwrap_or(&0.0);
             let sum = *sum_by_cat.get(&cat_val).unwrap_or(&0.0);
 
-            // Ordered target statistic (Eq from paper):
-            // x_encoded = (sum_prev + prior_strength * prior) / (count_prev + prior_strength)
-            let encoding = (sum + prior_strength * prior) / (count as f64 + prior_strength);
+            // Ordered target statistic (Eq from paper), weighted:
+            // x_encoded = (sum_prev + prior_strength * prior) / (wcount_prev + prior_strength)
+            let encoding = (sum + prior_strength * prior) / (wcount + prior_strength);
             encoded[[idx, cat_col]] = encoding;
 
             // Update running statistics (after encoding this sample)
-            *sum_by_cat.entry(cat_val).or_insert(0.0) += target[idx];
-            *count_by_cat.entry(cat_val).or_insert(0) += 1;
+            let wi = weights.map_or(1.0, |w| w[idx]);
+            *sum_by_cat.entry(cat_val).or_insert(0.0) += target[idx] * wi;
+            *wcount_by_cat.entry(cat_val).or_insert(0.0) += wi;
         }
     }
 
@@ -825,24 +847,34 @@ impl Learner for CatBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
+        let sw = task.weights();
         let eval = validate_eval_regress(&self.eval_set, nf)?;
         let mut rng = StdRng::seed_from_u64(self.seed);
         let cat_features = self.effective_cat_features(task);
 
-        let prior = target.iter().sum::<f64>() / ns as f64;
+        // Weighted target mean as the prior/initial when sample weights are
+        // set (wsum > 0 guaranteed by Task::with_weights validation).
+        let prior = match sw {
+            Some(w) => {
+                let wsum: f64 = w.iter().sum();
+                target.iter().zip(w).map(|(y, wi)| y * wi).sum::<f64>() / wsum
+            }
+            None => target.iter().sum::<f64>() / ns as f64,
+        };
         let encoded = ordered_target_encode(
             features,
             target,
             &cat_features,
             prior,
             self.prior_strength,
+            sw,
             &mut rng,
         );
 
         // Final encoding map: used at prediction time, and to encode the eval
         // set during training (it only depends on the data, not the model).
         let cat_encodings =
-            build_final_encodings(features, target, &cat_features, prior, self.prior_strength);
+            build_final_encodings(features, target, &cat_features, prior, self.prior_strength, sw);
         let eval_encoded = eval.map(|(ef, _)| Self::encode_eval(ef, &cat_encodings, prior));
 
         let initial = prior;
@@ -854,8 +886,18 @@ impl Learner for CatBoost {
         let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
-            let grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
-            let hess = vec![1.0; ns];
+            let mut grads: Vec<f64> = preds.iter().zip(target).map(|(p, y)| p - y).collect();
+            let mut hess = vec![1.0; ns];
+            if let Some(w) = sw {
+                // Weights scale gradient AND hessian before histogram
+                // accumulation, split gains, and leaf values. The weighted
+                // gradients stay f64; only the per-bin histogram sums are
+                // f32, exactly as in the unweighted path.
+                for i in 0..ns {
+                    grads[i] *= w[i];
+                    hess[i] *= w[i];
+                }
+            }
             let tree =
                 build_oblivious_tree(&bins, &grads, &hess, &indices, self.depth, nf, self.lambda);
             for i in 0..ns {
@@ -869,10 +911,27 @@ impl Learner for CatBoost {
             trees.push(tree);
 
             if stopper.is_active() {
+                // Eval-set metric unweighted (weights are a training-row
+                // property); weighted train-loss fallback.
                 let loss = if let (Some(ep), Some((_, et))) = (&eval_preds, eval) {
                     ep.iter().zip(et).map(|(p, y)| (p - y).powi(2)).sum::<f64>() / ep.len() as f64
                 } else {
-                    preds.iter().zip(target).map(|(p, y)| (p - y).powi(2)).sum::<f64>() / ns as f64
+                    match sw {
+                        Some(w) => {
+                            let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                            preds
+                                .iter()
+                                .zip(target)
+                                .zip(w)
+                                .map(|((p, y), wi)| wi * (p - y).powi(2))
+                                .sum::<f64>()
+                                / wsum
+                        }
+                        None => {
+                            preds.iter().zip(target).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+                                / ns as f64
+                        }
+                    }
                 };
                 if let Some(best_n) = stopper.update(loss, trees.len()) {
                     trees.truncate(best_n);
@@ -902,6 +961,15 @@ impl Learner for CatBoost {
             self.train_multiclass(task)
         }
     }
+
+    /// CatBoost consumes `Task::with_weights`: gradients and hessians are
+    /// scaled per sample before histogram accumulation and leaf values, and
+    /// the ordered target statistics for categorical features are weighted
+    /// too (sums of `w·y` over weight-counts of `w`), matching the official
+    /// implementation.
+    fn supports_weights(&self) -> bool {
+        true
+    }
 }
 
 impl CatBoost {
@@ -925,18 +993,28 @@ impl CatBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
+        let sw = task.weights();
         let eval = validate_eval_classif(&self.eval_set, nf)?;
         let mut rng = StdRng::seed_from_u64(self.seed);
         let cat_features = self.effective_cat_features(task);
 
         let target_f64: Vec<f64> = target.iter().map(|&t| t as f64).collect();
-        let prior = target_f64.iter().sum::<f64>() / ns as f64;
+        // Weighted positive fraction as the target-statistics prior and the
+        // initial log-odds when sample weights are set.
+        let prior = match sw {
+            Some(w) => {
+                let wsum: f64 = w.iter().sum();
+                target_f64.iter().zip(w).map(|(y, wi)| y * wi).sum::<f64>() / wsum
+            }
+            None => target_f64.iter().sum::<f64>() / ns as f64,
+        };
         let encoded = ordered_target_encode(
             features,
             &target_f64,
             &cat_features,
             prior,
             self.prior_strength,
+            sw,
             &mut rng,
         );
 
@@ -946,10 +1024,12 @@ impl CatBoost {
             &cat_features,
             prior,
             self.prior_strength,
+            sw,
         );
         let eval_encoded = eval.map(|(ef, _)| Self::encode_eval(ef, &cat_encodings, prior));
 
-        let p_pos = target.iter().filter(|&&t| t == 1).count() as f64 / ns as f64;
+        // `prior` is already the (weighted) positive-class fraction.
+        let p_pos = prior;
         let initial = (p_pos / (1.0 - p_pos).max(1e-15)).ln();
         let mut fv = vec![initial; ns];
         let mut eval_fv = eval.map(|(ef, _)| vec![initial; ef.nrows()]);
@@ -959,13 +1039,21 @@ impl CatBoost {
         let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
-            let grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
-            let hess: Vec<f64> = (0..ns)
+            let mut grads: Vec<f64> = (0..ns).map(|i| sigmoid(fv[i]) - target[i] as f64).collect();
+            let mut hess: Vec<f64> = (0..ns)
                 .map(|i| {
                     let p = sigmoid(fv[i]);
                     p * (1.0 - p).max(1e-15)
                 })
                 .collect();
+            if let Some(w) = sw {
+                // Weights scale gradient AND hessian before histogram
+                // accumulation, split gains, and leaf values.
+                for i in 0..ns {
+                    grads[i] *= w[i];
+                    hess[i] *= w[i];
+                }
+            }
             let tree =
                 build_oblivious_tree(&bins, &grads, &hess, &indices, self.depth, nf, self.lambda);
             for i in 0..ns {
@@ -985,11 +1073,26 @@ impl CatBoost {
                     let y = y as f64;
                     -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
                 };
+                // Eval-set metric unweighted; weighted train-loss fallback.
                 let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
                     efv.iter().zip(et).map(|(&f, &y)| logloss(f, y)).sum::<f64>()
                         / efv.len() as f64
                 } else {
-                    fv.iter().zip(target).map(|(&f, &y)| logloss(f, y)).sum::<f64>() / ns as f64
+                    match sw {
+                        Some(w) => {
+                            let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                            fv.iter()
+                                .zip(target)
+                                .zip(w)
+                                .map(|((&f, &y), wi)| wi * logloss(f, y))
+                                .sum::<f64>()
+                                / wsum
+                        }
+                        None => {
+                            fv.iter().zip(target).map(|(&f, &y)| logloss(f, y)).sum::<f64>()
+                                / ns as f64
+                        }
+                    }
                 };
                 if let Some(best_n) = stopper.update(loss, trees.len()) {
                     trees.truncate(best_n);
@@ -1014,6 +1117,7 @@ impl CatBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf, nc) = (task.n_samples(), task.n_features(), task.n_classes());
+        let sw = task.weights();
         let eval = validate_eval_classif(&self.eval_set, nf)?;
         let mut rng = StdRng::seed_from_u64(self.seed);
         let cat_features = self.effective_cat_features(task);
@@ -1030,9 +1134,16 @@ impl CatBoost {
         let one_vs_rest: Vec<Vec<f64>> = (0..nc)
             .map(|c| target.iter().map(|&t| if t == c { 1.0 } else { 0.0 }).collect())
             .collect();
+        // Weighted per-class fractions as priors when sample weights are set.
         let priors: Vec<f64> = one_vs_rest
             .iter()
-            .map(|ind| ind.iter().sum::<f64>() / ns as f64)
+            .map(|ind| match sw {
+                Some(w) => {
+                    let wsum: f64 = w.iter().sum::<f64>().max(1e-15);
+                    ind.iter().zip(w).map(|(y, wi)| y * wi).sum::<f64>() / wsum
+                }
+                None => ind.iter().sum::<f64>() / ns as f64,
+            })
             .collect();
         let encoded_by_class: Vec<Array2<f64>> = (0..nc)
             .map(|c| {
@@ -1042,6 +1153,7 @@ impl CatBoost {
                     &cat_features,
                     priors[c],
                     self.prior_strength,
+                    sw,
                     &mut rng,
                 )
             })
@@ -1054,6 +1166,7 @@ impl CatBoost {
                     &cat_features,
                     priors[c],
                     self.prior_strength,
+                    sw,
                 )
             })
             .collect();
@@ -1063,14 +1176,27 @@ impl CatBoost {
                 .collect()
         });
 
-        let mut cc = vec![0usize; nc];
-        for &t in target {
-            cc[t] += 1;
-        }
-        let initial: Vec<f64> = cc
-            .iter()
-            .map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln())
-            .collect();
+        // Weighted per-class frequency as the initial log-prior when sample
+        // weights are set.
+        let initial: Vec<f64> = match sw {
+            Some(w) => {
+                let mut wc = vec![0.0; nc];
+                for (&t, &wi) in target.iter().zip(w) {
+                    wc[t] += wi;
+                }
+                let wsum: f64 = w.iter().sum::<f64>().max(1e-15);
+                wc.iter().map(|&c| (c / wsum).max(1e-15).ln()).collect()
+            }
+            None => {
+                let mut cc = vec![0usize; nc];
+                for &t in target {
+                    cc[t] += 1;
+                }
+                cc.iter()
+                    .map(|&c| ((c as f64 / ns as f64).max(1e-15)).ln())
+                    .collect()
+            }
+        };
         let mut fv: Vec<Vec<f64>> = (0..ns).map(|_| initial.clone()).collect();
         let mut eval_fv: Option<Vec<Vec<f64>>> =
             eval.map(|(ef, _)| (0..ef.nrows()).map(|_| initial.clone()).collect());
@@ -1083,12 +1209,19 @@ impl CatBoost {
         for _ in 0..self.n_estimators {
             let probs: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
             for c in 0..nc {
-                let grads: Vec<f64> = (0..ns)
+                let mut grads: Vec<f64> = (0..ns)
                     .map(|i| probs[i][c] - if target[i] == c { 1.0 } else { 0.0 })
                     .collect();
-                let hess: Vec<f64> = (0..ns)
+                let mut hess: Vec<f64> = (0..ns)
                     .map(|i| (probs[i][c] * (1.0 - probs[i][c])).max(1e-15))
                     .collect();
+                if let Some(w) = sw {
+                    // Weights scale gradient AND hessian before accumulation.
+                    for i in 0..ns {
+                        grads[i] *= w[i];
+                        hess[i] *= w[i];
+                    }
+                }
                 let tree = build_oblivious_tree(
                     &bins_by_class[c],
                     &grads,
@@ -1112,13 +1245,21 @@ impl CatBoost {
 
             if stopper.is_active() {
                 let eps = 1e-15;
+                // Eval-set metric unweighted; weighted train-loss fallback.
                 let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
                     let ep: Vec<Vec<f64>> = efv.iter().map(|f| softmax(f)).collect();
                     (0..et.len()).map(|i| -ep[i][et[i]].max(eps).ln()).sum::<f64>()
                         / et.len() as f64
                 } else {
                     let pn: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
-                    (0..ns).map(|i| -pn[i][target[i]].max(eps).ln()).sum::<f64>() / ns as f64
+                    let per_point = |i: usize| -pn[i][target[i]].max(eps).ln();
+                    match sw {
+                        Some(w) => {
+                            let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
+                            (0..ns).map(|i| w[i] * per_point(i)).sum::<f64>() / wsum
+                        }
+                        None => (0..ns).map(per_point).sum::<f64>() / ns as f64,
+                    }
                 };
                 if let Some(best_n) = stopper.update(loss, trees.len()) {
                     trees.truncate(best_n);
@@ -1141,30 +1282,36 @@ impl CatBoost {
 }
 
 /// Build final target encoding map for prediction-time categorical handling.
+///
+/// `weights` weights the statistics the same way [`ordered_target_encode`]
+/// does (sums of `w_i * y_i` over weight-counts of `w_i`), so the
+/// prediction-time encoding is consistent with the training-time one.
 fn build_final_encodings(
     features: &Array2<f64>,
     target: &[f64],
     cat_features: &[usize],
     prior: f64,
     prior_strength: f64,
+    weights: Option<&[f64]>,
 ) -> HashMap<usize, HashMap<i64, f64>> {
     let mut result = HashMap::new();
     for &col in cat_features {
         let mut sum_by_cat: HashMap<i64, f64> = HashMap::new();
-        let mut count_by_cat: HashMap<i64, usize> = HashMap::new();
+        let mut wcount_by_cat: HashMap<i64, f64> = HashMap::new();
         for (i, &t) in target.iter().enumerate() {
             let raw = features[[i, col]];
             if raw.is_nan() {
                 continue; // missing category: no statistic to accumulate
             }
             let cat_val = raw as i64;
-            *sum_by_cat.entry(cat_val).or_insert(0.0) += t;
-            *count_by_cat.entry(cat_val).or_insert(0) += 1;
+            let wi = weights.map_or(1.0, |w| w[i]);
+            *sum_by_cat.entry(cat_val).or_insert(0.0) += t * wi;
+            *wcount_by_cat.entry(cat_val).or_insert(0.0) += wi;
         }
         let mut encodings = HashMap::new();
         for (&cat_val, &sum) in &sum_by_cat {
-            let count = count_by_cat[&cat_val];
-            let enc = (sum + prior_strength * prior) / (count as f64 + prior_strength);
+            let wcount = wcount_by_cat[&cat_val];
+            let enc = (sum + prior_strength * prior) / (wcount + prior_strength);
             encodings.insert(cat_val, enc);
         }
         result.insert(col, encodings);
@@ -1434,10 +1581,10 @@ mod tests {
         let target = vec![1.0, 100.0, 2.0, 3.0];
 
         let mut rng = StdRng::seed_from_u64(0);
-        let encoded = ordered_target_encode(&features, &target, &[0], 2.0, 1.0, &mut rng);
+        let encoded = ordered_target_encode(&features, &target, &[0], 2.0, 1.0, None, &mut rng);
         assert!(encoded[[1, 0]].is_nan(), "NaN cell must stay NaN after encoding");
 
-        let finals = build_final_encodings(&features, &target, &[0], 2.0, 1.0);
+        let finals = build_final_encodings(&features, &target, &[0], 2.0, 1.0, None);
         let enc0 = finals[&0][&0]; // category 0: targets 1 and 3, prior 2, strength 1
         assert!(
             (enc0 - (1.0 + 3.0 + 2.0) / 3.0).abs() < 1e-12,

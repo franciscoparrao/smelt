@@ -483,6 +483,9 @@ impl KrigingHybrid {
     /// concrete `TrainedKrigingHybrid` (use this instead of `Learner::train_regress`
     /// when you need [`TrainedKrigingHybrid::predict_spatial`]).
     pub fn train_regress_geo(&mut self, task: &RegressionTask) -> Result<TrainedKrigingHybrid> {
+        // Guard here (not in `Learner::train_regress`, which just boxes this)
+        // so BOTH public entry points reject weighted tasks.
+        crate::validate::check_no_weights(task.weights(), "KrigingHybrid")?;
         let n_samples = task.n_samples();
         if self.coords.len() != n_samples {
             return Err(SmeltError::DimensionMismatch {

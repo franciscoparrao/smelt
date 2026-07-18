@@ -203,6 +203,7 @@ impl Learner for TargetTransformRegressor {
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_weights(task.weights(), "TargetTransformRegressor")?;
         let target = task.target();
         // (1) Validate the domain BEFORE transforming, naming the first
         // offending index.
@@ -236,10 +237,18 @@ impl Learner for TargetTransformRegressor {
         // (3) Rebuild the task with the transformed target, PROPAGATING
         // feature_names and feature_types (dropping them silently disables
         // native categorical splits in the base learner — 5th audit M-3).
-        let transformed_task =
+        let mut transformed_task =
             RegressionTask::new(task.id(), task.features().clone(), transformed)?
                 .with_feature_names(task.feature_names().to_vec())?
                 .with_feature_types(task.feature_types().to_vec())?;
+        // Weights would propagate unchanged too (the transform is
+        // row-preserving). Unreachable today — check_no_weights above
+        // rejects weighted tasks — but kept in the rebuild so that removing
+        // the guard (when this wrapper becomes weight-aware) cannot silently
+        // drop them, the exact M-3 metadata-loss bug class.
+        if let Some(w) = task.weights() {
+            transformed_task = transformed_task.with_weights(w.to_vec());
+        }
 
         // (4) Train the base learner from the factory.
         let mut base = (self.factory)();

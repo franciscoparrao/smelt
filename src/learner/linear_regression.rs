@@ -153,6 +153,10 @@ impl Learner for LinearRegression {
         "linear_regression"
     }
 
+    fn supports_weights(&self) -> bool {
+        true
+    }
+
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_nan(task.features())?;
         let x = task.features();
@@ -169,10 +173,24 @@ impl Learner for LinearRegression {
             x_aug[[i, p]] = 1.0;
         }
 
-        // Normal equation: (X'X)w = X'y
-        let xtx = x_aug.t().dot(&x_aug);
+        // Normal equation: (X'X)w = X'y — or, with per-sample weights,
+        // weighted least squares (X'WX)w = X'Wy with W = diag(weights).
+        // W is applied by scaling each row of one copy of X once
+        // ((WX)'X = X'WX), so the unweighted path stays bit-identical to
+        // the historical code and an all-ones weight vector reproduces it
+        // exactly (1.0 * v == v in IEEE 754, and `dot` is deterministic
+        // for identical buffers).
         let y_arr = Array1::from_vec(y.to_vec());
-        let xty = x_aug.t().dot(&y_arr);
+        let (xtx, xty) = match task.weights() {
+            None => (x_aug.t().dot(&x_aug), x_aug.t().dot(&y_arr)),
+            Some(w) => {
+                let mut xw = x_aug.clone();
+                for (i, &wi) in w.iter().enumerate() {
+                    xw.row_mut(i).mapv_inplace(|v| wi * v);
+                }
+                (xw.t().dot(&x_aug), xw.t().dot(&y_arr))
+            }
+        };
 
         let weights = solve(&xtx, &xty)
             .ok_or_else(|| SmeltError::NumericalError("Singular matrix in normal equation".into()))?;

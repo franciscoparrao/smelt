@@ -109,6 +109,17 @@ impl SpatialSmote {
         task: &ClassificationTask,
         coords: &[(f64, f64)],
     ) -> Result<(ClassificationTask, Vec<(f64, f64)>)> {
+        // A weighted task cannot be resampled: a synthetic sample is an
+        // interpolation of two real ones, and there is no principled weight
+        // for it — any silent choice would corrupt the caller's weighting
+        // scheme (same guard as Smote/Adasyn).
+        if task.weights().is_some() {
+            return Err(SmeltError::InvalidParameter(
+                "resampling a weighted task is not supported; the synthetic samples' \
+                 weights are undefined — remove with_weights() before SpatialSmote"
+                    .into(),
+            ));
+        }
         let features = task.features();
         let target = task.target();
         let n_classes = task.n_classes();

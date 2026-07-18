@@ -150,9 +150,12 @@ pub struct XGBoost {
     n_bins: usize,
     early_stopping_rounds: usize,
     seed: u64,
-    /// Optional per-sample weights (regression). When set, each sample's gradient
-    /// and hessian are scaled by its weight — the standard way to fit a weighted
-    /// objective. Used by GeoXGBoost to apply the bi-square spatial kernel.
+    /// Optional per-sample weights (classification and regression). When set,
+    /// each sample's gradient and hessian are scaled by its weight — the
+    /// standard way to fit a weighted objective. Used by GeoXGBoost to apply
+    /// the bi-square spatial kernel. Mutually exclusive with weights attached
+    /// to the task via `Task::with_weights` (see `resolve_weights`): providing
+    /// both is an error, never a silent pick.
     sample_weight: Option<Vec<f64>>,
     /// Optional held-out set for early stopping. When set, `early_stopping_rounds`
     /// monitors loss on this set instead of the training set. Training loss under
@@ -255,8 +258,15 @@ impl XGBoost {
         self.seed = s;
         self
     }
-    /// Set per-sample weights for (weighted) regression. Length must match the
-    /// number of training samples; each gradient/hessian is scaled by its weight.
+    /// Set per-sample weights (classification and regression). Length must
+    /// match the number of training samples; each gradient/hessian is scaled
+    /// by its weight.
+    ///
+    /// Weights may equivalently be attached to the task itself via
+    /// `ClassificationTask::with_weights`/`RegressionTask::with_weights` (the
+    /// portable, learner-agnostic route — CV fold slicing, Pipeline
+    /// propagation). Providing both at once is rejected with
+    /// `InvalidParameter` at train time rather than silently preferring one.
     pub fn with_sample_weights(mut self, w: Vec<f64>) -> Self {
         self.sample_weight = Some(w);
         self
@@ -1179,6 +1189,37 @@ impl XGBoost {
         Ok(())
     }
 
+    /// Resolve the effective per-sample weights for this fit.
+    ///
+    /// Two entry points exist: the builder's [`Self::with_sample_weights`]
+    /// (historical, XGBoost-specific — predates task-level weights and is
+    /// what GeoXGBoost uses for its spatial kernel) and the task's
+    /// `Task::with_weights` (the portable route). Setting both is ambiguous
+    /// and rejected outright; builder weights are length-validated here
+    /// (task weights were already validated by `with_weights` itself).
+    fn resolve_weights<'a>(
+        &'a self,
+        task_weights: Option<&'a [f64]>,
+        ns: usize,
+    ) -> Result<Option<&'a [f64]>> {
+        match (&self.sample_weight, task_weights) {
+            (Some(_), Some(_)) => Err(SmeltError::InvalidParameter(
+                "XGBoost: weights provided both via with_sample_weights and \
+                 Task::with_weights; use one"
+                    .into(),
+            )),
+            (Some(w), None) => {
+                if w.len() != ns {
+                    return Err(SmeltError::DimensionMismatch {
+                        expected: ns,
+                        got: w.len(),
+                    });
+                }
+                Ok(Some(w.as_slice()))
+            }
+            (None, tw) => Ok(tw),
+        }
+    }
 }
 
 impl Learner for XGBoost {
@@ -1190,19 +1231,13 @@ impl Learner for XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
-        if let Some(w) = &self.sample_weight
-            && w.len() != ns {
-                return Err(SmeltError::DimensionMismatch {
-                    expected: ns,
-                    got: w.len(),
-                });
-            }
+        let sw = self.resolve_weights(task.weights(), ns)?;
         let eval = validate_eval_regress(&self.eval_set, nf)?;
         self.validate_constraints(nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         // Weighted mean as the initial prediction when sample weights are set;
         // the objective maps it to its raw-score space (e.g. log for Poisson).
-        let target_mean = match &self.sample_weight {
+        let target_mean = match sw {
             Some(w) => {
                 let wsum: f64 = w.iter().sum();
                 if wsum > 0.0 {
@@ -1227,7 +1262,7 @@ impl Learner for XGBoost {
                 .zip(target)
                 .map(|(&p, &y)| self.objective.grad_hess(p, y))
                 .unzip();
-            if let Some(w) = &self.sample_weight {
+            if let Some(w) = sw {
                 // Scale gradient and hessian by the sample weight: this fits the
                 // weighted least-squares objective (XGBoost's standard mechanism).
                 for i in 0..ns {
@@ -1255,7 +1290,11 @@ impl Learner for XGBoost {
                 // Evaluate on the held-out set when one was provided —
                 // training loss is (near-)monotonically decreasing under
                 // boosting and rarely plateaus, so it's a poor early-stopping
-                // signal on its own.
+                // signal on its own. The eval-set metric is deliberately NOT
+                // weighted: sample weights are a property of the *training*
+                // rows (an eval row has no weight), so the held-out monitor
+                // stays a plain mean. The train-loss fallback IS weighted —
+                // it must track the weighted objective actually being fit.
                 let loss = if let (Some(ep), Some((_, et))) = (&eval_preds, eval) {
                     ep.iter()
                         .zip(et)
@@ -1263,7 +1302,7 @@ impl Learner for XGBoost {
                         .sum::<f64>()
                         / ep.len() as f64
                 } else {
-                    match &self.sample_weight {
+                    match sw {
                         Some(w) => {
                             let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
                             preds
@@ -1308,6 +1347,14 @@ impl Learner for XGBoost {
             self.train_multiclass(task)
         }
     }
+
+    /// XGBoost consumes per-sample weights (`Task::with_weights` or the
+    /// builder's `with_sample_weights`, never both — see `resolve_weights`):
+    /// gradients and hessians are scaled by the weight before histogram
+    /// accumulation, split gains, leaf weights, and the initial score.
+    fn supports_weights(&self) -> bool {
+        true
+    }
 }
 
 impl XGBoost {
@@ -1315,19 +1362,13 @@ impl XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf) = (task.n_samples(), task.n_features());
-        if let Some(w) = &self.sample_weight
-            && w.len() != ns {
-                return Err(SmeltError::DimensionMismatch {
-                    expected: ns,
-                    got: w.len(),
-                });
-            }
+        let sw = self.resolve_weights(task.weights(), ns)?;
         let eval = validate_eval_classif(&self.eval_set, nf)?;
         self.validate_constraints(nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         // Weighted positive-class fraction as the initial log-odds when
         // sample weights are set (same objective as XGBoost's base_score).
-        let p_pos = match &self.sample_weight {
+        let p_pos = match sw {
             Some(w) => {
                 let wsum: f64 = w.iter().sum();
                 if wsum > 0.0 {
@@ -1359,7 +1400,7 @@ impl XGBoost {
                     p * (1.0 - p).max(1e-15)
                 })
                 .collect();
-            if let Some(w) = &self.sample_weight {
+            if let Some(w) = sw {
                 // Scale gradient and hessian by the sample weight, matching
                 // the weighted-least-squares mechanism used in train_regress.
                 for i in 0..ns {
@@ -1403,7 +1444,7 @@ impl XGBoost {
                         let y = target[i] as f64;
                         -(y * p.ln() + (1.0 - y) * (1.0 - p).ln())
                     };
-                    match &self.sample_weight {
+                    match sw {
                         Some(w) => {
                             let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
                             (0..ns).map(|i| w[i] * per_point(i)).sum::<f64>() / wsum
@@ -1432,19 +1473,13 @@ impl XGBoost {
         let features = task.features();
         let target = task.target();
         let (ns, nf, nc) = (task.n_samples(), task.n_features(), task.n_classes());
-        if let Some(w) = &self.sample_weight
-            && w.len() != ns {
-                return Err(SmeltError::DimensionMismatch {
-                    expected: ns,
-                    got: w.len(),
-                });
-            }
+        let sw = self.resolve_weights(task.weights(), ns)?;
         let eval = validate_eval_classif(&self.eval_set, nf)?;
         self.validate_constraints(nf)?;
         let bins = HistBins::build_typed(features, self.n_bins, task.feature_types());
         // Weighted per-class frequency as the initial log-prior when sample
         // weights are set.
-        let initial: Vec<f64> = match &self.sample_weight {
+        let initial: Vec<f64> = match sw {
             Some(w) => {
                 let mut wc = vec![0.0; nc];
                 for (&t, &wi) in target.iter().zip(w) {
@@ -1481,7 +1516,7 @@ impl XGBoost {
                 let mut hess: Vec<f64> = (0..ns)
                     .map(|i| (probs[i][c] * (1.0 - probs[i][c])).max(1e-15))
                     .collect();
-                if let Some(w) = &self.sample_weight {
+                if let Some(w) = sw {
                     for i in 0..ns {
                         grads[i] *= w[i];
                         hess[i] *= w[i];
@@ -1516,7 +1551,7 @@ impl XGBoost {
                 } else {
                     let pn: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
                     let per_point = |i: usize| -pn[i][target[i]].max(eps).ln();
-                    match &self.sample_weight {
+                    match sw {
                         Some(w) => {
                             let wsum: f64 = w.iter().sum::<f64>().max(1e-12);
                             (0..ns).map(|i| w[i] * per_point(i)).sum::<f64>() / wsum

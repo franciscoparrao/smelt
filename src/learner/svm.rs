@@ -248,6 +248,7 @@ impl Learner for LinearSVM {
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
+        crate::validate::check_no_weights(task.weights(), "LinearSVM")?;
         crate::validate::check_no_nan(task.features())?;
         let x = task.features();
         let target = task.target();
