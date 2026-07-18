@@ -132,7 +132,7 @@ pub(crate) fn factory_param_names(learner_type: &str) -> &'static [&'static str]
 /// Rejects param-space entries the factory would silently ignore, and
 /// eagerly validates `objective` choice values (so a bad objective fails
 /// with a `ValueError` before any training, instead of a panic mid-tune).
-fn validate_param_space(
+pub(crate) fn validate_param_space(
     learner_type: &str,
     space: &smelt_ml::tuning::ParamSpace,
 ) -> PyResult<()> {

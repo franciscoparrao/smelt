@@ -9,6 +9,7 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::upper_case_acronyms)]
 
+mod auto_tuner;
 mod causal;
 mod cluster;
 mod common;
@@ -24,6 +25,7 @@ mod tuning;
 
 use pyo3::prelude::*;
 
+use auto_tuner::AutoTuner;
 use causal::{DrLearner, RLearner, SLearner, TLearner, XLearner};
 use cluster::{DBSCAN, IsolationForest, KMeans};
 use conformal::SplitConformal;
@@ -94,6 +96,7 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<DynamicEnsemble>()?;
     m.add_class::<CostSensitiveClassifier>()?;
     m.add_class::<TargetTransformRegressor>()?;
+    m.add_class::<AutoTuner>()?;
     m.add_function(wrap_pyfunction!(registered_learner_ids, m)?)?;
 
     // Causal meta-learners

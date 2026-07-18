@@ -124,6 +124,26 @@ MINOR, not a patch.
   removed from git and ignored; `docs/roadmap_checklist.md` brought up
   to date.
 
+### Added — mlr3-parity roadmap, item 3: AutoTuner + nested CV (2026-07-18)
+
+- `AutoTuner` wraps a parameterized learner factory, a `TunerSpec` (any
+  of the four tuners — Grid/Random/Bayesian/Hyperband), an inner
+  resampling, and a measure into a single `Learner`: `train_*` runs the
+  tuner over the received task, picks the best `ParamSet`, and refits the
+  final model on the full task. Dropped into `benchmark::resample_*` with
+  an outer CV, this *is* nested cross-validation with no leakage by
+  construction (the inner tuning only ever sees an outer fold's training
+  rows) — the honest way to report tuned performance. Verified with a
+  row-probe learner that confirms no outer-test row reaches any inner
+  tuning call. `TrainedAutoTuner` exposes `best_params()`/`best_score()`/
+  `history()`; composes with reproducible tuner seeds and per-sample
+  weights (which flow to the inner folds). Not registrable (factory).
+  mlr3tuning's `AutoTuner`. Python:
+  `AutoTuner(learner, param_space, tuner="random", cv=5, metric=, seed=)`
+  with sklearn-style `best_params_`/`best_score_`, reusing the M-13
+  factory allowlist and M-5 huber_delta rule (no duplication) and
+  accepting `sample_weight`.
+
 ### Added — mlr3-parity roadmap, item 2: per-sample weights (2026-07-18)
 
 - `ClassificationTask::with_weights` / `RegressionTask::with_weights`:

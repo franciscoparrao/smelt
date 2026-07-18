@@ -4,6 +4,7 @@
 
 pub mod adaboost;
 pub mod adaptive_rf;
+pub mod auto_tuner;
 pub mod bagging;
 pub mod catboost;
 pub mod cost_sensitive;
@@ -42,6 +43,7 @@ use ndarray::Array2;
 
 pub use adaboost::AdaBoost;
 pub use adaptive_rf::{AdaptiveRandomForest, Adwin};
+pub use auto_tuner::{AutoTuner, TrainedAutoTuner, TunerSpec};
 pub use bagging::Bagging;
 pub use catboost::CatBoost;
 pub use cost_sensitive::CostSensitiveClassifier;

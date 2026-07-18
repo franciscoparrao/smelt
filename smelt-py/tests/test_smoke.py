@@ -151,3 +151,52 @@ def test_bayesian_optimizer_short_run():
     assert set(result["best_params"]) == {"n_estimators", "max_depth"}
     assert 0.0 <= result["best_score"] <= 1.0
     assert len(result["all_results"]) == 4
+
+
+def test_auto_tuner_fit_predict_and_nested_benchmark():
+    """AutoTuner tunes + refits (best_params_ ∈ space, model refit with them),
+    reruns cleanly inside benchmark()'s outer CV (nested CV), and rejects a bad
+    learner id / non-tunable param with ValueError. save() is unsupported."""
+    from smelt.benchmark import benchmark
+
+    x, y = _classif_data(seed=8)
+
+    at = smelt.AutoTuner(
+        learner="dt",
+        param_space={"max_depth": [2, 4, 8]},
+        tuner="grid",
+        cv=3,
+        metric="accuracy",
+        seed=1,
+    )
+    at.fit(x, y)
+    assert at.best_params_["max_depth"] in (2, 4, 8)
+    assert 0.0 <= at.best_score_ <= 1.0
+    assert (at.predict(x) == y).mean() > 0.9
+
+    # Nested CV: AutoTuner (inner tuning) inside benchmark's outer CV.
+    outer = smelt.CrossValidation(3, seed=2)
+    res = benchmark({"auto": at}, x, y, cv=outer)
+    assert res["auto"]["accuracy"]["mean"] > 0.8
+
+    # get_params round-trips through the constructor (this is how benchmark
+    # clones per fold), and set_params re-validates the learner id.
+    params = at.get_params()
+    assert params["learner"] == "dt" and params["tuner"] == "grid"
+    smelt.AutoTuner(**params)  # must reconstruct cleanly
+    with pytest.raises(ValueError):
+        at.set_params(learner="bogus")
+
+    # Bad learner id at construction, non-tunable param at fit.
+    with pytest.raises(ValueError):
+        smelt.AutoTuner(learner="not_a_learner", param_space={"x": [1]})
+    bad = smelt.AutoTuner(
+        learner="ridge", param_space={"nope": [1.0]}, tuner="grid", cv=3, metric="rmse"
+    )
+    xr, yr = _regress_data(seed=8)
+    with pytest.raises(ValueError):
+        bad.fit(xr, yr)
+
+    # save() is unsupported for this factory-built composite.
+    with pytest.raises(NotImplementedError):
+        at.save("/tmp/smelt_autotuner_should_not_exist.json")

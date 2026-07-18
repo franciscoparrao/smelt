@@ -17,10 +17,11 @@ use crate::{Result, SmeltError};
 ///
 /// Not every learner is registered: [`super::Bagging`], [`super::Stacking`],
 /// [`super::DynamicEnsemble`], [`super::CostSensitiveClassifier`],
-/// [`super::TargetTransformRegressor`] and
+/// [`super::AutoTuner`], [`super::TargetTransformRegressor`] and
 /// [`super::KrigingHybrid`] wrap *other* learners via a base-learner factory
 /// that has no sensible default (`CostSensitiveClassifier` additionally
-/// needs an explicit cost matrix with no sensible default either), and
+/// needs an explicit cost matrix with no sensible default either, and
+/// `AutoTuner` a tuner spec + parameter space), and
 /// [`super::GeoXGBoost`] needs training coordinates supplied externally.
 /// [`super::ObliqueForest`] and [`EBM`], by contrast, are self-contained
 /// (no factory, no external coordinates) and *are* registered. See

@@ -87,15 +87,15 @@ pub mod prelude {
         FeatureImportance, permutation_importance_classif, permutation_importance_regress,
     };
     pub use crate::learner::{
-        AdaBoost, AdaptiveRandomForest, Activation, Adwin, Bagging, CatBoost,
+        AdaBoost, AdaptiveRandomForest, Activation, Adwin, AutoTuner, Bagging, CatBoost,
         CostSensitiveClassifier, DecisionTree, DeepForest, DynamicEnsemble, EBM, ElasticNet,
         ExtraTrees, ExtremeLearningMachine, BandwidthSelection, GaussianNB, GeoXGBoost,
         GradientBoosting, HoeffdingTree, KNearestNeighbors, KrigingHybrid, Lasso, Learner,
         TrainedDeepForest, TrainedGeoXGBoost, TrainedKrigingHybrid, LightGBM, LinearRegression,
         LinearSVM, LogisticRegression, MondrianForest, MondrianTree, ObliqueForest, ObliqueTree,
         Objective, QuantileForest, QuantileGB, RandomForest, Ridge, Stacking,
-        TargetTransform, TargetTransformRegressor, TrainedTargetTransformRegressor,
-        TrainedQuantileForest, VariogramFit,
+        TargetTransform, TargetTransformRegressor, TrainedAutoTuner, TrainedTargetTransformRegressor,
+        TrainedQuantileForest, TunerSpec, VariogramFit,
         VariogramModel, XGBoost, learner_from_id, registered_learner_ids,
     };
     pub use crate::measure::{

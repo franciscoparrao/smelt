@@ -93,10 +93,18 @@ y learners espaciales — esto cubre lo inverso).
       LinearSVM y GeoXGBoost excluidos deliberadamente (semántica SGD por
       decidir / co-diseño con George). 66 tests nuevos (740 total).
       ✅ (2026-07-18)
-- [ ] **AutoTuner + nested CV** — envolver (learner + tuner + resampling)
-      como un `Learner`, haciendo trivial el CV anidado (reporte honesto de
-      performance tuneada — rigor publicable). ~200 líneas sobre los tuners
-      existentes.
+- [x] **AutoTuner + nested CV** — `AutoTuner` (`src/learner/auto_tuner.rs`)
+      envuelve (factory + `TunerSpec` de los 4 tuners + inner resampling +
+      measure) como un `Learner`: al entrenar corre el tuner sobre la task
+      recibida, elige best_params y reentrena el modelo final. Metido en
+      `benchmark::resample_*` con CV externo *es* nested CV sin leakage por
+      construcción — probado con un learner-sonda que verifica que el tuning
+      de cada fold externo nunca vio filas del test externo.
+      `TrainedAutoTuner` expone `best_params()`/`best_score()`/`history()`.
+      Compone con seeds reproducibles (HIGH-6) y pesos por muestra (fluyen a
+      los folds internos). Python `AutoTuner(learner, param_space, tuner=,
+      cv=, metric=, seed=)` con `best_params_`/`best_score_` sklearn-style,
+      reusando la allowlist del M-13. 9 tests Rust + sondas. ✅ (2026-07-18)
 - [ ] **Calibración de probabilidades + threshold tuning** — Platt/isotonic
       como wrapper (mismo patrón factory) + búsqueda de umbral óptimo por
       costo/métrica; completa la historia que `CostSensitiveClassifier`
