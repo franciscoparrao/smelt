@@ -12,18 +12,22 @@ repository = "https://github.com/franciscoparrao/smelt"
 keywords = ["machine-learning", "gradient-boosting", "spatial", "conformal-prediction", "xgboost"]
 categories = ["science", "algorithms"]
 readme = "README.md"
-# Also excluded: paper-workflow strays that live in the repo root/docs but
-# have no place inside the published crate (spreadsheets, LaTeX logs, PDFs).
-exclude = [
-    "docs/WOS/",
-    "docs/*.pdf",
-    "tests/xgboost_*.py",
-    "tests/real_benchmark.py",
-    "paper/",
-    "/data/",
-    "*.xlsx",
-    "*.log",
-    "Predict_results.csv",
+# include-list (not exclude): the published crate carries ONLY the code and
+# top-level docs below. The old exclude-list approach let private strays leak
+# into the crate as the repo grew (internal audits, private correspondence in
+# docs/, tests/*.py benchmark drivers — audit 5a, M-9); an allow-list is
+# robust against future strays by construction. Cargo adds Cargo.toml,
+# Cargo.lock and .cargo_vcs_info.json on its own. `tests/*.rs` (not
+# `tests/`) keeps the Python perf drivers out; no test/example reads a
+# repo-relative data file, so nothing else is needed at package time.
+include = [
+    "src/",
+    "tests/*.rs",
+    "examples/",
+    "benches/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
 ]
 
 [dependencies]
