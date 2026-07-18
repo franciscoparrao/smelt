@@ -3,7 +3,7 @@
 //! Binary classification with sigmoid. Multiclass via one-vs-rest.
 
 use crate::learner::math::sigmoid;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
 use crate::task::{ClassificationTask, Task};
@@ -243,8 +243,12 @@ impl Learner for LogisticRegression {
         "logistic_regression"
     }
 
-    fn supports_weights(&self) -> bool {
-        true
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier()
+            .with_weights()
+            .with_proba()
+            .with_feature_importance()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

@@ -26,6 +26,7 @@ pub(crate) mod math;
 pub mod mondrian;
 pub mod naive_bayes;
 pub mod oblique;
+pub mod properties;
 pub mod quantile;
 pub mod quantile_forest;
 pub mod regularized;
@@ -61,10 +62,11 @@ pub use logistic_regression::LogisticRegression;
 pub use mondrian::{MondrianForest, MondrianTree};
 pub use naive_bayes::GaussianNB;
 pub use oblique::{ObliqueForest, ObliqueTree};
+pub use properties::LearnerProperties;
 pub use quantile::QuantileGB;
 pub use quantile_forest::{QuantileForest, TrainedQuantileForest};
 pub use regularized::{ElasticNet, Lasso, Ridge};
-pub use registry::{learner_from_id, registered_learner_ids};
+pub use registry::{learner_from_id, learner_properties, registered_learner_ids};
 pub use stacking::Stacking;
 pub use svm::LinearSVM;
 pub use target_transform::{TargetTransform, TargetTransformRegressor, TrainedTargetTransformRegressor};
@@ -100,21 +102,41 @@ pub trait Learner: Send + Sync {
         )))
     }
 
+    /// Declarative capability metadata for this learner (task support,
+    /// weights, probabilities, NaN/categorical tolerance, feature importance,
+    /// serializability). See [`LearnerProperties`] for the exact observable
+    /// meaning of each field.
+    ///
+    /// The default is [`LearnerProperties::none`] (everything `false`): a
+    /// learner that forgets to override this *under*-claims and so fails the
+    /// contract autotest (`tests/contract.rs`) loudly, rather than silently
+    /// advertising a capability it lacks. Every registered learner overrides
+    /// it with values verified against its real behaviour.
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::none()
+    }
+
     /// Whether this learner consumes per-sample weights
     /// ([`ClassificationTask::weights`]/[`RegressionTask::weights`]) during
     /// training.
     ///
-    /// `false` (the default) means the learner rejects a weighted task with
-    /// a clear error via [`crate::validate::check_no_weights`] instead of
-    /// silently ignoring the weights. Weight-aware learners override this to
-    /// `true` *and* drop the guard — the two must change together.
+    /// **Single source of truth:** this default returns
+    /// [`self.properties().supports_weights`](LearnerProperties::supports_weights),
+    /// so the boolean and the metadata field can never diverge. Weight-aware
+    /// learners declare `.with_weights()` in their [`properties`](Self::properties)
+    /// override *and* drop the [`check_no_weights`](crate::validate::check_no_weights)
+    /// guard — the two must change together. Learners generally should not
+    /// override this method; override `properties()` instead. (The one
+    /// exception is a composite like [`AutoTuner`] whose weight support is a
+    /// runtime property of its base learner rather than a compile-time
+    /// constant; it overrides `properties()` to delegate, which this method
+    /// then reflects.)
     ///
-    /// This is the seam for the future queryable learner-properties
-    /// metadata (registry properties + contract autotest): callers can ask a
-    /// `dyn Learner` about weight support before building a weighted task,
-    /// the same way that metadata will answer "NaN? categorical? proba?".
+    /// `false` means the learner rejects a weighted task with a clear error
+    /// via [`check_no_weights`](crate::validate::check_no_weights) instead of
+    /// silently ignoring the weights.
     fn supports_weights(&self) -> bool {
-        false
+        self.properties().supports_weights
     }
 }
 

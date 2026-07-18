@@ -4,7 +4,7 @@
 
 use super::{LeafValue, Node, TreeBuilder};
 use crate::Result;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::Array2;
@@ -151,11 +151,12 @@ impl Learner for DecisionTree {
         "decision_tree"
     }
 
-    /// `true`: weights enter the Gini/MSE impurity and the leaf values
-    /// (sklearn convention); `min_samples_split`/`min_samples_leaf` still
-    /// count rows, and a weight of 0.0 excludes the sample entirely.
-    fn supports_weights(&self) -> bool {
-        true
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_weights()
+            .with_proba()
+            .with_feature_importance()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

@@ -7,7 +7,7 @@
 //! Huang, G.-B., Zhu, Q.-Y., & Siew, C.-K. (2006). "Extreme learning
 //! machine: Theory and applications." Neurocomputing, 70(1-3), 489-501.
 
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use crate::{Result, SmeltError};
@@ -369,8 +369,11 @@ impl Learner for ExtremeLearningMachine {
         "elm"
     }
 
-    fn supports_weights(&self) -> bool {
-        true
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_weights()
+            .with_proba()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

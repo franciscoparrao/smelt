@@ -200,3 +200,46 @@ def test_auto_tuner_fit_predict_and_nested_benchmark():
     # save() is unsupported for this factory-built composite.
     with pytest.raises(NotImplementedError):
         at.save("/tmp/smelt_autotuner_should_not_exist.json")
+
+
+def test_learner_properties():
+    """Queryable capability metadata: the module function and the per-wrapper
+    `properties` getter agree, and the declared flags match known truths for a
+    few representative learners (mirrors the Rust contract autotest)."""
+    # Module-level query for every registered id returns a full flag dict.
+    expected_keys = {
+        "supports_classification", "supports_regression", "supports_weights",
+        "supports_proba", "supports_nan", "supports_categorical",
+        "provides_feature_importance", "serializable",
+    }
+    for lid in smelt.registered_learner_ids():
+        props = smelt.learner_properties(lid)
+        assert set(props) == expected_keys, lid
+
+    # Boosting engines: NaN + categorical + weights + dual-task.
+    xgb = smelt.learner_properties("xgboost")
+    assert xgb["supports_nan"] and xgb["supports_categorical"]
+    assert xgb["supports_weights"] and xgb["supports_classification"] and xgb["supports_regression"]
+
+    # Random forest: weighted, feature importance, but no NaN/categorical.
+    rf = smelt.learner_properties("random_forest")
+    assert rf["supports_weights"] and rf["provides_feature_importance"]
+    assert not rf["supports_nan"] and not rf["supports_categorical"]
+
+    # KNN: no weights, no feature importance.
+    knn = smelt.learner_properties("knn")
+    assert not knn["supports_weights"] and not knn["provides_feature_importance"]
+
+    # Linear regression: regression-only, no probabilities.
+    lr = smelt.learner_properties("linear_regression")
+    assert lr["supports_regression"] and not lr["supports_classification"]
+    assert not lr["supports_proba"]
+
+    # Per-wrapper getter agrees with the module function (hand-written + macro).
+    assert smelt.XGBoost().properties == xgb
+    assert smelt.RandomForest().properties == rf
+    assert smelt.GradientBoosting().properties["supports_weights"]
+
+    # Unknown id raises ValueError.
+    with pytest.raises(ValueError):
+        smelt.learner_properties("not_a_learner")

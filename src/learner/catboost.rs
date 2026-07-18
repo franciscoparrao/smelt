@@ -17,7 +17,7 @@ use super::eval::{EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, vali
 use super::histogram::{HistBins, NAN_BIN};
 use crate::Result;
 use crate::learner::math::{sigmoid, softmax};
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::{Array2, ArrayView1};
@@ -842,6 +842,16 @@ impl Learner for CatBoost {
         "catboost"
     }
 
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_weights()
+            .with_proba()
+            .with_nan()
+            .with_categorical()
+            .with_feature_importance()
+            .with_serializable()
+    }
+
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         self.check_max_bins()?;
         let features = task.features();
@@ -960,15 +970,6 @@ impl Learner for CatBoost {
         } else {
             self.train_multiclass(task)
         }
-    }
-
-    /// CatBoost consumes `Task::with_weights`: gradients and hessians are
-    /// scaled per sample before histogram accumulation and leaf values, and
-    /// the ordered target statistics for categorical features are weighted
-    /// too (sums of `w·y` over weight-counts of `w`), matching the official
-    /// implementation.
-    fn supports_weights(&self) -> bool {
-        true
     }
 }
 

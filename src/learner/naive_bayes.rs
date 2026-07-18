@@ -1,6 +1,6 @@
 //! Gaussian Naive Bayes classifier.
 
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
 use crate::task::{ClassificationTask, Task};
@@ -109,6 +109,12 @@ impl TrainedModel for TrainedGaussianNB {
 impl Learner for GaussianNB {
     fn id(&self) -> &str {
         "gaussian_nb"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier()
+            .with_proba()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

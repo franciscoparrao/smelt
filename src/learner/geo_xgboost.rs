@@ -12,7 +12,7 @@
 //! - Local feature importance
 
 use crate::learner::xgboost::XGBoost;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::resample::{CrossValidation, Resample};
 use crate::task::{RegressionTask, Task};
@@ -508,6 +508,10 @@ impl TrainedModel for TrainedGeoXGBoost {
 impl Learner for GeoXGBoost {
     fn id(&self) -> &str {
         "geo_xgboost"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::regressor().with_feature_importance()
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {

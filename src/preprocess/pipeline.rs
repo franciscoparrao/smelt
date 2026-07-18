@@ -1,7 +1,7 @@
 //! Pipeline: chains transformers with a learner into a single Learner.
 
 use super::{Resampler, Transformer};
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use crate::{Result, SmeltError};
@@ -103,6 +103,16 @@ impl TrainedModel for TrainedPipeline {
 impl Learner for Pipeline {
     fn id(&self) -> &str {
         &self.id
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        // Delegates train/predict to the wrapped final learner, so task
+        // support, proba, and feature importance follow it. The trained
+        // pipeline is a composite with no SerializableModel variant.
+        LearnerProperties {
+            serializable: false,
+            ..self.learner.properties()
+        }
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

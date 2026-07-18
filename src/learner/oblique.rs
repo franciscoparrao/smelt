@@ -9,7 +9,7 @@
 
 use crate::Result;
 use crate::learner::tree::{gini_from_counts, mse_from_sums};
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::{Array2, ArrayView1};
@@ -593,6 +593,13 @@ impl Learner for ObliqueTree {
         "oblique_tree"
     }
 
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_proba()
+            .with_feature_importance()
+            .with_serializable()
+    }
+
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_weights(task.weights(), "ObliqueTree")?;
         crate::validate::check_no_nan(task.features())?;
@@ -741,6 +748,13 @@ impl ObliqueForest {
 impl Learner for ObliqueForest {
     fn id(&self) -> &str {
         "oblique_forest"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_proba()
+            .with_feature_importance()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

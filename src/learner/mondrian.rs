@@ -47,7 +47,7 @@
 //! online behavior -- new points outside current coverage introduce
 //! consistent new splits -- is implemented in full.
 
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use crate::Result;
@@ -756,6 +756,12 @@ impl Learner for MondrianTree {
         "mondrian_tree"
     }
 
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_proba()
+            .with_serializable()
+    }
+
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_weights(task.weights(), "MondrianTree")?;
         check_lifetime(self.lifetime)?;
@@ -835,6 +841,12 @@ impl TrainedModel for TrainedMondrianTree {
 impl Learner for MondrianForest {
     fn id(&self) -> &str {
         "mondrian_forest"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_proba()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

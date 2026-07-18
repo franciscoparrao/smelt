@@ -6,7 +6,7 @@
 
 use crate::{Result, SmeltError};
 use crate::learner::math::{sigmoid, softmax};
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::{Array2, ArrayView1};
@@ -1227,6 +1227,16 @@ impl Learner for XGBoost {
         "xgboost"
     }
 
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_weights()
+            .with_proba()
+            .with_nan()
+            .with_categorical()
+            .with_feature_importance()
+            .with_serializable()
+    }
+
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
         let target = task.target();
@@ -1346,14 +1356,6 @@ impl Learner for XGBoost {
         } else {
             self.train_multiclass(task)
         }
-    }
-
-    /// XGBoost consumes per-sample weights (`Task::with_weights` or the
-    /// builder's `with_sample_weights`, never both — see `resolve_weights`):
-    /// gradients and hessians are scaled by the weight before histogram
-    /// accumulation, split gains, leaf weights, and the initial score.
-    fn supports_weights(&self) -> bool {
-        true
     }
 }
 

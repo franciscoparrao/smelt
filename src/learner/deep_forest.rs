@@ -30,7 +30,7 @@
 
 use crate::learner::tree::extra_trees::ExtraTrees;
 use crate::learner::tree::random_forest::RandomForest;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::resample::{CrossValidation, Resample};
 use crate::task::{ClassificationTask, Task};
@@ -315,6 +315,11 @@ impl DeepForest {
 impl Learner for DeepForest {
     fn id(&self) -> &str {
         "deep_forest"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier()
+            .with_proba()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

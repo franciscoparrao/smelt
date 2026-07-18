@@ -3,7 +3,7 @@
 //! Uses Euclidean distance. Classification by majority vote, regression by mean.
 
 use crate::Result;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::{Array2, ArrayView1};
@@ -148,6 +148,12 @@ impl TrainedModel for TrainedKnnRegressor {
 impl Learner for KNearestNeighbors {
     fn id(&self) -> &str {
         "knn"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_proba()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

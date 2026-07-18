@@ -4,7 +4,7 @@
 //! Level 1: trains a meta-learner on out-of-fold predictions from level 0.
 
 use crate::Result;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::resample::{CrossValidation, Resample};
 use crate::task::{ClassificationTask, RegressionTask, Task};
@@ -132,6 +132,10 @@ impl TrainedStacking {
 impl Learner for Stacking {
     fn id(&self) -> &str {
         "stacking"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor().with_proba()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

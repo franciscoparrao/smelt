@@ -7,7 +7,7 @@ use crate::Result;
 use crate::learner::math::sigmoid;
 use crate::learner::tree::TreeBuilder;
 use crate::learner::tree::{LeafValue, Node};
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::Array2;
@@ -176,6 +176,13 @@ fn count_node_importance(node: &Node) -> f64 {
 impl Learner for EBM {
     fn id(&self) -> &str {
         "ebm"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_proba()
+            .with_feature_importance()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

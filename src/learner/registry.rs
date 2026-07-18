@@ -7,9 +7,9 @@
 use super::{
     AdaBoost, AdaptiveRandomForest, CatBoost, DecisionTree, DeepForest, ElasticNet, ExtraTrees,
     ExtremeLearningMachine, GaussianNB, GradientBoosting, HoeffdingTree, KNearestNeighbors, Lasso,
-    Learner, LightGBM, LinearRegression, LinearSVM, LogisticRegression, MondrianForest,
-    MondrianTree, ObliqueForest, ObliqueTree, QuantileForest, QuantileGB, RandomForest, Ridge,
-    XGBoost, EBM,
+    Learner, LearnerProperties, LightGBM, LinearRegression, LinearSVM, LogisticRegression,
+    MondrianForest, MondrianTree, ObliqueForest, ObliqueTree, QuantileForest, QuantileGB,
+    RandomForest, Ridge, XGBoost, EBM,
 };
 use crate::{Result, SmeltError};
 
@@ -63,6 +63,32 @@ pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
             )));
         }
     })
+}
+
+/// Query the declared [`LearnerProperties`] of a registered learner by id,
+/// without the caller having to instantiate it by hand.
+///
+/// Constructs the learner via [`learner_from_id`] (default hyperparameters)
+/// and returns its [`Learner::properties`]. Useful for capability-driven
+/// filtering — e.g. "give me every registered learner that supports sample
+/// weights":
+///
+/// ```
+/// use smelt_ml::learner::{learner_properties, registered_learner_ids};
+///
+/// let weighted: Vec<&str> = registered_learner_ids()
+///     .iter()
+///     .copied()
+///     .filter(|id| learner_properties(id).unwrap().supports_weights)
+///     .collect();
+/// assert!(weighted.contains(&"random_forest"));
+/// assert!(!weighted.contains(&"knn"));
+/// ```
+///
+/// Returns the same "unknown learner id" error as [`learner_from_id`] for an
+/// unregistered id (including the factory-based composites).
+pub fn learner_properties(id: &str) -> Result<LearnerProperties> {
+    Ok(learner_from_id(id)?.properties())
 }
 
 /// All learner ids constructible via [`learner_from_id`].

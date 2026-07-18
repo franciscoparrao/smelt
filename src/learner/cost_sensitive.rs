@@ -26,7 +26,7 @@
 
 use crate::Result;
 use crate::SmeltError;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::ClassificationTask;
 use ndarray::Array2;
@@ -97,6 +97,12 @@ impl CostSensitiveClassifier {
 impl Learner for CostSensitiveClassifier {
     fn id(&self) -> &str {
         "cost_sensitive"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier()
+            .with_proba()
+            .with_feature_importance()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

@@ -124,6 +124,29 @@ MINOR, not a patch.
   removed from git and ignored; `docs/roadmap_checklist.md` brought up
   to date.
 
+### Added — mlr3-parity roadmap, item 5: learner properties + contract autotest (2026-07-18)
+
+- `LearnerProperties` (`src/learner/properties.rs`): queryable per-learner
+  metadata — `supports_classification`/`supports_regression`/
+  `supports_weights`/`supports_proba`/`supports_nan`/`supports_categorical`/
+  `provides_feature_importance`/`serializable` — declared by each learner's
+  `Learner::properties()` override (mlr3's `Learner$properties`).
+  `supports_weights()` now derives from `properties()` (single source of
+  truth; the ad-hoc overrides added with per-sample weights are folded in).
+  Query without instantiating via `learner_properties(id)`; exposed in
+  Python as `smelt.learner_properties(id)` and a `.properties` getter on
+  the macro-generated wrappers.
+- `tests/contract.rs`: a contract autotest (mlr3's `autotest`) that, for
+  each of the 27 registered learners, verifies **empirically** that every
+  declared property matches observable behavior — task support vs. the
+  train_* error, `check_no_nan`/`check_no_weights` firing, probabilities
+  summing to ~1 at the label's width, positional `feature_importance`
+  Some/None, `to_serializable` Some/None, and universal predict-before-fit /
+  wrong-shape no-panic. It passed whole on the first run (0 mismatches: the
+  metadata is verified truth, not merely declared) and fails loudly if a
+  learner is added or changed with lying properties — turning into
+  infrastructure the class of drift the five engine audits caught by hand.
+
 ### Added — mlr3-parity roadmap, item 3: AutoTuner + nested CV (2026-07-18)
 
 - `AutoTuner` wraps a parameterized learner factory, a `TunerSpec` (any

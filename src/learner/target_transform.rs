@@ -41,7 +41,7 @@
 
 use crate::Result;
 use crate::SmeltError;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{RegressionTask, Task};
 use ndarray::Array2;
@@ -189,6 +189,10 @@ impl TargetTransformRegressor {
 impl Learner for TargetTransformRegressor {
     fn id(&self) -> &str {
         "target_transform"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::regressor().with_feature_importance()
     }
 
     fn train_classif(

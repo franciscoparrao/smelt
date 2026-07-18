@@ -9,7 +9,7 @@
 //! Reference: Ko, A. et al. (2008). From dynamic classifier selection to
 //! dynamic ensemble selection. Pattern Recognition.
 
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, Task};
 use crate::{Result, SmeltError};
@@ -208,6 +208,10 @@ impl TrainedModel for TrainedDES {
 impl Learner for DynamicEnsemble {
     fn id(&self) -> &str {
         "dynamic_ensemble"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier().with_proba()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

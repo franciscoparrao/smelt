@@ -10,7 +10,7 @@
 //! signal and kriging mop up spatially structured residual error the base
 //! model can't see.
 
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{RegressionTask, Task};
 use crate::{Result, SmeltError};
@@ -524,6 +524,10 @@ impl KrigingHybrid {
 impl Learner for KrigingHybrid {
     fn id(&self) -> &str {
         "kriging_hybrid"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::regressor().with_feature_importance()
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {

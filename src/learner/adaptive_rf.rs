@@ -13,7 +13,7 @@
 //! foreground tree once triggered.
 
 use crate::learner::hoeffding::HoeffdingTree;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, Task};
 use crate::Result;
@@ -488,6 +488,12 @@ impl AdaptiveRandomForest {
 impl Learner for AdaptiveRandomForest {
     fn id(&self) -> &str {
         "adaptive_random_forest"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier()
+            .with_proba()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

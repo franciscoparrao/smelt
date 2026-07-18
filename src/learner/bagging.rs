@@ -1,7 +1,7 @@
 //! Generic bootstrap aggregating (bagging) wrapper for any Learner.
 
 use crate::Result;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::{Array2, Axis};
@@ -229,6 +229,12 @@ impl TrainedBagging {
 impl Learner for Bagging {
     fn id(&self) -> &str {
         "bagging"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_proba()
+            .with_feature_importance()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

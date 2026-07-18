@@ -38,6 +38,23 @@ pub(crate) fn registered_learner_ids() -> Vec<&'static str> {
     smelt_ml::prelude::registered_learner_ids().to_vec()
 }
 
+/// Query the declared capability metadata of a registered learner by id,
+/// returning a dict of boolean flags (`supports_classification`,
+/// `supports_regression`, `supports_weights`, `supports_proba`,
+/// `supports_nan`, `supports_categorical`, `provides_feature_importance`,
+/// `serializable`). Mirrors the Rust `learner_properties(id)`. Raises
+/// `ValueError` for an unknown id.
+#[pyfunction]
+pub(crate) fn learner_properties(py: Python<'_>, id: &str) -> PyResult<PyObject> {
+    let props = smelt_ml::prelude::learner_properties(id).map_err(|_| {
+        PyValueError::new_err(format!(
+            "unknown learner id \"{id}\"; valid ids: {}",
+            smelt_ml::prelude::registered_learner_ids().join(", ")
+        ))
+    })?;
+    crate::common::properties_to_dict(py, props)
+}
+
 #[pyclass]
 #[derive(Default)]
 pub(crate) struct Bagging {

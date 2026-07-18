@@ -6,7 +6,7 @@
 //! Reference: Meinshausen, N. (2006). Quantile Regression Forests. JMLR 7, 983-999.
 
 use crate::learner::tree::{MaxFeatures, mse_from_sums};
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::{Result, SmeltError};
 use crate::task::{RegressionTask, Task};
@@ -455,6 +455,12 @@ impl QuantileForest {
 impl Learner for QuantileForest {
     fn id(&self) -> &str {
         "quantile_forest"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::regressor()
+            .with_feature_importance()
+            .with_serializable()
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {

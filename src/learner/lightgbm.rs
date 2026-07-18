@@ -15,7 +15,7 @@
 
 use crate::Result;
 use crate::learner::math::{sigmoid, softmax};
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::{Array2, ArrayView1};
@@ -874,6 +874,16 @@ impl Learner for LightGBM {
         "lightgbm"
     }
 
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_weights()
+            .with_proba()
+            .with_nan()
+            .with_categorical()
+            .with_feature_importance()
+            .with_serializable()
+    }
+
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         let features = task.features();
         let target = task.target();
@@ -985,13 +995,6 @@ impl Learner for LightGBM {
         } else {
             self.train_multiclass(task)
         }
-    }
-
-    /// LightGBM consumes `Task::with_weights`: gradients and hessians are
-    /// scaled per sample before GOSS sampling and histogram accumulation
-    /// (see the struct-level "Sample weights" doc for the GOSS interaction).
-    fn supports_weights(&self) -> bool {
-        true
     }
 }
 

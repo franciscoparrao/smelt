@@ -91,12 +91,12 @@ pub mod prelude {
         CostSensitiveClassifier, DecisionTree, DeepForest, DynamicEnsemble, EBM, ElasticNet,
         ExtraTrees, ExtremeLearningMachine, BandwidthSelection, GaussianNB, GeoXGBoost,
         GradientBoosting, HoeffdingTree, KNearestNeighbors, KrigingHybrid, Lasso, Learner,
-        TrainedDeepForest, TrainedGeoXGBoost, TrainedKrigingHybrid, LightGBM, LinearRegression,
-        LinearSVM, LogisticRegression, MondrianForest, MondrianTree, ObliqueForest, ObliqueTree,
-        Objective, QuantileForest, QuantileGB, RandomForest, Ridge, Stacking,
+        LearnerProperties, TrainedDeepForest, TrainedGeoXGBoost, TrainedKrigingHybrid, LightGBM,
+        LinearRegression, LinearSVM, LogisticRegression, MondrianForest, MondrianTree, ObliqueForest,
+        ObliqueTree, Objective, QuantileForest, QuantileGB, RandomForest, Ridge, Stacking,
         TargetTransform, TargetTransformRegressor, TrainedAutoTuner, TrainedTargetTransformRegressor,
         TrainedQuantileForest, TunerSpec, VariogramFit,
-        VariogramModel, XGBoost, learner_from_id, registered_learner_ids,
+        VariogramModel, XGBoost, learner_from_id, learner_properties, registered_learner_ids,
     };
     pub use crate::measure::{
         Accuracy, AteBias, AucRoc, BalancedAccuracy, Brier, CohensKappa, F1Score, LogLoss, Mae,

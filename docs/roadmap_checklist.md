@@ -109,11 +109,18 @@ y learners espaciales — esto cubre lo inverso).
       como wrapper (mismo patrón factory) + búsqueda de umbral óptimo por
       costo/métrica; completa la historia que `CostSensitiveClassifier`
       empezó. ~300 líneas.
-- [ ] **Registry con properties + autotest de contrato** — metadata
-      consultable por learner (¿NaN? ¿categóricas? ¿proba? ¿pesos?) y un
-      harness que verifica el contrato de cada learner registrado
-      automáticamente (la clase de hallazgos que las 5 auditorías pescaron a
-      mano). ~250 líneas, alto retorno en mantenibilidad.
+- [x] **Registry con properties + autotest de contrato** — `LearnerProperties`
+      (`src/learner/properties.rs`): 8 flags por learner (classif/regress/
+      weights/proba/nan/categorical/feature_importance/serializable), fuente
+      única = override `properties()` (el método `supports_weights()` ahora
+      deriva de ahí). `learner_properties(id)` en registry + Python. El
+      entregable: `tests/contract.rs` — 7 tests × 27 learners que verifican
+      EMPÍRICAMENTE que cada property declarada coincide con el
+      comportamiento real (train_* según task-support, check_no_nan/weights,
+      proba suma≈1, feature_importance posicional Some/None, serializable,
+      cero-panic universal). Pasó entero a la primera → 0 mismatches: la
+      metadata es verdad verificada, no declarada. Falla ruidoso si alguien
+      agrega un learner con properties mentirosas. ✅ (2026-07-18)
 - [ ] **Menores / futuro**: terminators componibles (tiempo/estancamiento/
       objetivo), dependencias entre parámetros en `ParamSet` (habría
       prevenido el M-5 de la 5ª auditoría), tuning multi-objetivo (Pareto),

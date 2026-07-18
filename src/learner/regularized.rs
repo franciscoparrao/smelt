@@ -1,6 +1,6 @@
 //! Regularized regression: Ridge (L2), Lasso (L1), Elastic Net (L1+L2).
 
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{RegressionTask, Task};
 use crate::{Result, SmeltError};
@@ -147,8 +147,11 @@ impl Learner for Ridge {
         "ridge"
     }
 
-    fn supports_weights(&self) -> bool {
-        true
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::regressor()
+            .with_weights()
+            .with_feature_importance()
+            .with_serializable()
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
@@ -342,8 +345,11 @@ impl Learner for Lasso {
         "lasso"
     }
 
-    fn supports_weights(&self) -> bool {
-        true
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::regressor()
+            .with_weights()
+            .with_feature_importance()
+            .with_serializable()
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
@@ -439,8 +445,11 @@ impl Learner for ElasticNet {
         "elastic_net"
     }
 
-    fn supports_weights(&self) -> bool {
-        true
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::regressor()
+            .with_weights()
+            .with_feature_importance()
+            .with_serializable()
     }
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {

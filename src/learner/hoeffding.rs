@@ -9,7 +9,7 @@
 //! Reference: Domingos, P. & Hulten, G. (2000). Mining high-speed data streams.
 //! KDD, 71-80.
 
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
 use crate::task::{ClassificationTask, Task};
@@ -539,6 +539,12 @@ fn find_best_split(
 impl Learner for HoeffdingTree {
     fn id(&self) -> &str {
         "hoeffding_tree"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier()
+            .with_proba()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

@@ -19,6 +19,25 @@ pub(crate) fn to_array2(x: PyReadonlyArray2<'_, f64>) -> Array2<f64> {
     x.as_array().to_owned()
 }
 
+/// Convert a Rust [`smelt_ml::learner::LearnerProperties`] into a Python dict
+/// with one boolean entry per capability flag. Shared by the per-wrapper
+/// `properties` getter and the module-level `learner_properties(id)` function.
+pub(crate) fn properties_to_dict(
+    py: Python<'_>,
+    p: smelt_ml::learner::LearnerProperties,
+) -> PyResult<PyObject> {
+    let dict = pyo3::types::PyDict::new(py);
+    dict.set_item("supports_classification", p.supports_classification)?;
+    dict.set_item("supports_regression", p.supports_regression)?;
+    dict.set_item("supports_weights", p.supports_weights)?;
+    dict.set_item("supports_proba", p.supports_proba)?;
+    dict.set_item("supports_nan", p.supports_nan)?;
+    dict.set_item("supports_categorical", p.supports_categorical)?;
+    dict.set_item("provides_feature_importance", p.provides_feature_importance)?;
+    dict.set_item("serializable", p.serializable)?;
+    Ok(dict.into_pyobject(py)?.into_any().unbind())
+}
+
 /// Maps a core `SmeltError` to a Python exception. Bad-input variants (an
 /// out-of-range/inconsistent hyperparameter, or mismatched array lengths --
 /// exactly what `Vec<i64>`/labels validation elsewhere in this crate already
@@ -646,6 +665,17 @@ macro_rules! define_learner {
                 smelt_ml::learner::Learner::supports_weights(&learner)
             }
 
+            /// Declarative capability metadata as a dict (task support,
+            /// weights, proba, NaN/categorical tolerance, feature importance,
+            /// serializability), the same values as
+            /// `smelt.learner_properties(id)`. Queried from the Rust
+            /// `Learner::properties`.
+            #[getter]
+            fn properties(&self, py: pyo3::Python<'_>) -> pyo3::PyResult<pyo3::PyObject> {
+                let learner = { let $slf = &*self; $ctor_expr };
+                crate::common::properties_to_dict(py, smelt_ml::learner::Learner::properties(&learner))
+            }
+
             fn predict<'py>(
                 &self,
                 py: pyo3::Python<'py>,
@@ -841,6 +871,14 @@ macro_rules! declare_weight_support {
                 #[getter]
                 fn supports_sample_weight(&self) -> bool {
                     smelt_ml::learner::Learner::supports_weights(&$ctor)
+                }
+
+                /// Declarative capability metadata as a dict (same values as
+                /// `smelt.learner_properties(id)`), queried from the Rust
+                /// `Learner::properties`.
+                #[getter]
+                fn properties(&self, py: pyo3::Python<'_>) -> pyo3::PyResult<pyo3::PyObject> {
+                    crate::common::properties_to_dict(py, smelt_ml::learner::Learner::properties(&$ctor))
                 }
             }
         )+

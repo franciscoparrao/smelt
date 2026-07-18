@@ -43,7 +43,7 @@
 //! constructible via [`crate::learner::registry::learner_from_id`].
 
 use crate::Result;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::measure::Measure;
 use crate::prediction::Prediction;
 use crate::resample::Resample;
@@ -322,6 +322,18 @@ impl Learner for AutoTuner {
         "auto_tuner"
     }
 
+    fn properties(&self) -> LearnerProperties {
+        // Delegate to a representative base learner: task support, weights,
+        // proba, and importance all follow the tuned learner. The default
+        // supports_weights() reads this, preserving the previous delegation.
+        // The trained AutoTuner is a composite with no SerializableModel
+        // variant, so serializability does not carry through.
+        LearnerProperties {
+            serializable: false,
+            ..(*self.factory)(&self.tuner.representative_params()).properties()
+        }
+    }
+
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
         Ok(Box::new(self.fit_classif(task)?))
     }
@@ -330,15 +342,6 @@ impl Learner for AutoTuner {
         Ok(Box::new(self.fit_regress(task)?))
     }
 
-    /// Delegates to the base learner: builds a probe with a representative
-    /// parameter set and reports *its* weight support. When `true`, the
-    /// weighted task flows through the inner resampling folds (sliced by
-    /// [`crate::benchmark`]) and the final refit unchanged; when the base is
-    /// weight-blind, its own `check_no_weights` guard rejects a weighted task
-    /// with a clear error at the first fold fit.
-    fn supports_weights(&self) -> bool {
-        (*self.factory)(&self.tuner.representative_params()).supports_weights()
-    }
 }
 
 /// A trained [`AutoTuner`]: the refit best model, plus the tuning outcome

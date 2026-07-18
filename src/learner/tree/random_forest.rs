@@ -2,7 +2,7 @@
 
 use super::{LeafValue, MaxFeatures, Node, TreeBuilder};
 use crate::Result;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::Array2;
@@ -220,12 +220,12 @@ impl Learner for RandomForest {
         "random_forest"
     }
 
-    /// `true`: weights enter each tree's impurity and leaf values (sklearn
-    /// convention). The bootstrap stays **uniform** — weights do NOT change
-    /// the resampling probabilities (also sklearn's behavior); a weight of
-    /// 0.0 excludes the sample from every tree it is drawn into.
-    fn supports_weights(&self) -> bool {
-        true
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_weights()
+            .with_proba()
+            .with_feature_importance()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

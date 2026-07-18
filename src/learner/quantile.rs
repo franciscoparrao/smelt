@@ -5,7 +5,7 @@
 
 use crate::learner::tree::TreeBuilder;
 use crate::learner::tree::{LeafValue, Node};
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
 use crate::task::{RegressionTask, Task};
@@ -123,6 +123,11 @@ impl TrainedModel for TrainedQuantileGB {
 impl Learner for QuantileGB {
     fn id(&self) -> &str {
         "quantile_gb"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::regressor()
+            .with_serializable()
     }
 
 

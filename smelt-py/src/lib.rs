@@ -39,7 +39,7 @@ use feature_selection::{
 use learners::boosting::{CatBoost, GeoXGBoost, KrigingHybrid, LightGBM, XGBoost};
 use learners::ensemble::{
     Bagging, CostSensitiveClassifier, DynamicEnsemble, Stacking, TargetTransformRegressor,
-    registered_learner_ids,
+    learner_properties, registered_learner_ids,
 };
 use learners::linear::{ElasticNet, Lasso, LinearRegression, LinearSVM, LogisticRegression, Ridge};
 use learners::misc::{
@@ -98,6 +98,7 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<TargetTransformRegressor>()?;
     m.add_class::<AutoTuner>()?;
     m.add_function(wrap_pyfunction!(registered_learner_ids, m)?)?;
+    m.add_function(wrap_pyfunction!(learner_properties, m)?)?;
 
     // Causal meta-learners
     m.add_class::<TLearner>()?;

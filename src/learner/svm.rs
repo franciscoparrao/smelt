@@ -1,6 +1,6 @@
 //! Linear Support Vector Machine via Stochastic Gradient Descent.
 
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
 use crate::task::{ClassificationTask, Task};
@@ -245,6 +245,13 @@ impl TrainedModel for TrainedLinearSVM {
 impl Learner for LinearSVM {
     fn id(&self) -> &str {
         "linear_svm"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier()
+            .with_proba()
+            .with_feature_importance()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

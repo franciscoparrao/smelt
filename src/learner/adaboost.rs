@@ -1,6 +1,6 @@
 //! AdaBoost (Adaptive Boosting) classifier via SAMME algorithm.
 
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::Result;
 use crate::task::{ClassificationTask, Task};
@@ -311,6 +311,12 @@ impl AdaBoost {
 impl Learner for AdaBoost {
     fn id(&self) -> &str {
         "adaboost"
+    }
+
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier()
+            .with_proba()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {

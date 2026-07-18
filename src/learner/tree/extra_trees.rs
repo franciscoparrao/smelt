@@ -2,7 +2,7 @@
 
 use super::{LeafValue, MaxFeatures, Node, TreeBuilder};
 use crate::Result;
-use crate::learner::{Learner, TrainedModel};
+use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
 use ndarray::Array2;
@@ -200,11 +200,12 @@ impl Learner for ExtraTrees {
         "extra_trees"
     }
 
-    /// `true`: weights enter each tree's impurity and leaf values (sklearn
-    /// convention); a weight of 0.0 excludes the sample from every tree
-    /// (Extra Trees has no bootstrap, so exclusion is exact and ensemble-wide).
-    fn supports_weights(&self) -> bool {
-        true
+    fn properties(&self) -> LearnerProperties {
+        LearnerProperties::classifier_regressor()
+            .with_weights()
+            .with_proba()
+            .with_feature_importance()
+            .with_serializable()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
