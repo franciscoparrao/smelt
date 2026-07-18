@@ -12,10 +12,117 @@ patch; defensible as a bug fix, not a precedent to repeat).
 
 ## [Unreleased]
 
-LOW-severity backlog of the 4th engine audit (2026-07-10). Mostly
-validation, determinism, and documentation fixes; the entries below are
-the ones that can change numerical results, so per the convention above
-this section ships in a MINOR, not a patch.
+LOW-severity backlog of the 4th engine audit (2026-07-10) plus the full
+remediation of the 5th engine audit
+(`docs/auditoria_motor_2026-07-17.md`: 0 CRITICAL / 1 HIGH / 10 MEDIUM /
+~17 LOW — the HIGH was process-side). Mostly validation, determinism,
+and documentation fixes; the entries below include some that can change
+numerical results, so per the convention above this section ships in a
+MINOR, not a patch.
+
+### Fixed — 5th engine audit (2026-07-17): Rust core
+
+- CatBoost: model files written by 2.0.x–3.0.0 with the legacy
+  object-form `cat_encodings` wire format **load again** — the 3.1.0
+  persistence fix (`f9e028f`) silently broke them with an opaque serde
+  error. The deserializer now accepts both wire forms (untagged);
+  round-trips of current files stay bit-identical (M-2).
+- `Pipeline` now propagates `feature_types` through every stage (new
+  `Transformer::transform_types`, mirroring `transform_names`;
+  `FilterSelector`/`RFE` select types, `PCA`/`OneHotEncoder` emit
+  Numeric for derived columns). Previously even an empty pipeline reset
+  all features to Numeric, silently disabling XGBoost/LightGBM native
+  categorical splits (audit probe: accuracy 1.000 direct vs 0.623
+  through a no-op pipeline). **Pipelines over categorical tasks can
+  produce different — better — results** (M-3).
+- GeoXGBoost: `select_bandwidth` and training now return a clear
+  `InvalidParameter` when the dataset cannot satisfy the 30-neighbour
+  minimum (n − 1 < 30) instead of silently clamping every candidate to
+  n − 1 — which made the bandwidth sweep fictitious (identical scores,
+  meaningless "best"). Erroring is the conservative choice; a
+  warning-mode alternative is a question for the co-designed method's
+  discussion (M-1).
+- Degenerate-parameter validation at train time (`InvalidParameter`):
+  `CatBoost::with_max_bins(0|1)` (was a silent constant model),
+  `Bagging` with `n_estimators = 0`, ELM with `n_hidden = 0` (the old
+  silent clamp-to-1 is removed), Mondrian `lifetime` negative or NaN.
+  `TrainedDES::predict` validates feature count (was silent zip
+  truncation in the neighbour search). `CQR::calibrate` and
+  `ConformalClassifier::calibrate` reject mismatched calibration
+  lengths (`DimensionMismatch`), matching `SplitConformal`.
+- `ClassificationTask::with_class_names` now panics immediately with a
+  clear message when given fewer names than `max(label) + 1`
+  (documented under `# Panics`) — previously the mismatch surfaced as
+  an index-out-of-bounds deep inside consumers such as SMOTE.
+- DeepForest: per-fold and final-layer tasks propagate `class_names`
+  (closes M-9 of the 4th-audit backlog — rare classes keep the full
+  probability width in the cascade's OOF features).
+- `QuantileForest` implements `feature_importance()` (same
+  weighted-gain accounting as RandomForest; previously always `None`).
+  Old serialized QRF files still load (fields are `serde(default)`).
+- LightGBM: the plain-GBDT default path skips the GOSS
+  sort-by-gradient entirely (it selected everything with weight 1
+  after an O(n log n) sort per tree, per class). Selection, weights
+  and RNG state are pinned identical to the general path; **outputs
+  can differ from 3.1.0 at floating-point-reassociation (ulp) level**
+  because accumulation order changes — documented in the regression
+  test.
+- Docs: variogram WLS attribution corrected (Cressie 1985 = gstat
+  `fit.method = 2`; gstat's *default* is method 7); XGBoost
+  `with_objective` publicly documents that early stopping under
+  `Objective::Custom` monitors plain MSE on the raw score.
+
+### Fixed — 5th engine audit (2026-07-17): smelt-py
+
+- Regression `fit(X, y)` (and every other float-target entry point:
+  eval sets, `GeoXGBoost`/`KrigingHybrid`/`QuantileForest` fits,
+  `BayesianOptimizer.optimize`, the five causal `estimate()`s) rejects
+  NaN/±inf targets with a `ValueError` naming the first bad index.
+  Previously the model trained fine and predicted all-NaN with no
+  error — the CSV loaders were fixed in 3.1.0 but the main API path
+  was not (M-4).
+- `BayesianOptimizer.optimize`: tuning `huber_delta` without also
+  tuning `objective` to include `"huber"` is now a `ValueError`
+  instead of a silent no-op (every trial trained the identical model)
+  (M-5).
+- **`SplitConformal` is now exposed in Python** (`SplitConformal(alpha)`,
+  `calibrate_from_predictions(cal_pred, cal_truth)`,
+  `predict_interval(test_pred)` → `(lower, upper)`), closing the gap
+  that made the PM2.5 paper's conformal-over-`predict_spatial` flow
+  unreproducible from the bindings; empirical coverage 92% at
+  alpha=0.1 in the end-to-end KrigingHybrid probe. The
+  `GeoXGBoost.conformal_predict` docstring no longer promises a
+  nonexistent `coords` parameter and now points to `SplitConformal`
+  for the spatial flow (M-6).
+- `XGBoost` validates `objective` eagerly in the constructor and
+  `set_params` (listing valid options), matching the
+  KrigingHybrid/ELM convention, instead of failing at `fit()`.
+- All 14 two-array measure functions (`rmse`…`brier`) validate equal
+  lengths — mismatched inputs previously zip-truncated and could
+  report perfect scores (`rmse` 3-vs-1 → 0.0, `accuracy` → 1.0).
+- Composite learners (`DeepForest`, `Bagging`, `Stacking`,
+  `DynamicEnsemble`, `CostSensitiveClassifier`) raise
+  `NotImplementedError` with an explanation from `save()` (was an
+  opaque `RuntimeError`); `brier_score` rejects malformed probability
+  input with a clear `ValueError` (was a PyO3 `TypeError`) and accepts
+  sklearn-style 1D positive-class probabilities like `auc_roc_score`.
+
+### Fixed — 5th engine audit (2026-07-17): process
+
+- **Publishing to PyPI is now gated on the test suite**: `release.yml`
+  runs the full suite (default + `parquet` features) on the tag's ref
+  and `publish` depends on it. Previously a tag pushed from a red — or
+  never-CI'd — tree built and published wheels (the audit's only HIGH).
+- Crate packaging switched to an `include` allow-list: internal audit
+  reports, private correspondence drafts, and process docs are no
+  longer published to crates.io (156 → 124 files) (M-9).
+- New `python-smoke` CI job builds the real maturin wheel and runs
+  `smelt-py/tests/test_smoke.py` (import/version, fit/predict,
+  bit-identical save/load round-trip, a short tuner run) — the first
+  permanent Python test surface in the repo (M-10).
+- GitHub Actions pinned by commit SHA; tracked `__pycache__/*.pyc`
+  removed from git and ignored; `docs/roadmap_checklist.md` brought up
+  to date.
 
 ### Added — KrigingHybrid variogram upgrade (PM2.5 handoff, gap 3b)
 
@@ -26,8 +133,9 @@ this section ships in a MINOR, not a patch.
   crate's hand-rolled numerics. Python:
   `KrigingHybrid(variogram_model="matern32"/"matern52")`.
 - `fit_variogram` now minimizes Cressie's (1985) WLS objective
-  (`Σ N_j (γ̂_j − γ_j)²/γ_j²` -- relative misfit, the gstat-default
-  family) instead of plain pair-count-weighted SSE, with a two-stage
+  (`Σ N_j (γ̂_j − γ_j)²/γ_j²` -- relative misfit; gstat's
+  `fit.method = 2`, though gstat's own *default* is method 7, which
+  weights by `N_j/h_j²`) instead of plain pair-count-weighted SSE, with a two-stage
   grid search (coarse + ±1-step local refinement). **Changes fitted
   variogram parameters and therefore `predict_spatial` outputs** for
   existing `KrigingHybrid`/`predict_spatial` users -- the old absolute
@@ -105,6 +213,20 @@ MINOR, not a patch, per the convention above: M-3's incremental split
 sweep can flip exact ties between equal-gain candidate splits
 (floating-point-rounding-level differences), and M-7 changes ANOVA
 degrees of freedom when a class is absent from a fold.
+
+### Changed — numerical results (entry added retroactively 2026-07-17)
+
+- GeoXGBoost: `select_bandwidth` now rejects candidate bandwidths below a
+  30-neighbour minimum (`MIN_BANDWIDTH`, per the co-designed GWR
+  reference implementation: geographically weighted fits are unreliable
+  below ~30 units), and the automatic bandwidth search therefore explores
+  a restricted candidate set. **Users relying on automatic bandwidth
+  selection can get different predictions than under 3.0.0.** The LOO
+  criterion docstring was also corrected (skipping sparse neighbourhoods
+  favors small bandwidths, not large ones). This shipped in 3.1.0 without
+  a changelog entry — added retroactively after the 5th engine audit
+  (2026-07-17) flagged the omission; the convention in this file's header
+  requires such entries at release time.
 
 ### Fixed (M-19, 4th audit Tier 3 — Python bindings)
 
@@ -190,6 +312,16 @@ and the PM2.5 case-study additions (TimeSeriesCV, SplitConformal).
 
 ### Changed — numerical results
 
+- *(entry added retroactively 2026-07-17, flagged by the 5th engine
+  audit)* `LinearSVM`: the per-sample shrink implemented an effective
+  regularization of `λ = 1/C` **per sample** — a factor of *n* more than
+  the standard `½‖w‖² + C·Σ hinge` objective (sklearn/Pegasos
+  convention, now `λ = 1/(C·n)`) — and the learner gained internal
+  feature standardization (like LogisticRegression/ELM). With defaults on
+  trivially separable data, training accuracy goes from chance level
+  (~0.51–0.54) to ~1.0; every LinearSVM model changes. This was HIGH-5
+  of the 4th audit and the single largest behavior change in 3.0.0; it
+  shipped without a changelog entry.
 - `RandomSearch`/`Hyperband`/`BayesianOptimizer` with a fixed seed now
   assign RNG draws to parameters in sorted-key order instead of `HashMap`
   iteration order. Previously the same seed sampled **different
