@@ -12,6 +12,19 @@ patch; defensible as a bug fix, not a precedent to repeat).
 
 ## [Unreleased]
 
+## [smelt-ml 3.2.0] / [smelt-py 0.8.0] - 2026-07-19
+
+Two large threads land together, both MINOR-worthy (numerical-result and
+default changes shipped with explicit entries, never silently — per this
+file's header convention): the full remediation of the 5th engine audit,
+and **Prioridad 6 (mlr3 parity)** — the five composition/introspection
+gaps versus mlr3, all closed as `Learner` wrappers plus queryable
+metadata without touching the core architecture (see
+`docs/roadmap_checklist.md`). Highlights below; this is also the first
+release published through the `release.yml` test gate added in the audit
+remediation, and the first `cargo publish` under the packaging
+allow-list that keeps internal docs and correspondence out of the crate.
+
 LOW-severity backlog of the 4th engine audit (2026-07-10) plus the full
 remediation of the 5th engine audit
 (`docs/auditoria_motor_2026-07-17.md`: 0 CRITICAL / 1 HIGH / 10 MEDIUM /
