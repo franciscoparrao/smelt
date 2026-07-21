@@ -143,7 +143,9 @@ pub(crate) fn cohens_kappa_score(y_true: Vec<usize>, y_pred: Vec<f64>) -> PyResu
     check_same_len(y_true.len(), "y_pred", y_pred.len())?;
     let pred_u = to_class_labels(&y_pred)?;
     let pred = Prediction::classification_with_truth(pred_u, y_true);
-    smelt_ml::prelude::CohensKappa.score(&pred).map_err(smelt_err)
+    smelt_ml::prelude::CohensKappa
+        .score(&pred)
+        .map_err(smelt_err)
 }
 
 #[pyfunction]

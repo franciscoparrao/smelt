@@ -4,11 +4,11 @@
 //! histogram-based + auto exact greedy, NaN handling, row/col subsampling,
 //! parallel split finding, early stopping, zero-copy prediction, in-place partitioning.
 
-use crate::{Result, SmeltError};
 use crate::learner::math::{sigmoid, softmax};
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
+use crate::{Result, SmeltError};
 use ndarray::{Array2, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -16,9 +16,13 @@ use rand::seq::SliceRandom;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::eval::{EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress};
+use super::eval::{
+    EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress,
+};
 use super::hist_pool::HistPool;
-use super::histogram::{HistBins, NAN_BIN, accumulate_histogram, best_categorical_split, best_numeric_split};
+use super::histogram::{
+    HistBins, NAN_BIN, accumulate_histogram, best_categorical_split, best_numeric_split,
+};
 
 /// Regression objective: defines the per-sample gradient/hessian the trees
 /// fit, the initial prediction, and the output transform.
@@ -642,7 +646,10 @@ impl<'a> XGBTreeBuilder<'a> {
         // Child g/h sums are only needed for leaf weights or monotone bounds —
         // skip the four O(n) passes on the common unconstrained inner node.
         let ((llo, lhi), (rlo, rhi), gh) = if constrained || children_are_leaves {
-            let lg: f64 = indices[start..left_end].iter().map(|&i| self.grads[i]).sum();
+            let lg: f64 = indices[start..left_end]
+                .iter()
+                .map(|&i| self.grads[i])
+                .sum();
             let lh: f64 = indices[start..left_end].iter().map(|&i| self.hess[i]).sum();
             let rg: f64 = indices[left_end..end].iter().map(|&i| self.grads[i]).sum();
             let rh: f64 = indices[left_end..end].iter().map(|&i| self.hess[i]).sum();
@@ -752,16 +759,18 @@ impl<'a> XGBTreeBuilder<'a> {
                 weight: self.bounded_leaf(g_sum, h_sum, lo, hi),
             };
         }
-        let ((llo, lhi), (rlo, rhi)) =
-            if self.constraints.get(feat).copied().unwrap_or(0) != 0 {
-                let lg: f64 = indices[start..left_end].iter().map(|&i| self.grads[i]).sum();
-                let lh: f64 = indices[start..left_end].iter().map(|&i| self.hess[i]).sum();
-                let rg: f64 = indices[left_end..end].iter().map(|&i| self.grads[i]).sum();
-                let rh: f64 = indices[left_end..end].iter().map(|&i| self.hess[i]).sum();
-                self.child_bounds_gh(feat, lo, hi, lg, lh, rg, rh)
-            } else {
-                ((lo, hi), (lo, hi))
-            };
+        let ((llo, lhi), (rlo, rhi)) = if self.constraints.get(feat).copied().unwrap_or(0) != 0 {
+            let lg: f64 = indices[start..left_end]
+                .iter()
+                .map(|&i| self.grads[i])
+                .sum();
+            let lh: f64 = indices[start..left_end].iter().map(|&i| self.hess[i]).sum();
+            let rg: f64 = indices[left_end..end].iter().map(|&i| self.grads[i]).sum();
+            let rh: f64 = indices[left_end..end].iter().map(|&i| self.hess[i]).sum();
+            self.child_bounds_gh(feat, lo, hi, lg, lh, rg, rh)
+        } else {
+            ((lo, hi), (lo, hi))
+        };
         let left = self.build_exact(indices, start, left_end, depth + 1, llo, lhi);
         let right = self.build_exact(indices, left_end, end, depth + 1, rlo, rhi);
         best.into_node(left, right)
@@ -777,8 +786,14 @@ impl<'a> XGBTreeBuilder<'a> {
             .col_indices
             .par_iter()
             .map(|&feat| {
-                let (bin_g, bin_h, nan_g, nan_h) =
-                    accumulate_histogram(self.bins, feat, self.grads, self.hess, None, node_indices);
+                let (bin_g, bin_h, nan_g, nan_h) = accumulate_histogram(
+                    self.bins,
+                    feat,
+                    self.grads,
+                    self.hess,
+                    None,
+                    node_indices,
+                );
 
                 if self.bins.cat[feat].is_some() {
                     let split = best_categorical_split(
@@ -1057,7 +1072,9 @@ impl TrainedModel for TrainedXGBoost {
                         let pred = probs
                             .iter()
                             .enumerate()
-                            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                            .max_by(|a, b| {
+                                a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)
+                            })
                             .unwrap()
                             .0;
                         (pred, probs)
@@ -1635,8 +1652,14 @@ mod cat_tests {
 
         let m_cat = stumps().train_regress(&cat_task).unwrap();
         let m_num = stumps().train_regress(&num_task).unwrap();
-        let (rc, rn) = (rmse_of(&*m_cat, &features, &target), rmse_of(&*m_num, &features, &target));
-        assert!(rc < 1.0, "categorical split should fit parity exactly, got RMSE={rc}");
+        let (rc, rn) = (
+            rmse_of(&*m_cat, &features, &target),
+            rmse_of(&*m_num, &features, &target),
+        );
+        assert!(
+            rc < 1.0,
+            "categorical split should fit parity exactly, got RMSE={rc}"
+        );
         assert!(
             rn > 2.0,
             "numeric thresholds cannot fit parity with 3 stumps, got RMSE={rn}"
@@ -1650,7 +1673,10 @@ mod cat_tests {
         let (cat_task, features, target) = parity_task(n, true);
         let m_cat = stumps().train_regress(&cat_task).unwrap();
         let rc = rmse_of(&*m_cat, &features, &target);
-        assert!(rc < 1.0, "categorical split should fit parity in exact mode, got RMSE={rc}");
+        assert!(
+            rc < 1.0,
+            "categorical split should fit parity in exact mode, got RMSE={rc}"
+        );
     }
 
     /// Unseen categories at prediction time route right (with the
@@ -1691,8 +1717,7 @@ mod cat_tests {
             .with_max_depth(2)
             .with_learning_rate(0.5);
         let model = m.train_classif(&task).unwrap();
-        let Prediction::Classification { predicted, .. } = model.predict(&features).unwrap()
-        else {
+        let Prediction::Classification { predicted, .. } = model.predict(&features).unwrap() else {
             unreachable!()
         };
         let acc = predicted
@@ -1701,7 +1726,10 @@ mod cat_tests {
             .filter(|(p, t)| p == t)
             .count() as f64
             / n as f64;
-        assert!(acc > 0.95, "categorical multiclass should be near-perfect, got acc={acc}");
+        assert!(
+            acc > 0.95,
+            "categorical multiclass should be near-perfect, got acc={acc}"
+        );
     }
 }
 
@@ -1780,7 +1808,10 @@ mod objective_tests {
         // Linear growth in the tail: one extra unit of residual adds
         // exactly delta, where MSE would add r-dependent (2r+1) amounts.
         let step = obj.monitor_loss(10.0, 0.0) - obj.monitor_loss(9.0, 0.0);
-        assert!((step - 1.0).abs() < 1e-12, "tail must grow linearly, got step {step}");
+        assert!(
+            (step - 1.0).abs() < 1e-12,
+            "tail must grow linearly, got step {step}"
+        );
     }
 
     /// Poisson objective fits count data on the log scale and returns
@@ -1803,7 +1834,10 @@ mod objective_tests {
             .with_objective(Objective::Poisson);
         let preds = predict_vec(&*m.train_regress(&task).unwrap(), &features);
 
-        assert!(preds.iter().all(|&p| p > 0.0), "Poisson predictions must be positive");
+        assert!(
+            preds.iter().all(|&p| p > 0.0),
+            "Poisson predictions must be positive"
+        );
         // Relative error on the larger counts should be small.
         let rel_err: f64 = preds
             .iter()
@@ -1812,7 +1846,10 @@ mod objective_tests {
             .map(|(&p, &y)| ((p - y) / y).abs())
             .sum::<f64>()
             / target.iter().filter(|&&y| y >= 5.0).count() as f64;
-        assert!(rel_err < 0.2, "mean relative error should be small, got {rel_err:.3}");
+        assert!(
+            rel_err < 0.2,
+            "mean relative error should be small, got {rel_err:.3}"
+        );
     }
 
     /// A custom objective encoding squared error must reproduce the built-in
@@ -1870,7 +1907,11 @@ mod monotone_tests {
         for i in 0..n {
             let x = i as f64 / n as f64 * 100.0;
             features[[i, 0]] = x;
-            target[i] = if (40.0..60.0).contains(&x) { x - 30.0 } else { x };
+            target[i] = if (40.0..60.0).contains(&x) {
+                x - 30.0
+            } else {
+                x
+            };
         }
         let task = RegressionTask::new("dip", features.clone(), target).unwrap();
         (task, features)
@@ -1884,10 +1925,7 @@ mod monotone_tests {
     }
 
     fn max_decrease(preds: &[f64]) -> f64 {
-        preds
-            .windows(2)
-            .map(|w| w[0] - w[1])
-            .fold(0.0f64, f64::max)
+        preds.windows(2).map(|w| w[0] - w[1]).fold(0.0f64, f64::max)
     }
 
     #[test]
@@ -1946,7 +1984,11 @@ mod monotone_tests {
         for i in 0..n {
             let x = i as f64 / n as f64 * 100.0;
             features[[i, 0]] = x;
-            target[i] = if (40.0..60.0).contains(&x) { 130.0 - x } else { 100.0 - x };
+            target[i] = if (40.0..60.0).contains(&x) {
+                130.0 - x
+            } else {
+                100.0 - x
+            };
         }
         let task = RegressionTask::new("bump", features.clone(), target).unwrap();
         let mut m = XGBoost::new()
@@ -1995,7 +2037,10 @@ mod weight_tests {
             Prediction::Regression { predicted, .. } => predicted[0],
             _ => unreachable!(),
         };
-        assert!((4.0..=6.0).contains(&p0), "unweighted should be ~5, got {p0}");
+        assert!(
+            (4.0..=6.0).contains(&p0),
+            "unweighted should be ~5, got {p0}"
+        );
 
         // Weight the y=10 group 9x heavier -> weighted mean = 9.
         let w: Vec<f64> = (0..n).map(|i| if i < n / 2 { 1.0 } else { 9.0 }).collect();
@@ -2008,7 +2053,10 @@ mod weight_tests {
             Prediction::Regression { predicted, .. } => predicted[0],
             _ => unreachable!(),
         };
-        assert!(p1 > 7.0, "weighted prediction should be pulled toward 9, got {p1}");
+        assert!(
+            p1 > 7.0,
+            "weighted prediction should be pulled toward 9, got {p1}"
+        );
     }
 
     #[test]
@@ -2047,7 +2095,10 @@ mod weight_tests {
             .sum::<f64>()
             / n as f64)
             .sqrt();
-        assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
+        assert!(
+            rmse < 1.0,
+            "binary feature should be perfectly splittable, got RMSE={rmse}"
+        );
     }
 
     /// Regression test for the stale-histogram bug in `build_hist_sub`
@@ -2123,10 +2174,16 @@ mod weight_tests {
         let mut unweighted = XGBoost::new().with_n_estimators(30).with_learning_rate(0.3);
         let m0 = unweighted.train_classif(&task).unwrap();
         let p0 = match m0.predict(&features).unwrap() {
-            Prediction::Classification { probabilities: Some(p), .. } => p[0][1],
+            Prediction::Classification {
+                probabilities: Some(p),
+                ..
+            } => p[0][1],
             _ => unreachable!(),
         };
-        assert!((0.3..=0.7).contains(&p0), "unweighted P(class=1) should be ~0.5, got {p0}");
+        assert!(
+            (0.3..=0.7).contains(&p0),
+            "unweighted P(class=1) should be ~0.5, got {p0}"
+        );
 
         // Weight the class=1 group 9x heavier -> weighted positive fraction = 0.9.
         let w: Vec<f64> = (0..n).map(|i| if i < n / 2 { 1.0 } else { 9.0 }).collect();
@@ -2136,10 +2193,16 @@ mod weight_tests {
             .with_sample_weights(w);
         let m1 = weighted.train_classif(&task).unwrap();
         let p1 = match m1.predict(&features).unwrap() {
-            Prediction::Classification { probabilities: Some(p), .. } => p[0][1],
+            Prediction::Classification {
+                probabilities: Some(p),
+                ..
+            } => p[0][1],
             _ => unreachable!(),
         };
-        assert!(p1 > 0.75, "weighted P(class=1) should be pulled toward 0.9, got {p1}");
+        assert!(
+            p1 > 0.75,
+            "weighted P(class=1) should be pulled toward 0.9, got {p1}"
+        );
     }
 
     #[test]
@@ -2152,20 +2215,32 @@ mod weight_tests {
         let mut unweighted = XGBoost::new().with_n_estimators(30).with_learning_rate(0.3);
         let m0 = unweighted.train_classif(&task).unwrap();
         let p0 = match m0.predict(&features).unwrap() {
-            Prediction::Classification { probabilities: Some(p), .. } => p[0][2],
+            Prediction::Classification {
+                probabilities: Some(p),
+                ..
+            } => p[0][2],
             _ => unreachable!(),
         };
-        assert!((0.15..=0.5).contains(&p0), "unweighted P(class=2) should be ~1/3, got {p0}");
+        assert!(
+            (0.15..=0.5).contains(&p0),
+            "unweighted P(class=2) should be ~1/3, got {p0}"
+        );
 
         // Weight class=2 examples 9x heavier -> should dominate the posterior.
-        let w: Vec<f64> = target.iter().map(|&t| if t == 2 { 9.0 } else { 1.0 }).collect();
+        let w: Vec<f64> = target
+            .iter()
+            .map(|&t| if t == 2 { 9.0 } else { 1.0 })
+            .collect();
         let mut weighted = XGBoost::new()
             .with_n_estimators(30)
             .with_learning_rate(0.3)
             .with_sample_weights(w);
         let m1 = weighted.train_classif(&task).unwrap();
         let p1 = match m1.predict(&features).unwrap() {
-            Prediction::Classification { probabilities: Some(p), .. } => p[0][2],
+            Prediction::Classification {
+                probabilities: Some(p),
+                ..
+            } => p[0][2],
             _ => unreachable!(),
         };
         assert!(p1 > 0.6, "weighted P(class=2) should dominate, got {p1}");
@@ -2220,7 +2295,11 @@ mod weight_tests {
             let Prediction::Regression { predicted, .. } = model.predict(feat).unwrap() else {
                 unreachable!()
             };
-            (predicted.iter().zip(tgt).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+            (predicted
+                .iter()
+                .zip(tgt)
+                .map(|(p, y)| (p - y).powi(2))
+                .sum::<f64>()
                 / tgt.len() as f64)
                 .sqrt()
         };

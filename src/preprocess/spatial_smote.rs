@@ -281,11 +281,7 @@ mod tests {
 
     #[test]
     fn achieves_class_parity_without_spatial_constraint() {
-        let features = Array2::from_shape_vec(
-            (6, 1),
-            vec![0.0, 0.1, 0.2, 0.3, 0.4, 1.0],
-        )
-        .unwrap();
+        let features = Array2::from_shape_vec((6, 1), vec![0.0, 0.1, 0.2, 0.3, 0.4, 1.0]).unwrap();
         let target = vec![0, 0, 0, 0, 0, 1];
         let coords: Vec<(f64, f64)> = (0..6).map(|i| (i as f64, 0.0)).collect();
         let task = ClassificationTask::new("t", features, target).unwrap();
@@ -305,9 +301,7 @@ mod tests {
     fn matches_plain_smote_when_unconstrained() {
         let features = Array2::from_shape_vec(
             (6, 2),
-            vec![
-                0.0, 0.0, 0.1, 0.1, 0.2, 0.0, 0.3, 0.2, 0.4, 0.1, 1.0, 1.0,
-            ],
+            vec![0.0, 0.0, 0.1, 0.1, 0.2, 0.0, 0.3, 0.2, 0.4, 0.1, 1.0, 1.0],
         )
         .unwrap();
         let target = vec![0, 0, 0, 0, 0, 1];
@@ -316,7 +310,11 @@ mod tests {
         let task_a = ClassificationTask::new("t", features.clone(), target.clone()).unwrap();
         let task_b = ClassificationTask::new("t", features, target).unwrap();
 
-        let spatial = SpatialSmote::new().with_seed(7).balance(&task_a, &coords).unwrap().0;
+        let spatial = SpatialSmote::new()
+            .with_seed(7)
+            .balance(&task_a, &coords)
+            .unwrap()
+            .0;
         let plain = Smote::new().with_seed(7).balance(&task_b).unwrap();
 
         assert_eq!(spatial.target(), plain.target());
@@ -338,7 +336,12 @@ mod tests {
             coords.push((x, y));
             target.push(1usize);
         }
-        for &(x, y) in &[(100.0, 100.0), (100.0, 101.0), (101.0, 100.0), (101.0, 101.0)] {
+        for &(x, y) in &[
+            (100.0, 100.0),
+            (100.0, 101.0),
+            (101.0, 100.0),
+            (101.0, 101.0),
+        ] {
             feats.push(x);
             feats.push(y);
             coords.push((x, y));
@@ -357,7 +360,9 @@ mod tests {
         let features = Array2::from_shape_vec((feats.len() / 2, 2), feats).unwrap();
         let task = ClassificationTask::new("clusters", features, target).unwrap();
 
-        let smote = SpatialSmote::new().with_seed(3).with_max_spatial_distance(3.0);
+        let smote = SpatialSmote::new()
+            .with_seed(3)
+            .with_max_spatial_distance(3.0);
         let (balanced, new_coords) = smote.balance(&task, &coords).unwrap();
 
         // Every synthetic coordinate (appended after the original 28 rows)
@@ -392,14 +397,19 @@ mod tests {
             .collect();
         let task = ClassificationTask::new("isolated", features, target).unwrap();
 
-        let smote = SpatialSmote::new().with_seed(5).with_max_spatial_distance(1.0);
+        let smote = SpatialSmote::new()
+            .with_seed(5)
+            .with_max_spatial_distance(1.0);
         let (balanced, new_coords) = smote.balance(&task, &coords).unwrap();
 
         let mut counts = vec![0usize; balanced.n_classes()];
         for &t in balanced.target() {
             counts[t] += 1;
         }
-        assert_eq!(counts[1], 2, "no synthetic minority samples should have been generated");
+        assert_eq!(
+            counts[1], 2,
+            "no synthetic minority samples should have been generated"
+        );
         assert_eq!(new_coords.len(), balanced.n_samples());
     }
 }

@@ -87,16 +87,16 @@ pub mod prelude {
         FeatureImportance, permutation_importance_classif, permutation_importance_regress,
     };
     pub use crate::learner::{
-        AdaBoost, AdaptiveRandomForest, Activation, Adwin, AutoTuner, Bagging, CalibratedClassifier,
-        CalibrationMethod, CatBoost, CostSensitiveClassifier, DecisionTree, DeepForest,
-        DynamicEnsemble, EBM, ElasticNet, ExtraTrees, ExtremeLearningMachine, BandwidthSelection,
+        Activation, AdaBoost, AdaptiveRandomForest, Adwin, AutoTuner, Bagging, BandwidthSelection,
+        CalibratedClassifier, CalibrationMethod, CatBoost, CostSensitiveClassifier, DecisionTree,
+        DeepForest, DynamicEnsemble, EBM, ElasticNet, ExtraTrees, ExtremeLearningMachine,
         GaussianNB, GeoXGBoost, GradientBoosting, HoeffdingTree, KNearestNeighbors, KrigingHybrid,
-        Lasso, Learner, LearnerProperties, TrainedCalibratedClassifier, TrainedDeepForest,
-        TrainedGeoXGBoost, TrainedKrigingHybrid, LightGBM, LinearRegression, LinearSVM,
-        LogisticRegression, MondrianForest, MondrianTree, ObliqueForest, ObliqueTree, Objective,
+        Lasso, Learner, LearnerProperties, LightGBM, LinearRegression, LinearSVM,
+        LogisticRegression, MondrianForest, MondrianTree, Objective, ObliqueForest, ObliqueTree,
         QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, TargetTransform,
         TargetTransformRegressor, ThresholdedClassifier, TrainedAutoTuner,
-        TrainedTargetTransformRegressor, TrainedThresholdedClassifier, TrainedQuantileForest,
+        TrainedCalibratedClassifier, TrainedDeepForest, TrainedGeoXGBoost, TrainedKrigingHybrid,
+        TrainedQuantileForest, TrainedTargetTransformRegressor, TrainedThresholdedClassifier,
         TunerSpec, VariogramFit, VariogramModel, XGBoost, learner_from_id, learner_properties,
         registered_learner_ids,
     };

@@ -570,7 +570,11 @@ mod tests {
     #[test]
     fn kmeans_with_n_init_one_still_produces_valid_clustering() {
         let data = three_blobs();
-        let result = KMeans::new(3).with_seed(7).with_n_init(1).fit(&data).unwrap();
+        let result = KMeans::new(3)
+            .with_seed(7)
+            .with_n_init(1)
+            .fit(&data)
+            .unwrap();
         assert!(result.n_clusters >= 1 && result.n_clusters <= 3);
         assert_eq!(result.labels.len(), data.nrows());
     }
@@ -631,6 +635,9 @@ mod tests {
             centroids: None,
         };
         let score = result.silhouette_score(&data);
-        assert!(score > 0.9, "well-separated blobs should score high: {score}");
+        assert!(
+            score > 0.9,
+            "well-separated blobs should score high: {score}"
+        );
     }
 }

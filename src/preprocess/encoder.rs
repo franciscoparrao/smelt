@@ -200,7 +200,10 @@ impl Transformer for OneHotEncoder {
             if let Some((_, cats)) = categories.iter().find(|(c, _)| *c == j) {
                 // One-hot output columns are 0/1 indicators, not integer
                 // category codes: Numeric for each expanded column.
-                result.extend(std::iter::repeat_n(crate::task::FeatureType::Numeric, cats.len()));
+                result.extend(std::iter::repeat_n(
+                    crate::task::FeatureType::Numeric,
+                    cats.len(),
+                ));
             } else {
                 result.push(ty);
             }

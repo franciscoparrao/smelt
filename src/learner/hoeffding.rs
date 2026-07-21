@@ -9,9 +9,9 @@
 //! Reference: Domingos, P. & Hulten, G. (2000). Mining high-speed data streams.
 //! KDD, 71-80.
 
+use crate::Result;
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
 use crate::task::{ClassificationTask, Task};
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
@@ -256,11 +256,25 @@ impl HoeffdingTree {
             } => {
                 if features[*feature] <= *threshold {
                     Self::update_node(
-                        left, features, label, delta, grace, max_depth, n_classes, feature_subset,
+                        left,
+                        features,
+                        label,
+                        delta,
+                        grace,
+                        max_depth,
+                        n_classes,
+                        feature_subset,
                     );
                 } else {
                     Self::update_node(
-                        right, features, label, delta, grace, max_depth, n_classes, feature_subset,
+                        right,
+                        features,
+                        label,
+                        delta,
+                        grace,
+                        max_depth,
+                        n_classes,
+                        feature_subset,
                     );
                 }
             }
@@ -645,8 +659,14 @@ mod tests {
 
         for _ in 0..20 {
             let (best_feat, best_gain, _) = find_best_split(&feature_stats, &[3, 3], 6, 2);
-            assert!(best_gain > 0.0, "separated classes must yield positive gain");
-            assert_eq!(best_feat, 2, "tied gains must resolve to the lower feature index");
+            assert!(
+                best_gain > 0.0,
+                "separated classes must yield positive gain"
+            );
+            assert_eq!(
+                best_feat, 2,
+                "tied gains must resolve to the lower feature index"
+            );
         }
     }
 
@@ -678,9 +698,10 @@ mod tests {
             let x1 = rng.random::<f64>();
             let y = if x0 > 0.5 { 1 } else { 0 };
             if let Some((pred, _)) = tree.predict_one(&[x0, x1])
-                && pred == y {
-                    correct += 1;
-                }
+                && pred == y
+            {
+                correct += 1;
+            }
         }
         let acc = correct as f64 / n_eval as f64;
         assert!(
@@ -720,7 +741,10 @@ mod tests {
             .filter(|(p, t)| *p == *t)
             .count();
         let acc = correct as f64 / predicted.len() as f64;
-        assert!(acc > 0.85, "batch train_classif should fit this simple rule well, got {acc}");
+        assert!(
+            acc > 0.85,
+            "batch train_classif should fit this simple rule well, got {acc}"
+        );
     }
 
     fn count_nodes(node: &HNode) -> usize {

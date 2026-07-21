@@ -81,11 +81,19 @@ impl<'a> CQR<'a> {
 
         let lower_vals = match &lower_pred {
             Prediction::Regression { predicted, .. } => predicted,
-            _ => return Err(SmeltError::IncompatiblePrediction("Expected regression prediction".into())),
+            _ => {
+                return Err(SmeltError::IncompatiblePrediction(
+                    "Expected regression prediction".into(),
+                ));
+            }
         };
         let upper_vals = match &upper_pred {
             Prediction::Regression { predicted, .. } => predicted,
-            _ => return Err(SmeltError::IncompatiblePrediction("Expected regression prediction".into())),
+            _ => {
+                return Err(SmeltError::IncompatiblePrediction(
+                    "Expected regression prediction".into(),
+                ));
+            }
         };
 
         // Conformity scores: max(lower - y, y - upper)
@@ -103,7 +111,11 @@ impl<'a> CQR<'a> {
         // clamping to the largest observed score.
         let n = scores.len();
         let q_rank = ((n as f64 + 1.0) * (1.0 - alpha)).ceil() as usize;
-        let correction = if q_rank > n { f64::INFINITY } else { scores[q_rank - 1] };
+        let correction = if q_rank > n {
+            f64::INFINITY
+        } else {
+            scores[q_rank - 1]
+        };
 
         Ok(Self {
             lower_model,
@@ -119,11 +131,19 @@ impl<'a> CQR<'a> {
 
         let lower_vals = match &lower_pred {
             Prediction::Regression { predicted, .. } => predicted,
-            _ => return Err(SmeltError::IncompatiblePrediction("Expected regression prediction".into())),
+            _ => {
+                return Err(SmeltError::IncompatiblePrediction(
+                    "Expected regression prediction".into(),
+                ));
+            }
         };
         let upper_vals = match &upper_pred {
             Prediction::Regression { predicted, .. } => predicted,
-            _ => return Err(SmeltError::IncompatiblePrediction("Expected regression prediction".into())),
+            _ => {
+                return Err(SmeltError::IncompatiblePrediction(
+                    "Expected regression prediction".into(),
+                ));
+            }
         };
 
         Ok(lower_vals

@@ -281,8 +281,7 @@ impl CausalForest {
                         ci_upper: f64::INFINITY,
                     };
                 }
-                let mean_tau =
-                    values.iter().map(|(v, _)| v).sum::<f64>() / values.len() as f64;
+                let mean_tau = values.iter().map(|(v, _)| v).sum::<f64>() / values.len() as f64;
                 let se = infinitesimal_jackknife_se(&values, n_samples);
                 CausalEffect {
                     estimate: mean_tau,
@@ -304,7 +303,10 @@ impl CausalForest {
                 if vals.is_empty() {
                     None
                 } else {
-                    Some((vals.iter().sum::<f64>() / vals.len() as f64, in_bag.as_slice()))
+                    Some((
+                        vals.iter().sum::<f64>() / vals.len() as f64,
+                        in_bag.as_slice(),
+                    ))
                 }
             })
             .collect();
@@ -660,12 +662,22 @@ mod tests {
         let names = vec!["a".to_string(), "b".to_string()];
 
         for bad in [-0.5, 0.0, 1.0, 1.5] {
-            let cf = CausalForest::new().with_n_estimators(3).with_honesty_fraction(bad);
-            assert!(cf.estimate(&features, &treatment, &outcome, &names).is_err());
+            let cf = CausalForest::new()
+                .with_n_estimators(3)
+                .with_honesty_fraction(bad);
+            assert!(
+                cf.estimate(&features, &treatment, &outcome, &names)
+                    .is_err()
+            );
         }
         for bad in [-0.1, 0.0, 1.5] {
-            let cf = CausalForest::new().with_n_estimators(3).with_subsample_fraction(bad);
-            assert!(cf.estimate(&features, &treatment, &outcome, &names).is_err());
+            let cf = CausalForest::new()
+                .with_n_estimators(3)
+                .with_subsample_fraction(bad);
+            assert!(
+                cf.estimate(&features, &treatment, &outcome, &names)
+                    .is_err()
+            );
         }
     }
     use ndarray::array;
@@ -685,8 +697,16 @@ mod tests {
             split: Some(CausalSplit {
                 feature: 0,
                 threshold: 0.5,
-                left: Box::new(CausalNode { tau: 999.0, honest_valid: false, split: None }),
-                right: Box::new(CausalNode { tau: 999.0, honest_valid: false, split: None }),
+                left: Box::new(CausalNode {
+                    tau: 999.0,
+                    honest_valid: false,
+                    split: None,
+                }),
+                right: Box::new(CausalNode {
+                    tau: 999.0,
+                    honest_valid: false,
+                    split: None,
+                }),
             }),
         };
 
@@ -721,7 +741,11 @@ mod tests {
     /// not silently default to 0.0 (a fabricated "no effect" claim).
     #[test]
     fn populate_leaf_tau_marks_leaf_invalid_without_both_groups() {
-        let mut leaf = CausalNode { tau: 0.0, honest_valid: false, split: None };
+        let mut leaf = CausalNode {
+            tau: 0.0,
+            honest_valid: false,
+            split: None,
+        };
         let features = array![[0.0], [0.1]];
         let treatment = vec![1, 1]; // both treated: no control reaches this leaf
         let outcome = vec![5.0, 6.0];
@@ -729,7 +753,10 @@ mod tests {
 
         populate_leaf_tau(&mut leaf, &features, &est_idx, &treatment, &outcome);
 
-        assert!(!leaf.honest_valid, "a leaf with no honest control unit must not be marked valid");
+        assert!(
+            !leaf.honest_valid,
+            "a leaf with no honest control unit must not be marked valid"
+        );
     }
 
     /// End-to-end: samples whose leaf receives no honest estimation data are
@@ -755,7 +782,9 @@ mod tests {
         let features = Array2::from_shape_vec((n, 1), features_flat).unwrap();
 
         let cf = CausalForest::new().with_n_estimators(50).with_seed(7);
-        let result = cf.estimate(&features, &treatment, &outcome, &["x".into()]).unwrap();
+        let result = cf
+            .estimate(&features, &treatment, &outcome, &["x".into()])
+            .unwrap();
 
         assert!(
             (result.ate - 5.0).abs() < 1.0,
@@ -897,10 +926,8 @@ mod tests {
             .estimate(&features, &treatment, &outcome, &["x".into()])
             .unwrap();
 
-        let mean_se_small: f64 =
-            small.effects.iter().map(|e| e.std_error).sum::<f64>() / n as f64;
-        let mean_se_large: f64 =
-            large.effects.iter().map(|e| e.std_error).sum::<f64>() / n as f64;
+        let mean_se_small: f64 = small.effects.iter().map(|e| e.std_error).sum::<f64>() / n as f64;
+        let mean_se_large: f64 = large.effects.iter().map(|e| e.std_error).sum::<f64>() / n as f64;
 
         let ratio = mean_se_large / mean_se_small;
         let old_buggy_ratio = (20.0_f64 / 300.0).sqrt();

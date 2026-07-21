@@ -217,7 +217,10 @@ impl Learner for TargetTransformRegressor {
         // TRAINING target only (population variance, std -> 1.0 when the
         // target is constant — StandardScaler's convention).
         let (transformed, fitted): (Vec<f64>, FittedTransform) = match self.transform {
-            TargetTransform::Log => (target.iter().map(|&y| y.ln()).collect(), FittedTransform::Log),
+            TargetTransform::Log => (
+                target.iter().map(|&y| y.ln()).collect(),
+                FittedTransform::Log,
+            ),
             TargetTransform::Log1p => (
                 target.iter().map(|&y| y.ln_1p()).collect(),
                 FittedTransform::Log1p,
@@ -329,7 +332,11 @@ mod tests {
         let task = simple_task();
         let query = array![[1.5], [3.5], [5.5]];
 
-        let cases: Vec<(TargetTransform, Box<dyn Fn(f64) -> f64>, Box<dyn Fn(f64) -> f64>)> = {
+        let cases: Vec<(
+            TargetTransform,
+            Box<dyn Fn(f64) -> f64>,
+            Box<dyn Fn(f64) -> f64>,
+        )> = {
             // Standardize's manual forward/inverse need the fitted mean/std.
             let target = task.target();
             let n = target.len() as f64;
@@ -366,7 +373,9 @@ mod tests {
             let manual_target: Vec<f64> = task.target().iter().map(|&y| forward(y)).collect();
             let manual_task =
                 RegressionTask::new("manual", task.features().clone(), manual_target).unwrap();
-            let manual_model = KNearestNeighbors::new(2).train_regress(&manual_task).unwrap();
+            let manual_model = KNearestNeighbors::new(2)
+                .train_regress(&manual_task)
+                .unwrap();
             let manual: Vec<f64> = predicted(manual_model.predict(&query).unwrap())
                 .into_iter()
                 .map(&*inverse)
@@ -513,8 +522,10 @@ mod tests {
         let features = array![[0.0, 5.0], [1.0, 4.0], [2.0, 3.0], [3.0, 2.0], [4.0, 1.0]];
         let target = vec![1.0, 2.0, 4.0, 8.0, 16.0];
         let task = RegressionTask::new("imp", features, target).unwrap();
-        let mut ttr =
-            TargetTransformRegressor::new(|| Box::new(DecisionTree::default()), TargetTransform::Log);
+        let mut ttr = TargetTransformRegressor::new(
+            || Box::new(DecisionTree::default()),
+            TargetTransform::Log,
+        );
         let model = ttr.train_regress(&task).unwrap();
         assert!(model.feature_importance().is_some());
     }

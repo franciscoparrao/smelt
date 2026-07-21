@@ -58,8 +58,12 @@ impl TLearner {
         let control = self.control.clone();
         let treated = self.treated.clone();
         let learner = smelt_ml::causal::meta_learners::TLearner::new(
-            move || smelt_ml::prelude::learner_from_id(&control).expect("validated in TLearner::new"),
-            move || smelt_ml::prelude::learner_from_id(&treated).expect("validated in TLearner::new"),
+            move || {
+                smelt_ml::prelude::learner_from_id(&control).expect("validated in TLearner::new")
+            },
+            move || {
+                smelt_ml::prelude::learner_from_id(&treated).expect("validated in TLearner::new")
+            },
         );
         let result = py
             .allow_threads(|| learner.estimate(&features, &treatment, &outcome))
@@ -226,11 +230,23 @@ impl XLearner {
         let tau_treated = self.tau_treated.clone();
         let propensity = self.propensity.clone();
         let learner = smelt_ml::causal::meta_learners::XLearner::new(
-            move || smelt_ml::prelude::learner_from_id(&control).expect("validated in XLearner::new"),
-            move || smelt_ml::prelude::learner_from_id(&treated).expect("validated in XLearner::new"),
-            move || smelt_ml::prelude::learner_from_id(&tau_control).expect("validated in XLearner::new"),
-            move || smelt_ml::prelude::learner_from_id(&tau_treated).expect("validated in XLearner::new"),
-            move || smelt_ml::prelude::learner_from_id(&propensity).expect("validated in XLearner::new"),
+            move || {
+                smelt_ml::prelude::learner_from_id(&control).expect("validated in XLearner::new")
+            },
+            move || {
+                smelt_ml::prelude::learner_from_id(&treated).expect("validated in XLearner::new")
+            },
+            move || {
+                smelt_ml::prelude::learner_from_id(&tau_control)
+                    .expect("validated in XLearner::new")
+            },
+            move || {
+                smelt_ml::prelude::learner_from_id(&tau_treated)
+                    .expect("validated in XLearner::new")
+            },
+            move || {
+                smelt_ml::prelude::learner_from_id(&propensity).expect("validated in XLearner::new")
+            },
         )
         .with_propensity_clip(self.propensity_clip);
         let result = py
@@ -356,9 +372,16 @@ impl RLearner {
         let propensity_id = self.propensity.clone();
         let effect_id = self.effect.clone();
         let learner = smelt_ml::causal::meta_learners::RLearner::new(
-            move || smelt_ml::prelude::learner_from_id(&outcome_id).expect("validated in RLearner::new"),
-            move || smelt_ml::prelude::learner_from_id(&propensity_id).expect("validated in RLearner::new"),
-            move || smelt_ml::prelude::learner_from_id(&effect_id).expect("validated in RLearner::new"),
+            move || {
+                smelt_ml::prelude::learner_from_id(&outcome_id).expect("validated in RLearner::new")
+            },
+            move || {
+                smelt_ml::prelude::learner_from_id(&propensity_id)
+                    .expect("validated in RLearner::new")
+            },
+            move || {
+                smelt_ml::prelude::learner_from_id(&effect_id).expect("validated in RLearner::new")
+            },
         )
         .with_cv_folds(self.cv_folds)
         .with_cv_seed(self.cv_seed)
@@ -475,10 +498,19 @@ impl DrLearner {
         let propensity = self.propensity.clone();
         let effect = self.effect.clone();
         let learner = smelt_ml::causal::meta_learners::DrLearner::new(
-            move || smelt_ml::prelude::learner_from_id(&control).expect("validated in DrLearner::new"),
-            move || smelt_ml::prelude::learner_from_id(&treated).expect("validated in DrLearner::new"),
-            move || smelt_ml::prelude::learner_from_id(&propensity).expect("validated in DrLearner::new"),
-            move || smelt_ml::prelude::learner_from_id(&effect).expect("validated in DrLearner::new"),
+            move || {
+                smelt_ml::prelude::learner_from_id(&control).expect("validated in DrLearner::new")
+            },
+            move || {
+                smelt_ml::prelude::learner_from_id(&treated).expect("validated in DrLearner::new")
+            },
+            move || {
+                smelt_ml::prelude::learner_from_id(&propensity)
+                    .expect("validated in DrLearner::new")
+            },
+            move || {
+                smelt_ml::prelude::learner_from_id(&effect).expect("validated in DrLearner::new")
+            },
         )
         .with_cv_folds(self.cv_folds)
         .with_cv_seed(self.cv_seed)

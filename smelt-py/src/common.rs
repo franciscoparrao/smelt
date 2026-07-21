@@ -61,9 +61,10 @@ pub(crate) fn smelt_err(e: smelt_ml::SmeltError) -> PyErr {
 pub(crate) fn is_integer(y: &Bound<'_, PyAny>) -> bool {
     if let Ok(arr) = y.getattr("dtype")
         && let Ok(kind) = arr.getattr("kind")
-            && let Ok(k) = kind.extract::<String>() {
-                return k == "i" || k == "u" || k == "b";
-            }
+        && let Ok(k) = kind.extract::<String>()
+    {
+        return k == "i" || k == "u" || k == "b";
+    }
     y.extract::<Vec<i64>>().is_ok()
 }
 
@@ -222,8 +223,8 @@ pub(crate) fn fit_learner_cat(
     }
     if is_integer(y) {
         let target = extract_class_labels(y)?;
-        let mut task = smelt_ml::task::ClassificationTask::new("py", features, target)
-            .map_err(smelt_err)?;
+        let mut task =
+            smelt_ml::task::ClassificationTask::new("py", features, target).map_err(smelt_err)?;
         if let Some(cats) = cat_features {
             task = task.with_categorical_features(&cats).map_err(smelt_err)?;
         }
@@ -266,7 +267,10 @@ pub(crate) fn parse_eval_set(
         Some((x, y)) => {
             let features = to_array2(x);
             if is_integer(&y) {
-                Ok(Some((features, EvalKind::Classification(extract_class_labels(&y)?))))
+                Ok(Some((
+                    features,
+                    EvalKind::Classification(extract_class_labels(&y)?),
+                )))
             } else {
                 let target: Vec<f64> = y.extract()?;
                 // Same finiteness check as the main training target: a NaN
@@ -291,7 +295,9 @@ pub(crate) fn predict_values<'py>(
     x: PyReadonlyArray2<'_, f64>,
 ) -> PyResult<Bound<'py, PyArray1<f64>>> {
     let features = to_array2(x);
-    let pred = py.allow_threads(|| model.predict(&features)).map_err(smelt_err)?;
+    let pred = py
+        .allow_threads(|| model.predict(&features))
+        .map_err(smelt_err)?;
     let values: Vec<f64> = match &pred {
         Prediction::Classification { predicted, .. } => {
             predicted.iter().map(|&p| p as f64).collect()
@@ -308,7 +314,9 @@ pub(crate) fn predict_proba_values<'py>(
     x: PyReadonlyArray2<'_, f64>,
 ) -> PyResult<Bound<'py, PyArray2<f64>>> {
     let features = to_array2(x);
-    let pred = py.allow_threads(|| model.predict(&features)).map_err(smelt_err)?;
+    let pred = py
+        .allow_threads(|| model.predict(&features))
+        .map_err(smelt_err)?;
     match &pred {
         Prediction::Classification {
             probabilities: Some(probs),
@@ -445,7 +453,9 @@ pub(crate) fn resolve_measure(metric: &str) -> PyResult<Box<dyn Measure>> {
         "kappa" => Ok(Box::new(CohensKappa)),
         "mcc" => Ok(Box::new(Mcc)),
         "brier" => Ok(Box::new(Brier)),
-        _ => Err(pyo3::exceptions::PyValueError::new_err(format!("Unknown metric: {metric}"))),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Unknown metric: {metric}"
+        ))),
     }
 }
 
@@ -465,8 +475,8 @@ pub(crate) fn shap_impl<'py>(
 
     let result = if is_classif {
         let target = extract_class_labels(y)?;
-        let mut task = smelt_ml::task::ClassificationTask::new("shap", features, target)
-            .map_err(smelt_err)?;
+        let mut task =
+            smelt_ml::task::ClassificationTask::new("shap", features, target).map_err(smelt_err)?;
         task = task.with_feature_names(names.clone()).map_err(smelt_err)?;
         py.allow_threads(|| {
             smelt_ml::importance::shap::tree_shap_classif(model, &task, n_background, target_class)
@@ -474,11 +484,13 @@ pub(crate) fn shap_impl<'py>(
         .map_err(smelt_err)?
     } else {
         let target: Vec<f64> = y.extract()?;
-        let mut task = smelt_ml::task::RegressionTask::new("shap", features, target)
-            .map_err(smelt_err)?;
+        let mut task =
+            smelt_ml::task::RegressionTask::new("shap", features, target).map_err(smelt_err)?;
         task = task.with_feature_names(names.clone()).map_err(smelt_err)?;
-        py.allow_threads(|| smelt_ml::importance::shap::tree_shap_regress(model, &task, n_background))
-            .map_err(smelt_err)?
+        py.allow_threads(|| {
+            smelt_ml::importance::shap::tree_shap_regress(model, &task, n_background)
+        })
+        .map_err(smelt_err)?
     };
 
     // Convert to Python dict
@@ -486,15 +498,28 @@ pub(crate) fn shap_impl<'py>(
 
     // SHAP values as 2D numpy array
     let n = result.explanations.len();
-    let p = if n > 0 { result.explanations[0].values.len() } else { 0 };
-    let flat: Vec<f64> = result.explanations.iter()
-        .flat_map(|e| e.values.iter().copied()).collect();
+    let p = if n > 0 {
+        result.explanations[0].values.len()
+    } else {
+        0
+    };
+    let flat: Vec<f64> = result
+        .explanations
+        .iter()
+        .flat_map(|e| e.values.iter().copied())
+        .collect();
     let arr = ndarray::Array2::from_shape_vec((n, p), flat)
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     dict.set_item("values", PyArray2::from_owned_array(py, arr))?;
 
-    dict.set_item("base_value",
-        result.explanations.first().map(|e| e.base_value).unwrap_or(0.0))?;
+    dict.set_item(
+        "base_value",
+        result
+            .explanations
+            .first()
+            .map(|e| e.base_value)
+            .unwrap_or(0.0),
+    )?;
     dict.set_item("feature_names", &names)?;
 
     let imp: Vec<(String, f64)> = result.global_importance;
@@ -521,8 +546,8 @@ pub(crate) fn perm_importance_impl<'py>(
 
     let importances = if is_classif {
         let target = extract_class_labels(y)?;
-        let mut task = smelt_ml::task::ClassificationTask::new("perm", features, target)
-            .map_err(smelt_err)?;
+        let mut task =
+            smelt_ml::task::ClassificationTask::new("perm", features, target).map_err(smelt_err)?;
         task = task.with_feature_names(names).map_err(smelt_err)?;
         py.allow_threads(|| {
             smelt_ml::importance::permutation_importance_classif(
@@ -532,8 +557,8 @@ pub(crate) fn perm_importance_impl<'py>(
         .map_err(smelt_err)?
     } else {
         let target: Vec<f64> = y.extract()?;
-        let mut task = smelt_ml::task::RegressionTask::new("perm", features, target)
-            .map_err(smelt_err)?;
+        let mut task =
+            smelt_ml::task::RegressionTask::new("perm", features, target).map_err(smelt_err)?;
         task = task.with_feature_names(names).map_err(smelt_err)?;
         py.allow_threads(|| {
             smelt_ml::importance::permutation_importance_regress(
@@ -569,7 +594,10 @@ pub(crate) fn conformal_predict_impl<'py>(
     let (intervals, interval_width) = py
         .allow_threads(|| {
             let cf = smelt_ml::conformal::ConformalRegressor::calibrate(
-                model, &cal_features, &y_cal, alpha,
+                model,
+                &cal_features,
+                &y_cal,
+                alpha,
             )?;
             let intervals = cf.predict(&test_features)?;
             Ok::<_, smelt_ml::SmeltError>((intervals, cf.interval_width()))
@@ -841,11 +869,15 @@ macro_rules! declare_support {
         impl $name {
             /// Whether this learner can train on classification targets (integer y).
             #[getter]
-            fn supports_classification(&self) -> bool { $c }
+            fn supports_classification(&self) -> bool {
+                $c
+            }
 
             /// Whether this learner can train on regression targets (continuous y).
             #[getter]
-            fn supports_regression(&self) -> bool { $r }
+            fn supports_regression(&self) -> bool {
+                $r
+            }
         }
     };
 }

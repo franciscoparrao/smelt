@@ -95,10 +95,7 @@ fn dup_fixture() -> (Array2<f64>, Vec<f64>, Vec<usize>, Vec<f64>) {
 }
 
 /// Physically duplicate row i `weights[i]` times (contiguously).
-fn duplicate_rows(
-    features: &Array2<f64>,
-    weights: &[f64],
-) -> (Array2<f64>, Vec<usize>) {
+fn duplicate_rows(features: &Array2<f64>, weights: &[f64]) -> (Array2<f64>, Vec<usize>) {
     let mut rows: Vec<f64> = Vec::new();
     let mut origin: Vec<usize> = Vec::new();
     for (i, &w) in weights.iter().enumerate().take(features.nrows()) {
@@ -290,11 +287,21 @@ where
 #[test]
 fn xgboost_all_ones_weights_bit_identical_to_unweighted() {
     all_ones_regress(
-        |t| XGBoost::new().with_n_estimators(20).train_regress(t).unwrap(),
+        |t| {
+            XGBoost::new()
+                .with_n_estimators(20)
+                .train_regress(t)
+                .unwrap()
+        },
         "xgboost",
     );
     all_ones_classif(
-        |t| XGBoost::new().with_n_estimators(20).train_classif(t).unwrap(),
+        |t| {
+            XGBoost::new()
+                .with_n_estimators(20)
+                .train_classif(t)
+                .unwrap()
+        },
         "xgboost",
     );
 }
@@ -302,11 +309,21 @@ fn xgboost_all_ones_weights_bit_identical_to_unweighted() {
 #[test]
 fn lightgbm_all_ones_weights_bit_identical_to_unweighted() {
     all_ones_regress(
-        |t| LightGBM::new().with_n_estimators(20).train_regress(t).unwrap(),
+        |t| {
+            LightGBM::new()
+                .with_n_estimators(20)
+                .train_regress(t)
+                .unwrap()
+        },
         "lightgbm",
     );
     all_ones_classif(
-        |t| LightGBM::new().with_n_estimators(20).train_classif(t).unwrap(),
+        |t| {
+            LightGBM::new()
+                .with_n_estimators(20)
+                .train_classif(t)
+                .unwrap()
+        },
         "lightgbm",
     );
 }
@@ -314,11 +331,21 @@ fn lightgbm_all_ones_weights_bit_identical_to_unweighted() {
 #[test]
 fn catboost_all_ones_weights_bit_identical_to_unweighted() {
     all_ones_regress(
-        |t| CatBoost::new().with_n_estimators(20).train_regress(t).unwrap(),
+        |t| {
+            CatBoost::new()
+                .with_n_estimators(20)
+                .train_regress(t)
+                .unwrap()
+        },
         "catboost",
     );
     all_ones_classif(
-        |t| CatBoost::new().with_n_estimators(20).train_classif(t).unwrap(),
+        |t| {
+            CatBoost::new()
+                .with_n_estimators(20)
+                .train_classif(t)
+                .unwrap()
+        },
         "catboost",
     );
 }
@@ -522,16 +549,15 @@ fn xgboost_task_weights_bit_identical_to_builder_weights() {
 fn local_drag_fixture() -> (Array2<f64>, Vec<f64>, Vec<f64>) {
     let n = 41;
     let mut xs: Vec<f64> = (0..40).map(|i| i as f64).collect();
-    let mut target: Vec<f64> = xs.iter().map(|&x| if x < 20.0 { 0.0 } else { 10.0 }).collect();
+    let mut target: Vec<f64> = xs
+        .iter()
+        .map(|&x| if x < 20.0 { 0.0 } else { 10.0 })
+        .collect();
     xs.push(5.0);
     target.push(10.0); // contrarian point
     let mut weights = vec![1.0; n];
     weights[n - 1] = 100.0;
-    (
-        Array2::from_shape_vec((n, 1), xs).unwrap(),
-        target,
-        weights,
-    )
+    (Array2::from_shape_vec((n, 1), xs).unwrap(), target, weights)
 }
 
 fn local_drag_check<F>(train: F, name: &str)
@@ -663,7 +689,12 @@ where
 #[test]
 fn xgboost_task_weights_shift_classification() {
     classif_prior_shift(
-        |t| XGBoost::new().with_n_estimators(30).train_classif(t).unwrap(),
+        |t| {
+            XGBoost::new()
+                .with_n_estimators(30)
+                .train_classif(t)
+                .unwrap()
+        },
         "xgboost",
     );
 }
@@ -671,7 +702,12 @@ fn xgboost_task_weights_shift_classification() {
 #[test]
 fn lightgbm_task_weights_shift_classification() {
     classif_prior_shift(
-        |t| LightGBM::new().with_n_estimators(30).train_classif(t).unwrap(),
+        |t| {
+            LightGBM::new()
+                .with_n_estimators(30)
+                .train_classif(t)
+                .unwrap()
+        },
         "lightgbm",
     );
 }
@@ -679,7 +715,12 @@ fn lightgbm_task_weights_shift_classification() {
 #[test]
 fn catboost_task_weights_shift_classification() {
     classif_prior_shift(
-        |t| CatBoost::new().with_n_estimators(30).train_classif(t).unwrap(),
+        |t| {
+            CatBoost::new()
+                .with_n_estimators(30)
+                .train_classif(t)
+                .unwrap()
+        },
         "catboost",
     );
 }

@@ -28,14 +28,14 @@
 //! improvement, the cascade stops and is truncated back to its best-so-far
 //! depth.
 
+use crate::Result;
 use crate::learner::tree::extra_trees::ExtraTrees;
 use crate::learner::tree::random_forest::RandomForest;
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::resample::{CrossValidation, Resample};
 use crate::task::{ClassificationTask, Task};
-use crate::Result;
-use ndarray::{s, Array2, Axis};
+use ndarray::{Array2, Axis, s};
 
 fn argmax_row(probs: &Array2<f64>, i: usize) -> usize {
     probs
@@ -48,7 +48,9 @@ fn argmax_row(probs: &Array2<f64>, i: usize) -> usize {
 }
 
 fn accuracy_from_probs(probs: &Array2<f64>, target: &[usize]) -> f64 {
-    let correct = (0..target.len()).filter(|&i| argmax_row(probs, i) == target[i]).count();
+    let correct = (0..target.len())
+        .filter(|&i| argmax_row(probs, i) == target[i])
+        .count();
     correct as f64 / target.len().max(1) as f64
 }
 
@@ -78,7 +80,12 @@ fn concat_features(original: &Array2<f64>, probs_per_forest: &[Array2<f64>]) -> 
     out
 }
 
-fn new_forest(is_random_forest: bool, n_estimators: usize, max_depth: usize, seed: u64) -> Box<dyn Learner> {
+fn new_forest(
+    is_random_forest: bool,
+    n_estimators: usize,
+    max_depth: usize,
+    seed: u64,
+) -> Box<dyn Learner> {
     if is_random_forest {
         Box::new(
             RandomForest::new()
@@ -96,7 +103,11 @@ fn new_forest(is_random_forest: bool, n_estimators: usize, max_depth: usize, see
     }
 }
 
-fn probabilities_array(model: &dyn TrainedModel, features: &Array2<f64>, n_classes: usize) -> Result<Array2<f64>> {
+fn probabilities_array(
+    model: &dyn TrainedModel,
+    features: &Array2<f64>,
+    n_classes: usize,
+) -> Result<Array2<f64>> {
     let n = features.nrows();
     let pred = model.predict(features)?;
     let mut out = Array2::zeros((n, n_classes));
@@ -237,7 +248,8 @@ impl DeepForest {
         let mut rounds_without_improvement = 0usize;
 
         for layer_idx in 0..self.max_layers {
-            let cv = CrossValidation::new(self.cv_folds).with_seed(self.seed.wrapping_add(layer_idx as u64));
+            let cv = CrossValidation::new(self.cv_folds)
+                .with_seed(self.seed.wrapping_add(layer_idx as u64));
             let splits = cv.splits(n_samples)?;
 
             let mut oof_probs_per_forest: Vec<Array2<f64>> = Vec::with_capacity(n_forests);
@@ -259,10 +271,16 @@ impl DeepForest {
                     // n_classes as max(label)+1, so a fold missing the
                     // highest class trained a narrower forest whose OOF
                     // probability rows dropped that class's column.
-                    let fold_task = ClassificationTask::new("deep_forest_fold", train_features, train_target)?
-                        .with_class_names(task.class_names().to_vec());
+                    let fold_task =
+                        ClassificationTask::new("deep_forest_fold", train_features, train_target)?
+                            .with_class_names(task.class_names().to_vec());
 
-                    let mut fold_learner = new_forest(is_random_forest, self.n_estimators_per_forest, self.max_depth, forest_seed);
+                    let mut fold_learner = new_forest(
+                        is_random_forest,
+                        self.n_estimators_per_forest,
+                        self.max_depth,
+                        forest_seed,
+                    );
                     let fold_model = fold_learner.train_classif(&fold_task)?;
 
                     let test_features = current_input.select(Axis(0), test_idx);
@@ -276,9 +294,18 @@ impl DeepForest {
                 oof_probs_per_forest.push(oof);
 
                 // Retrain on the FULL current-layer input for deployment.
-                let full_task = ClassificationTask::new("deep_forest_layer", current_input.clone(), target.clone())?
-                    .with_class_names(task.class_names().to_vec());
-                let mut full_learner = new_forest(is_random_forest, self.n_estimators_per_forest, self.max_depth, forest_seed);
+                let full_task = ClassificationTask::new(
+                    "deep_forest_layer",
+                    current_input.clone(),
+                    target.clone(),
+                )?
+                .with_class_names(task.class_names().to_vec());
+                let mut full_learner = new_forest(
+                    is_random_forest,
+                    self.n_estimators_per_forest,
+                    self.max_depth,
+                    forest_seed,
+                );
                 let full_model = full_learner.train_classif(&full_task)?;
                 trained_forests.push(full_model);
             }
@@ -286,7 +313,9 @@ impl DeepForest {
             let mean_probs = average_arrays(&oof_probs_per_forest);
             let layer_acc = accuracy_from_probs(&mean_probs, &target);
 
-            kept_layers.push(Layer { forests: trained_forests });
+            kept_layers.push(Layer {
+                forests: trained_forests,
+            });
 
             if layer_acc > best_acc + 1e-6 {
                 best_acc = layer_acc;
@@ -318,8 +347,7 @@ impl Learner for DeepForest {
     }
 
     fn properties(&self) -> LearnerProperties {
-        LearnerProperties::classifier()
-            .with_proba()
+        LearnerProperties::classifier().with_proba()
     }
 
     fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
@@ -352,7 +380,11 @@ impl TrainedModel for TrainedDeepForest {
         for (layer_idx, layer) in self.layers.iter().enumerate() {
             let mut probs_per_forest = Vec::with_capacity(layer.forests.len());
             for forest in &layer.forests {
-                probs_per_forest.push(probabilities_array(&**forest, &current_input, self.n_classes)?);
+                probs_per_forest.push(probabilities_array(
+                    &**forest,
+                    &current_input,
+                    self.n_classes,
+                )?);
             }
             let is_last = layer_idx + 1 == self.layers.len();
             if is_last {
@@ -413,9 +445,16 @@ mod tests {
         let Prediction::Classification { predicted, .. } = pred else {
             panic!("expected classification");
         };
-        let correct = predicted.iter().zip(&target).filter(|(p, t)| *p == *t).count();
+        let correct = predicted
+            .iter()
+            .zip(&target)
+            .filter(|(p, t)| *p == *t)
+            .count();
         let acc = correct as f64 / n as f64;
-        assert!(acc > 0.85, "should fit a simple boundary well, got acc={acc}");
+        assert!(
+            acc > 0.85,
+            "should fit a simple boundary well, got acc={acc}"
+        );
     }
 
     /// Regression test (backlog M-9, closed in the 5th audit): fold tasks
@@ -434,8 +473,16 @@ mod tests {
         // folds the fold holding it in TEST trains without class 2 at all —
         // exactly the narrowing scenario class_names propagation prevents.
         let features = array![
-            [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.1, 0.0],
-            [5.0, 5.0], [5.1, 4.9], [4.9, 5.1], [5.0, 4.8], [5.1, 5.1],
+            [0.0, 0.0],
+            [0.1, 0.1],
+            [0.2, 0.0],
+            [0.0, 0.2],
+            [0.1, 0.0],
+            [5.0, 5.0],
+            [5.1, 4.9],
+            [4.9, 5.1],
+            [5.0, 4.8],
+            [5.1, 5.1],
             [10.0, 10.0],
         ];
         let target = vec![0usize, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2];
@@ -450,23 +497,44 @@ mod tests {
             .with_seed(3);
         let model = df.fit(&task).unwrap();
         let pred = model.predict(&features).unwrap();
-        let Prediction::Classification { predicted, probabilities: Some(probs), .. } = pred else {
+        let Prediction::Classification {
+            predicted,
+            probabilities: Some(probs),
+            ..
+        } = pred
+        else {
             panic!("expected classification with probabilities");
         };
         for row in &probs {
-            assert_eq!(row.len(), 3, "every probability row must span the declared 3 classes");
+            assert_eq!(
+                row.len(),
+                3,
+                "every probability row must span the declared 3 classes"
+            );
         }
         // The rare class is trivially separable (far from both clusters), so
         // the deployed cascade must actually recover it.
-        assert_eq!(predicted[10], 2, "the rare class must be predictable, got {predicted:?}");
+        assert_eq!(
+            predicted[10], 2,
+            "the rare class must be predictable, got {predicted:?}"
+        );
     }
 
     #[test]
     fn multiclass_works() {
         let features = array![
-            [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2],
-            [5.0, 5.0], [5.1, 4.9], [4.9, 5.1], [5.0, 4.8],
-            [10.0, 0.0], [10.1, 0.1], [9.9, -0.1], [10.0, 0.2],
+            [0.0, 0.0],
+            [0.1, 0.1],
+            [0.2, 0.0],
+            [0.0, 0.2],
+            [5.0, 5.0],
+            [5.1, 4.9],
+            [4.9, 5.1],
+            [5.0, 4.8],
+            [10.0, 0.0],
+            [10.1, 0.1],
+            [9.9, -0.1],
+            [10.0, 0.2],
         ];
         let target = vec![0usize, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2];
         let task = ClassificationTask::new("df_multi", features.clone(), target.clone()).unwrap();
@@ -478,15 +546,30 @@ mod tests {
             .with_seed(3);
         let model = df.train_classif(&task).unwrap();
         let pred = model.predict(&features).unwrap();
-        let Prediction::Classification { predicted, probabilities, .. } = pred else {
+        let Prediction::Classification {
+            predicted,
+            probabilities,
+            ..
+        } = pred
+        else {
             panic!("expected classification");
         };
-        let correct = predicted.iter().zip(&target).filter(|(p, t)| *p == *t).count();
-        assert!(correct as f64 / target.len() as f64 > 0.8, "should separate 3 well-separated clusters");
+        let correct = predicted
+            .iter()
+            .zip(&target)
+            .filter(|(p, t)| *p == *t)
+            .count();
+        assert!(
+            correct as f64 / target.len() as f64 > 0.8,
+            "should separate 3 well-separated clusters"
+        );
 
         for row in &probabilities.unwrap() {
             let sum: f64 = row.iter().sum();
-            assert!((sum - 1.0).abs() < 1e-6, "probabilities should sum to 1, got {sum}");
+            assert!(
+                (sum - 1.0).abs() < 1e-6,
+                "probabilities should sum to 1, got {sum}"
+            );
         }
     }
 
@@ -529,7 +612,10 @@ mod tests {
         let features = array![[0.0, 0.0], [1.0, 1.0], [0.1, 0.1], [0.9, 0.9]];
         let target = vec![0usize, 1, 0, 1];
         let task = ClassificationTask::new("df_dim", features, target).unwrap();
-        let mut df = DeepForest::new().with_n_estimators_per_forest(10).with_max_layers(2).with_seed(1);
+        let mut df = DeepForest::new()
+            .with_n_estimators_per_forest(10)
+            .with_max_layers(2)
+            .with_seed(1);
         let model = df.train_classif(&task).unwrap();
 
         let wrong = array![[1.0, 2.0, 3.0]];

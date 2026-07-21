@@ -283,7 +283,11 @@ fn gaussian_elimination_solve(mut matrix: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> R
     // algorithm) makes the check scale-invariant per row instead.
     let mut row_scale: Vec<f64> = matrix
         .iter()
-        .map(|row| row.iter().fold(0.0f64, |acc, &v| acc.max(v.abs())).max(f64::MIN_POSITIVE))
+        .map(|row| {
+            row.iter()
+                .fold(0.0f64, |acc, &v| acc.max(v.abs()))
+                .max(f64::MIN_POSITIVE)
+        })
         .collect();
 
     for col in 0..n {
@@ -409,12 +413,19 @@ fn ordinary_kriging(
         }
         matrix[a][k] = 1.0;
         matrix[k][a] = 1.0;
-        rhs[a] = fit.model.value(group_query_dist(&groups[a]), fit.nugget, fit.sill, fit.range);
+        rhs[a] = fit.model.value(
+            group_query_dist(&groups[a]),
+            fit.nugget,
+            fit.sill,
+            fit.range,
+        );
     }
     rhs[k] = 1.0;
 
     let weights = gaussian_elimination_solve(matrix, rhs)?;
-    Ok((0..k).map(|a| weights[a] * group_residual(&groups[a])).sum())
+    Ok((0..k)
+        .map(|a| weights[a] * group_residual(&groups[a]))
+        .sum())
 }
 
 /// Regression-kriging: a base `Learner` plus ordinary kriging of its
@@ -500,7 +511,11 @@ impl KrigingHybrid {
         let base_pred = base_model.predict(task.features())?;
         let base_vals = match &base_pred {
             Prediction::Regression { predicted, .. } => predicted.clone(),
-            _ => return Err(SmeltError::IncompatiblePrediction("expected regression prediction".into())),
+            _ => {
+                return Err(SmeltError::IncompatiblePrediction(
+                    "expected regression prediction".into(),
+                ));
+            }
         };
 
         let target = task.target();
@@ -575,7 +590,11 @@ impl TrainedKrigingHybrid {
         let base_pred = self.base_model.predict(features)?;
         let base_vals = match &base_pred {
             Prediction::Regression { predicted, .. } => predicted.clone(),
-            _ => return Err(SmeltError::IncompatiblePrediction("expected regression prediction".into())),
+            _ => {
+                return Err(SmeltError::IncompatiblePrediction(
+                    "expected regression prediction".into(),
+                ));
+            }
         };
 
         let k = self.n_neighbors.min(self.coords.len());
@@ -762,7 +781,11 @@ mod tests {
     #[test]
     fn matern_variants_are_smooth_monotone_and_sill_bounded() {
         for model in [VariogramModel::Matern32, VariogramModel::Matern52] {
-            assert_eq!(model.value(0.0, 0.3, 1.0, 1.0), 0.0, "{model:?}: γ(0) must be 0");
+            assert_eq!(
+                model.value(0.0, 0.3, 1.0, 1.0),
+                0.0,
+                "{model:?}: γ(0) must be 0"
+            );
             let mut prev = 0.0;
             for i in 1..=100 {
                 let h = i as f64 * 0.1;
@@ -771,7 +794,10 @@ mod tests {
                 assert!(v <= 1.0 + 1e-12, "{model:?} must stay below the sill");
                 prev = v;
             }
-            assert!(prev > 0.99, "{model:?} must approach the sill at long range");
+            assert!(
+                prev > 0.99,
+                "{model:?} must approach the sill at long range"
+            );
         }
         let h = 0.2;
         let exp = VariogramModel::Exponential.value(h, 0.0, 1.0, 1.0);
@@ -845,11 +871,19 @@ mod tests {
 
         let max_lag = (2.0 / 3.0) * max_pairwise_distance(&coords);
         let (lags, semivariances, weights) = empirical_variogram(&coords, &residuals, 15, max_lag);
-        let fitted = fit_variogram(&lags, &semivariances, &weights, VariogramModel::Spherical, max_lag);
+        let fitted = fit_variogram(
+            &lags,
+            &semivariances,
+            &weights,
+            VariogramModel::Spherical,
+            max_lag,
+        );
 
         let fitted_sse: f64 = (0..lags.len())
             .map(|k| {
-                let pred = fitted.model.value(lags[k], fitted.nugget, fitted.sill, fitted.range);
+                let pred = fitted
+                    .model
+                    .value(lags[k], fitted.nugget, fitted.sill, fitted.range);
                 weights[k] * (pred - semivariances[k]).powi(2)
             })
             .sum();
@@ -888,8 +922,10 @@ mod tests {
 
         let via_trait = TrainedModel::predict(&model, &features).unwrap();
         let base_only = model.base_model.predict(&features).unwrap();
-        let (Prediction::Regression { predicted: a, .. }, Prediction::Regression { predicted: b, .. }) =
-            (via_trait, base_only)
+        let (
+            Prediction::Regression { predicted: a, .. },
+            Prediction::Regression { predicted: b, .. },
+        ) = (via_trait, base_only)
         else {
             panic!("expected regression");
         };
@@ -977,11 +1013,19 @@ mod tests {
         let held = Array2::from_shape_vec((side * side, 1), held_features).unwrap();
 
         let base_only = model.predict(&held).unwrap();
-        let Prediction::Regression { predicted: base_pred, .. } = base_only else {
+        let Prediction::Regression {
+            predicted: base_pred,
+            ..
+        } = base_only
+        else {
             panic!("expected regression");
         };
         let spatial = model.predict_spatial(&held, &held_coords).unwrap();
-        let Prediction::Regression { predicted: spatial_pred, .. } = spatial else {
+        let Prediction::Regression {
+            predicted: spatial_pred,
+            ..
+        } = spatial
+        else {
             panic!("expected regression");
         };
 
@@ -1045,13 +1089,17 @@ mod tests {
                 .with_n_neighbors(10);
             let model = kh.train_regress_geo(&train_task).unwrap();
 
-            let Prediction::Regression { predicted: base_pred, .. } =
-                model.predict(&held).unwrap()
+            let Prediction::Regression {
+                predicted: base_pred,
+                ..
+            } = model.predict(&held).unwrap()
             else {
                 panic!("expected regression");
             };
-            let Prediction::Regression { predicted: spatial_pred, .. } =
-                model.predict_spatial(&held, &held_coords).unwrap()
+            let Prediction::Regression {
+                predicted: spatial_pred,
+                ..
+            } = model.predict_spatial(&held, &held_coords).unwrap()
             else {
                 panic!("expected regression");
             };
@@ -1131,16 +1179,27 @@ mod tests {
         let model = kh.train_regress_geo(&task).unwrap();
 
         let mse = |predicted: &[f64]| -> f64 {
-            predicted.iter().zip(&target).map(|(p, t)| (p - t).powi(2)).sum::<f64>() / n as f64
+            predicted
+                .iter()
+                .zip(&target)
+                .map(|(p, t)| (p - t).powi(2))
+                .sum::<f64>()
+                / n as f64
         };
 
-        let Prediction::Regression { predicted: base_pred, .. } = model.predict(&features).unwrap()
+        let Prediction::Regression {
+            predicted: base_pred,
+            ..
+        } = model.predict(&features).unwrap()
         else {
             panic!("expected regression");
         };
-        let Prediction::Regression { predicted: spatial_pred, .. } = model
-            .predict_spatial(&features, &coords)
-            .expect("a small-scale but genuinely non-degenerate variogram must not fail predict_spatial")
+        let Prediction::Regression {
+            predicted: spatial_pred,
+            ..
+        } = model.predict_spatial(&features, &coords).expect(
+            "a small-scale but genuinely non-degenerate variogram must not fail predict_spatial",
+        )
         else {
             panic!("expected regression");
         };

@@ -4,8 +4,8 @@
 //! Integrates with Pipeline as a Transformer — fit on training data only,
 //! preventing data leakage in cross-validation.
 
-use super::mutual_info;
 use super::Transformer;
+use super::mutual_info;
 use crate::{Result, SmeltError};
 use ndarray::Array2;
 
@@ -781,7 +781,9 @@ impl Filter for ReliefFilter {
                 }
             }
         }
-        let col_range: Vec<f64> = (0..p).map(|j| (col_max[j] - col_min[j]).max(1e-10)).collect();
+        let col_range: Vec<f64> = (0..p)
+            .map(|j| (col_max[j] - col_min[j]).max(1e-10))
+            .collect();
 
         let t_min = target.iter().cloned().fold(f64::INFINITY, f64::min);
         let t_max = target.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -811,8 +813,7 @@ impl Filter for ReliefFilter {
                 .map(|j| {
                     let d: f64 = (0..p)
                         .map(|f| {
-                            let diff =
-                                (features[[i, f]] - features[[j, f]]) / col_range[f];
+                            let diff = (features[[i, f]] - features[[j, f]]) / col_range[f];
                             diff * diff
                         })
                         .sum::<f64>()
@@ -843,7 +844,11 @@ impl Filter for ReliefFilter {
         (0..p)
             .map(|f| {
                 let pos_term = if n_dc > 1e-10 { pos[f] / n_dc } else { 0.0 };
-                let neg_term = if n_equal > 1e-10 { neg[f] / n_equal } else { 0.0 };
+                let neg_term = if n_equal > 1e-10 {
+                    neg[f] / n_equal
+                } else {
+                    0.0
+                };
                 pos_term - neg_term
             })
             .collect()
@@ -878,7 +883,10 @@ mod class_target_tests {
         let features = class_fixture();
         let continuous = vec![1.5, 2.7, 3.1, 4.9, 5.2, 6.8];
 
-        for selector in [FilterSelector::anova_f(1), FilterSelector::information_gain(1)] {
+        for selector in [
+            FilterSelector::anova_f(1),
+            FilterSelector::information_gain(1),
+        ] {
             let mut selector = selector;
             let err = selector
                 .fit_supervised(&features, &continuous)

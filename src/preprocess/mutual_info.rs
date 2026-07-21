@@ -138,7 +138,10 @@ mod tests {
         let xb = discretize(&x);
         let yb = discretize(&y);
         let mi = mi_from_bins(&xb, &yb);
-        assert!(mi < 0.1, "MI of independent vars should be near 0, got {mi}");
+        assert!(
+            mi < 0.1,
+            "MI of independent vars should be near 0, got {mi}"
+        );
     }
 
     #[test]

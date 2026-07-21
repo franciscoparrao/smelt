@@ -13,7 +13,9 @@
 //! Reference: Prokhorenkova, L. et al. (2018). CatBoost: unbiased boosting
 //! with categorical features. NeurIPS.
 
-use super::eval::{EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress};
+use super::eval::{
+    EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress,
+};
 use super::histogram::{HistBins, NAN_BIN};
 use crate::Result;
 use crate::learner::math::{sigmoid, softmax};
@@ -791,8 +793,9 @@ impl TrainedModel for TrainedCatBoost {
                 // categorical stats derived from that class's own
                 // one-vs-rest indicator target, not a single shared
                 // "average class index" encoding.
-                let encoded_by_class: Vec<Array2<f64>> =
-                    (0..k).map(|c| self.encode_for_output(features, c)).collect();
+                let encoded_by_class: Vec<Array2<f64>> = (0..k)
+                    .map(|c| self.encode_for_output(features, c))
+                    .collect();
                 let n_rows = features.nrows();
                 let results: Vec<(usize, Vec<f64>)> = (0..n_rows)
                     .into_par_iter()
@@ -809,7 +812,9 @@ impl TrainedModel for TrainedCatBoost {
                         let pred = probs
                             .iter()
                             .enumerate()
-                            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                            .max_by(|a, b| {
+                                a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)
+                            })
                             .unwrap()
                             .0;
                         (pred, probs)
@@ -883,8 +888,14 @@ impl Learner for CatBoost {
 
         // Final encoding map: used at prediction time, and to encode the eval
         // set during training (it only depends on the data, not the model).
-        let cat_encodings =
-            build_final_encodings(features, target, &cat_features, prior, self.prior_strength, sw);
+        let cat_encodings = build_final_encodings(
+            features,
+            target,
+            &cat_features,
+            prior,
+            self.prior_strength,
+            sw,
+        );
         let eval_encoded = eval.map(|(ef, _)| Self::encode_eval(ef, &cat_encodings, prior));
 
         let initial = prior;
@@ -938,7 +949,11 @@ impl Learner for CatBoost {
                                 / wsum
                         }
                         None => {
-                            preds.iter().zip(target).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+                            preds
+                                .iter()
+                                .zip(target)
+                                .map(|(p, y)| (p - y).powi(2))
+                                .sum::<f64>()
                                 / ns as f64
                         }
                     }
@@ -1076,7 +1091,10 @@ impl CatBoost {
                 };
                 // Eval-set metric unweighted; weighted train-loss fallback.
                 let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
-                    efv.iter().zip(et).map(|(&f, &y)| logloss(f, y)).sum::<f64>()
+                    efv.iter()
+                        .zip(et)
+                        .map(|(&f, &y)| logloss(f, y))
+                        .sum::<f64>()
                         / efv.len() as f64
                 } else {
                     match sw {
@@ -1090,7 +1108,10 @@ impl CatBoost {
                                 / wsum
                         }
                         None => {
-                            fv.iter().zip(target).map(|(&f, &y)| logloss(f, y)).sum::<f64>()
+                            fv.iter()
+                                .zip(target)
+                                .map(|(&f, &y)| logloss(f, y))
+                                .sum::<f64>()
                                 / ns as f64
                         }
                     }
@@ -1133,7 +1154,12 @@ impl CatBoost {
         // predict time), and its own histogram bins — matching how that
         // class's gradients/hessians are actually computed below.
         let one_vs_rest: Vec<Vec<f64>> = (0..nc)
-            .map(|c| target.iter().map(|&t| if t == c { 1.0 } else { 0.0 }).collect())
+            .map(|c| {
+                target
+                    .iter()
+                    .map(|&t| if t == c { 1.0 } else { 0.0 })
+                    .collect()
+            })
             .collect();
         // Weighted per-class fractions as priors when sample weights are set.
         let priors: Vec<f64> = one_vs_rest
@@ -1203,8 +1229,10 @@ impl CatBoost {
             eval.map(|(ef, _)| (0..ef.nrows()).map(|_| initial.clone()).collect());
         let mut trees = Vec::with_capacity(self.n_estimators * nc);
         let indices: Vec<usize> = (0..ns).collect();
-        let bins_by_class: Vec<HistBins> =
-            encoded_by_class.iter().map(|enc| HistBins::build(enc, self.max_bins)).collect();
+        let bins_by_class: Vec<HistBins> = encoded_by_class
+            .iter()
+            .map(|enc| HistBins::build(enc, self.max_bins))
+            .collect();
         let mut stopper = EarlyStopper::new(self.early_stopping_rounds);
 
         for _ in 0..self.n_estimators {
@@ -1249,7 +1277,9 @@ impl CatBoost {
                 // Eval-set metric unweighted; weighted train-loss fallback.
                 let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
                     let ep: Vec<Vec<f64>> = efv.iter().map(|f| softmax(f)).collect();
-                    (0..et.len()).map(|i| -ep[i][et[i]].max(eps).ln()).sum::<f64>()
+                    (0..et.len())
+                        .map(|i| -ep[i][et[i]].max(eps).ln())
+                        .sum::<f64>()
                         / et.len() as f64
                 } else {
                     let pn: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
@@ -1417,7 +1447,9 @@ mod tests {
         }
         // target roughly in [0, 100]
         let target: Vec<f64> = (0..n)
-            .map(|i| (0.01 * features[[i, 2]] + rng.random::<f64>() * 5.0 + 20.0).clamp(0.37, 93.62))
+            .map(|i| {
+                (0.01 * features[[i, 2]] + rng.random::<f64>() * 5.0 + 20.0).clamp(0.37, 93.62)
+            })
             .collect();
 
         let task = RegressionTask::new("cat_diverge", features.clone(), target.clone()).unwrap();
@@ -1453,7 +1485,9 @@ mod tests {
             target[i] = bit * 10.0;
         }
         let task = RegressionTask::new("binary", features.clone(), target.clone()).unwrap();
-        let mut model = CatBoost::new().with_n_estimators(20).with_learning_rate(0.5);
+        let mut model = CatBoost::new()
+            .with_n_estimators(20)
+            .with_learning_rate(0.5);
         let trained = model.train_regress(&task).unwrap();
         let pred = trained.predict(&features).unwrap();
         let Prediction::Regression { predicted, .. } = pred else {
@@ -1466,7 +1500,10 @@ mod tests {
             .sum::<f64>()
             / n as f64)
             .sqrt();
-        assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
+        assert!(
+            rmse < 1.0,
+            "binary feature should be perfectly splittable, got RMSE={rmse}"
+        );
     }
 
     /// Regression test for M5 (docs/auditoria_motor_2026-07-05.md, Fase F):
@@ -1518,7 +1555,10 @@ mod tests {
             features[[i, 1]] = (i % 5) as f64; // uninformative noise column
         }
         let task = RegressionTask::new("nan_split", features.clone(), target.clone()).unwrap();
-        let mut cb = CatBoost::new().with_n_estimators(30).with_depth(3).with_learning_rate(0.3);
+        let mut cb = CatBoost::new()
+            .with_n_estimators(30)
+            .with_depth(3)
+            .with_learning_rate(0.3);
         let model = cb.train_regress(&task).unwrap();
         let Prediction::Regression { predicted, .. } = model.predict(&features).unwrap() else {
             panic!("expected regression")
@@ -1577,13 +1617,15 @@ mod tests {
     /// category 0's statistics.
     #[test]
     fn target_encoding_skips_nan() {
-        let features =
-            Array2::from_shape_vec((4, 1), vec![0.0, f64::NAN, 1.0, 0.0]).unwrap();
+        let features = Array2::from_shape_vec((4, 1), vec![0.0, f64::NAN, 1.0, 0.0]).unwrap();
         let target = vec![1.0, 100.0, 2.0, 3.0];
 
         let mut rng = StdRng::seed_from_u64(0);
         let encoded = ordered_target_encode(&features, &target, &[0], 2.0, 1.0, None, &mut rng);
-        assert!(encoded[[1, 0]].is_nan(), "NaN cell must stay NaN after encoding");
+        assert!(
+            encoded[[1, 0]].is_nan(),
+            "NaN cell must stay NaN after encoding"
+        );
 
         let finals = build_final_encodings(&features, &target, &[0], 2.0, 1.0, None);
         let enc0 = finals[&0][&0]; // category 0: targets 1 and 3, prior 2, strength 1
@@ -1622,8 +1664,8 @@ mod tests {
             }
             features[[i, 1]] = ((i * 37) % 17) as f64; // uninformative noise feature
         }
-        let task = ClassificationTask::new("multiclass_cat", features.clone(), target.clone())
-            .unwrap();
+        let task =
+            ClassificationTask::new("multiclass_cat", features.clone(), target.clone()).unwrap();
         let mut cb = CatBoost::new()
             .with_n_estimators(50)
             .with_depth(3)
@@ -1649,8 +1691,8 @@ mod tests {
     /// were configured explicitly (item 14: FeatureType metadata).
     #[test]
     fn task_categorical_metadata_is_used_automatically() {
-        let features = Array2::from_shape_vec((4, 2), vec![0.0, 1.0, 1.0, 2.0, 0.0, 3.0, 1.0, 4.0])
-            .unwrap();
+        let features =
+            Array2::from_shape_vec((4, 2), vec![0.0, 1.0, 1.0, 2.0, 0.0, 3.0, 1.0, 4.0]).unwrap();
         let task = RegressionTask::new("meta", features, vec![1.0, 2.0, 3.0, 4.0])
             .unwrap()
             .with_categorical_features(&[0])
@@ -1688,7 +1730,11 @@ mod tests {
             let Prediction::Regression { predicted, .. } = m.predict(&va_f).unwrap() else {
                 panic!("expected regression")
             };
-            (predicted.iter().zip(&va_t).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+            (predicted
+                .iter()
+                .zip(&va_t)
+                .map(|(p, y)| (p - y).powi(2))
+                .sum::<f64>()
                 / va_t.len() as f64)
                 .sqrt()
         };

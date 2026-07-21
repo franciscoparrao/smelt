@@ -267,7 +267,11 @@ impl GeoXGBoost {
                 let pred = local_model.predict(&center_row)?;
                 let yhat = match &pred {
                     Prediction::Regression { predicted, .. } => predicted[0],
-                    _ => return Err(SmeltError::IncompatiblePrediction("Expected regression".into())),
+                    _ => {
+                        return Err(SmeltError::IncompatiblePrediction(
+                            "Expected regression".into(),
+                        ));
+                    }
                 };
                 let e = target[i] - yhat;
                 Ok(Some(e * e))
@@ -418,7 +422,11 @@ impl TrainedGeoXGBoost {
         let global_pred = self.global_model.predict(features)?;
         let global_vals = match &global_pred {
             Prediction::Regression { predicted, .. } => predicted.clone(),
-            _ => return Err(SmeltError::IncompatiblePrediction("Expected regression".into())),
+            _ => {
+                return Err(SmeltError::IncompatiblePrediction(
+                    "Expected regression".into(),
+                ));
+            }
         };
 
         let mut predicted = Vec::with_capacity(n_samples);
@@ -441,7 +449,11 @@ impl TrainedGeoXGBoost {
                     let local_pred = local_model.predict(&row)?;
                     let local_val = match &local_pred {
                         Prediction::Regression { predicted, .. } => predicted[0],
-                        _ => return Err(SmeltError::IncompatiblePrediction("Expected regression".into())),
+                        _ => {
+                            return Err(SmeltError::IncompatiblePrediction(
+                                "Expected regression".into(),
+                            ));
+                        }
                     };
                     let alpha = self.alphas[nearest];
                     alpha * local_val + (1.0 - alpha) * global_vals[i]
@@ -564,7 +576,11 @@ impl GeoXGBoost {
         let global_pred = global_model.predict(features)?;
         let global_vals = match &global_pred {
             Prediction::Regression { predicted, .. } => predicted.clone(),
-            _ => return Err(SmeltError::IncompatiblePrediction("Expected regression".into())),
+            _ => {
+                return Err(SmeltError::IncompatiblePrediction(
+                    "Expected regression".into(),
+                ));
+            }
         };
 
         // Global errors per point, out-of-fold (CV) — comparable to the local
@@ -580,7 +596,11 @@ impl GeoXGBoost {
         // The local models are independent, so we train them in parallel.
         // Each entry is `None` where the neighbourhood was too small (the global
         // model is used for that point at prediction time).
-        type LocalFit = (Option<Box<dyn TrainedModel>>, f64, Option<Vec<(String, f64)>>);
+        type LocalFit = (
+            Option<Box<dyn TrainedModel>>,
+            f64,
+            Option<Vec<(String, f64)>>,
+        );
         let fits: Vec<Result<LocalFit>> = (0..n_samples)
             .into_par_iter()
             .map(|i| -> Result<LocalFit> {
@@ -682,7 +702,11 @@ impl GeoXGBoost {
         if folds < 2 {
             // Too few points to cross-validate: fall back to the in-sample
             // residual (biased, but there is no out-of-sample alternative).
-            return Ok(target.iter().zip(global_vals).map(|(y, p)| (y - p).abs()).collect());
+            return Ok(target
+                .iter()
+                .zip(global_vals)
+                .map(|(y, p)| (y - p).abs())
+                .collect());
         }
 
         let cv = CrossValidation::new(folds).with_seed(self.seed);
@@ -703,7 +727,11 @@ impl GeoXGBoost {
                 let test_pred = fold_model.predict(&test_features)?;
                 let test_vals = match &test_pred {
                     Prediction::Regression { predicted, .. } => predicted.clone(),
-                    _ => return Err(SmeltError::IncompatiblePrediction("Expected regression".into())),
+                    _ => {
+                        return Err(SmeltError::IncompatiblePrediction(
+                            "Expected regression".into(),
+                        ));
+                    }
                 };
                 Ok(test_idx
                     .into_iter()
@@ -812,7 +840,11 @@ mod tests {
         let mut global_xgb = gxgb.make_xgb();
         let global_model = global_xgb.train_regress(&task).unwrap();
         let global_pred = global_model.predict(&features).unwrap();
-        let Prediction::Regression { predicted: global_vals, .. } = global_pred else {
+        let Prediction::Regression {
+            predicted: global_vals,
+            ..
+        } = global_pred
+        else {
             panic!("expected regression")
         };
 
@@ -851,7 +883,10 @@ mod tests {
             }
         }
         let features = Array2::from_shape_vec((n, 1), feats).unwrap();
-        (RegressionTask::new("toy", features, target).unwrap(), coords)
+        (
+            RegressionTask::new("toy", features, target).unwrap(),
+            coords,
+        )
     }
 
     #[test]
@@ -876,23 +911,36 @@ mod tests {
     fn predict_is_global_only_never_positional_local_models() {
         let (task, coords) = toy_task(4); // 16 points
         let features = task.features().clone();
-        let mut gxgb = GeoXGBoost::new(coords).with_n_estimators(20).with_bandwidth(4);
+        let mut gxgb = GeoXGBoost::new(coords)
+            .with_n_estimators(20)
+            .with_bandwidth(4);
         let model = gxgb.train_geo(&task).unwrap();
 
         // Same row count as training (16), predicted through the trait method.
         let via_trait = TrainedModel::predict(&model, &features).unwrap();
-        let Prediction::Regression { predicted: via_trait_vals, .. } = via_trait else {
+        let Prediction::Regression {
+            predicted: via_trait_vals,
+            ..
+        } = via_trait
+        else {
             panic!("expected regression");
         };
 
         // Must match the global model's own prediction exactly — no local
         // model or alpha blending involved, regardless of row count matching.
         let global_only = model.global_model.predict(&features).unwrap();
-        let Prediction::Regression { predicted: global_vals, .. } = global_only else {
+        let Prediction::Regression {
+            predicted: global_vals,
+            ..
+        } = global_only
+        else {
             panic!("expected regression");
         };
 
-        assert_eq!(via_trait_vals, global_vals, "predict() must equal the global model alone");
+        assert_eq!(
+            via_trait_vals, global_vals,
+            "predict() must equal the global model alone"
+        );
     }
 
     /// Per Grekousis (2026-07-11): neighbourhoods below ~30 units make

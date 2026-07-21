@@ -471,10 +471,7 @@ impl RandomSurvivalForest {
         let oob_c_index = concordance_index(&oob_predictions, events);
 
         Ok((
-            TrainedRandomSurvivalForest {
-                trees,
-                event_times,
-            },
+            TrainedRandomSurvivalForest { trees, event_times },
             oob_c_index,
         ))
     }
@@ -587,9 +584,15 @@ mod tests {
             let base_time = 20.0 - x0 + rng.random_range(-1.0..1.0);
             let censor_time: f64 = rng.random_range(0.0..25.0);
             if base_time <= censor_time {
-                events.push(SurvivalEvent { time: base_time.max(0.1), event: true });
+                events.push(SurvivalEvent {
+                    time: base_time.max(0.1),
+                    event: true,
+                });
             } else {
-                events.push(SurvivalEvent { time: censor_time.max(0.1), event: false });
+                events.push(SurvivalEvent {
+                    time: censor_time.max(0.1),
+                    event: false,
+                });
             }
         }
         (features, events)
@@ -603,7 +606,9 @@ mod tests {
     #[test]
     fn fit_returns_a_model_that_predicts_new_unseen_data() {
         let (features, events) = synthetic_survival_data(60, 7);
-        let rsf = RandomSurvivalForest::new().with_n_estimators(30).with_seed(1);
+        let rsf = RandomSurvivalForest::new()
+            .with_n_estimators(30)
+            .with_seed(1);
         let (trained, _oob_c_index) = rsf.fit(&features, &events).unwrap();
 
         // New data, not part of the training set at all.
@@ -659,7 +664,9 @@ mod tests {
     #[test]
     fn fit_predict_matches_fit_then_predict_on_training_data() {
         let (features, events) = synthetic_survival_data(30, 5);
-        let rsf = RandomSurvivalForest::new().with_n_estimators(20).with_seed(9);
+        let rsf = RandomSurvivalForest::new()
+            .with_n_estimators(20)
+            .with_seed(9);
 
         let via_fit_predict = rsf.fit_predict(&features, &events).unwrap();
         let (trained, _) = rsf.fit(&features, &events).unwrap();
@@ -688,15 +695,33 @@ mod tests {
     #[test]
     fn concordance_index_no_ties_perfect_discrimination() {
         let events = vec![
-            SurvivalEvent { time: 1.0, event: true },
-            SurvivalEvent { time: 5.0, event: true },
-            SurvivalEvent { time: 10.0, event: true },
-            SurvivalEvent { time: 20.0, event: true },
+            SurvivalEvent {
+                time: 1.0,
+                event: true,
+            },
+            SurvivalEvent {
+                time: 5.0,
+                event: true,
+            },
+            SurvivalEvent {
+                time: 10.0,
+                event: true,
+            },
+            SurvivalEvent {
+                time: 20.0,
+                event: true,
+            },
         ];
         // Risk strictly decreasing as time increases -> perfect discrimination.
-        let predictions: Vec<_> = [4.0, 3.0, 2.0, 1.0].into_iter().map(prediction_with_risk).collect();
+        let predictions: Vec<_> = [4.0, 3.0, 2.0, 1.0]
+            .into_iter()
+            .map(prediction_with_risk)
+            .collect();
         let c = concordance_index(&predictions, &events);
-        assert!((c - 1.0).abs() < 1e-12, "expected perfect C-index 1.0, got {c}");
+        assert!(
+            (c - 1.0).abs() < 1e-12,
+            "expected perfect C-index 1.0, got {c}"
+        );
     }
 
     /// Regression test for N11 (docs/auditoria_motor_2026-07-05.md, Fase F):
@@ -710,12 +735,27 @@ mod tests {
     #[test]
     fn concordance_index_does_not_double_count_tied_event_times() {
         let events = vec![
-            SurvivalEvent { time: 1.0, event: true },
-            SurvivalEvent { time: 10.0, event: true },
-            SurvivalEvent { time: 5.0, event: true }, // tied with idx 3
-            SurvivalEvent { time: 5.0, event: true }, // tied with idx 2
+            SurvivalEvent {
+                time: 1.0,
+                event: true,
+            },
+            SurvivalEvent {
+                time: 10.0,
+                event: true,
+            },
+            SurvivalEvent {
+                time: 5.0,
+                event: true,
+            }, // tied with idx 3
+            SurvivalEvent {
+                time: 5.0,
+                event: true,
+            }, // tied with idx 2
         ];
-        let predictions: Vec<_> = [1.0, 0.0, 0.9, 0.1].into_iter().map(prediction_with_risk).collect();
+        let predictions: Vec<_> = [1.0, 0.0, 0.9, 0.1]
+            .into_iter()
+            .map(prediction_with_risk)
+            .collect();
 
         let c = concordance_index(&predictions, &events);
         // 6 unordered pairs total: 5 strictly concordant (risk fully
@@ -724,7 +764,10 @@ mod tests {
         // gave 6/7 ~= 0.857 on this same data (pair (2, 3) contributed
         // total += 2 instead of 1, since neither traversal direction was
         // skipped).
-        assert!((c - 5.5 / 6.0).abs() < 1e-12, "expected 5.5/6 = 0.91666..., got {c}");
+        assert!(
+            (c - 5.5 / 6.0).abs() < 1e-12,
+            "expected 5.5/6 = 0.91666..., got {c}"
+        );
     }
 
     #[test]
@@ -734,11 +777,23 @@ mod tests {
         // event at the same time is also not comparable (unknown whether
         // the censored one would have failed before or after).
         let events = vec![
-            SurvivalEvent { time: 5.0, event: false },
-            SurvivalEvent { time: 5.0, event: false },
-            SurvivalEvent { time: 5.0, event: true },
+            SurvivalEvent {
+                time: 5.0,
+                event: false,
+            },
+            SurvivalEvent {
+                time: 5.0,
+                event: false,
+            },
+            SurvivalEvent {
+                time: 5.0,
+                event: true,
+            },
         ];
-        let predictions: Vec<_> = [0.5, 0.5, 0.5].into_iter().map(prediction_with_risk).collect();
+        let predictions: Vec<_> = [0.5, 0.5, 0.5]
+            .into_iter()
+            .map(prediction_with_risk)
+            .collect();
         // No comparable pairs at all -> falls back to the 0.5 default.
         assert_eq!(concordance_index(&predictions, &events), 0.5);
     }

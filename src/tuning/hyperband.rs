@@ -4,12 +4,12 @@
 //! discards the worst, and allocates more resources to the best.
 
 use super::{ParamSet, ParamSpace, TuneResult};
-use crate::{Result, SmeltError};
 use crate::benchmark;
 use crate::learner::Learner;
 use crate::measure::Measure;
 use crate::resample::CrossValidation;
 use crate::task::{ClassificationTask, RegressionTask};
+use crate::{Result, SmeltError};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rayon::prelude::*;
@@ -146,7 +146,8 @@ impl Hyperband {
                     .par_iter()
                     .map(|params| {
                         let mut learner = (self.factory)(params);
-                        let result = benchmark::resample_classif(&mut *learner, task, &cv, &[measure])?;
+                        let result =
+                            benchmark::resample_classif(&mut *learner, task, &cv, &[measure])?;
                         Ok::<_, crate::SmeltError>((params.clone(), result.mean_scores()[0]))
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -200,7 +201,8 @@ impl Hyperband {
                     .par_iter()
                     .map(|params| {
                         let mut learner = (self.factory)(params);
-                        let result = benchmark::resample_regress(&mut *learner, task, &cv, &[measure])?;
+                        let result =
+                            benchmark::resample_regress(&mut *learner, task, &cv, &[measure])?;
                         Ok::<_, crate::SmeltError>((params.clone(), result.mean_scores()[0]))
                     })
                     .collect::<Result<Vec<_>>>()?;

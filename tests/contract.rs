@@ -92,10 +92,13 @@ fn contract_task_support() {
         let props = learner_from_id(id).unwrap().properties();
 
         let mut lc = learner_from_id(id).unwrap();
-        match (props.supports_classification, lc.train_classif(&classif_task())) {
-            (true, Err(e)) => {
-                failures.push(format!("{id}: declares classification but train_classif errored: {e}"))
-            }
+        match (
+            props.supports_classification,
+            lc.train_classif(&classif_task()),
+        ) {
+            (true, Err(e)) => failures.push(format!(
+                "{id}: declares classification but train_classif errored: {e}"
+            )),
             (false, Ok(_)) => failures.push(format!(
                 "{id}: does NOT declare classification but train_classif succeeded"
             )),
@@ -104,9 +107,9 @@ fn contract_task_support() {
 
         let mut lr = learner_from_id(id).unwrap();
         match (props.supports_regression, lr.train_regress(&regress_task())) {
-            (true, Err(e)) => {
-                failures.push(format!("{id}: declares regression but train_regress errored: {e}"))
-            }
+            (true, Err(e)) => failures.push(format!(
+                "{id}: declares regression but train_regress errored: {e}"
+            )),
             (false, Ok(_)) => failures.push(format!(
                 "{id}: does NOT declare regression but train_regress succeeded"
             )),
@@ -138,12 +141,22 @@ fn contract_weights() {
         let weights = vec![1.0_f64; N];
         let result = if props.supports_classification {
             let (x, y) = classif_features_target();
-            let task = ClassificationTask::new("w", x, y).unwrap().with_weights(weights);
-            learner_from_id(id).unwrap().train_classif(&task).map(|_| ())
+            let task = ClassificationTask::new("w", x, y)
+                .unwrap()
+                .with_weights(weights);
+            learner_from_id(id)
+                .unwrap()
+                .train_classif(&task)
+                .map(|_| ())
         } else {
             let (x, y) = regress_features_target();
-            let task = RegressionTask::new("w", x, y).unwrap().with_weights(weights);
-            learner_from_id(id).unwrap().train_regress(&task).map(|_| ())
+            let task = RegressionTask::new("w", x, y)
+                .unwrap()
+                .with_weights(weights);
+            learner_from_id(id)
+                .unwrap()
+                .train_regress(&task)
+                .map(|_| ())
         };
 
         match (props.supports_weights, result) {
@@ -171,18 +184,24 @@ fn contract_nan() {
             let (mut x, y) = classif_features_target();
             x[[0, 0]] = f64::NAN;
             let task = ClassificationTask::new("nan", x, y).unwrap();
-            learner_from_id(id).unwrap().train_classif(&task).map(|_| ())
+            learner_from_id(id)
+                .unwrap()
+                .train_classif(&task)
+                .map(|_| ())
         } else {
             let (mut x, y) = regress_features_target();
             x[[0, 0]] = f64::NAN;
             let task = RegressionTask::new("nan", x, y).unwrap();
-            learner_from_id(id).unwrap().train_regress(&task).map(|_| ())
+            learner_from_id(id)
+                .unwrap()
+                .train_regress(&task)
+                .map(|_| ())
         };
 
         match (props.supports_nan, result) {
-            (true, Err(e)) => {
-                failures.push(format!("{id}: declares NaN support but a NaN feature errored: {e}"))
-            }
+            (true, Err(e)) => failures.push(format!(
+                "{id}: declares NaN support but a NaN feature errored: {e}"
+            )),
             (false, Ok(())) => failures.push(format!(
                 "{id}: does NOT declare NaN support but trained on a NaN feature"
             )),
@@ -211,7 +230,9 @@ fn contract_proba() {
         let model = match l.train_classif(&task) {
             Ok(m) => m,
             Err(e) => {
-                failures.push(format!("{id}: train_classif errored during proba check: {e}"));
+                failures.push(format!(
+                    "{id}: train_classif errored during proba check: {e}"
+                ));
                 continue;
             }
         };
@@ -222,13 +243,21 @@ fn contract_proba() {
                 continue;
             }
         };
-        let Prediction::Classification { predicted, probabilities, .. } = pred else {
-            failures.push(format!("{id}: classification predict did not return a Classification"));
+        let Prediction::Classification {
+            predicted,
+            probabilities,
+            ..
+        } = pred
+        else {
+            failures.push(format!(
+                "{id}: classification predict did not return a Classification"
+            ));
             continue;
         };
         match (props.supports_proba, probabilities) {
-            (true, None) => failures
-                .push(format!("{id}: declares proba but predict returned probabilities = None")),
+            (true, None) => failures.push(format!(
+                "{id}: declares proba but predict returned probabilities = None"
+            )),
             (true, Some(rows)) => {
                 let n_classes = task.n_classes();
                 for (i, row) in rows.iter().enumerate() {
@@ -277,7 +306,10 @@ fn contract_feature_importance() {
     for &id in registered_learner_ids() {
         let props = learner_from_id(id).unwrap().properties();
         let model = train_supported(id, props);
-        match (props.provides_feature_importance, model.feature_importance()) {
+        match (
+            props.provides_feature_importance,
+            model.feature_importance(),
+        ) {
             (true, None) => failures.push(format!(
                 "{id}: declares feature importance but feature_importance() returned None"
             )),
@@ -338,5 +370,8 @@ fn contract_predict_wrong_features_errors_not_panics() {
             Ok(Err(_)) => {}
         }
     }
-    report("contract_predict_wrong_features_errors_not_panics", failures);
+    report(
+        "contract_predict_wrong_features_errors_not_panics",
+        failures,
+    );
 }

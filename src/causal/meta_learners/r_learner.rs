@@ -33,7 +33,11 @@ const T_RESID_EPS: f64 = 1e-8;
 /// indices into `weights` with each `k` repeated its replica count times —
 /// fitting an unweighted model on the rows selected by this list
 /// approximates fitting a `weights`-weighted model on the original rows.
-fn replicate_by_weight(weights: &[f64], target_mean_replicas: f64, max_replicas: usize) -> Vec<usize> {
+fn replicate_by_weight(
+    weights: &[f64],
+    target_mean_replicas: f64,
+    max_replicas: usize,
+) -> Vec<usize> {
     let mean_weight = weights.iter().sum::<f64>() / weights.len() as f64;
     let mut out = Vec::new();
     for (k, &w) in weights.iter().enumerate() {
@@ -239,7 +243,10 @@ impl RLearner {
         let tau_model = (self.effect_factory)().train_regress(&final_task)?;
 
         let pred = tau_model.predict(features)?;
-        let Prediction::Regression { predicted: cate, .. } = pred else {
+        let Prediction::Regression {
+            predicted: cate, ..
+        } = pred
+        else {
             return Err(SmeltError::InvalidParameter(
                 "RLearner's effect learner must produce regression predictions".into(),
             ));
@@ -312,9 +319,15 @@ mod tests {
     #[test]
     fn recovers_linear_heterogeneous_effect() {
         let (features, treatment, outcome, true_cate) = synthetic_linear_cate(400, 7, 0.1);
-        let result = r_learner_rf().estimate(&features, &treatment, &outcome).unwrap();
+        let result = r_learner_rf()
+            .estimate(&features, &treatment, &outcome)
+            .unwrap();
         let pred = Prediction::causal_effect_with_truth(result.cate, true_cate);
-        assert!(Pehe.score(&pred).unwrap() < 2.0, "PEHE too high: {}", Pehe.score(&pred).unwrap());
+        assert!(
+            Pehe.score(&pred).unwrap() < 2.0,
+            "PEHE too high: {}",
+            Pehe.score(&pred).unwrap()
+        );
         assert!(AteBias.score(&pred).unwrap() < 0.7);
     }
 
@@ -322,7 +335,9 @@ mod tests {
     fn handles_confounded_nonlinear_effect() {
         let (features, treatment, outcome, true_cate) =
             synthetic_confounded_nonlinear_cate(400, 8, 0.1);
-        let result = r_learner_rf().estimate(&features, &treatment, &outcome).unwrap();
+        let result = r_learner_rf()
+            .estimate(&features, &treatment, &outcome)
+            .unwrap();
         let pred = Prediction::causal_effect_with_truth(result.cate, true_cate);
         assert!(Pehe.score(&pred).unwrap().is_finite());
     }
@@ -330,14 +345,22 @@ mod tests {
     #[test]
     fn rejects_non_binary_treatment() {
         let features = Array2::from_shape_vec((6, 1), vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
-        let err = r_learner_rf().estimate(&features, &[0, 1, 2, 0, 1, 0], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let err = r_learner_rf().estimate(
+            &features,
+            &[0, 1, 2, 0, 1, 0],
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        );
         assert!(err.is_err());
     }
 
     #[test]
     fn rejects_single_arm() {
         let features = Array2::from_shape_vec((6, 1), vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
-        let err = r_learner_rf().estimate(&features, &[0, 0, 0, 0, 0, 0], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let err = r_learner_rf().estimate(
+            &features,
+            &[0, 0, 0, 0, 0, 0],
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        );
         assert!(err.is_err());
     }
 
@@ -348,7 +371,10 @@ mod tests {
         let reps = replicate_by_weight(&equal, 3.0, 20);
         for k in 0..equal.len() {
             let count = reps.iter().filter(|&&i| i == k).count();
-            assert_eq!(count, 3, "equal weights should each replicate to the target mean");
+            assert_eq!(
+                count, 3,
+                "equal weights should each replicate to the target mean"
+            );
         }
 
         // A row with 10x the others' weight should replicate proportionally
@@ -433,10 +459,16 @@ mod tests {
         );
 
         let pehe_exact = Pehe
-            .score(&Prediction::causal_effect_with_truth(exact.cate, true_cate.clone()))
+            .score(&Prediction::causal_effect_with_truth(
+                exact.cate,
+                true_cate.clone(),
+            ))
             .unwrap();
         let pehe_fallback = Pehe
-            .score(&Prediction::causal_effect_with_truth(fallback.cate, true_cate))
+            .score(&Prediction::causal_effect_with_truth(
+                fallback.cate,
+                true_cate,
+            ))
             .unwrap();
         assert!(
             pehe_exact < pehe_fallback,
@@ -475,7 +507,12 @@ mod tests {
         .estimate(&features, &treatment, &outcome)
         .unwrap();
 
-        for (i, (&v, &bits)) in result.cate.iter().zip(EXPECTED_CATE_BITS.iter()).enumerate() {
+        for (i, (&v, &bits)) in result
+            .cate
+            .iter()
+            .zip(EXPECTED_CATE_BITS.iter())
+            .enumerate()
+        {
             assert_eq!(
                 v.to_bits(),
                 bits,
@@ -566,8 +603,14 @@ mod tests {
         // and an extreme weight is capped rather than blowing up the count.
         let weights = vec![1e-9, 1.0, 1e9];
         let reps = replicate_by_weight(&weights, 3.0, 20);
-        assert!(reps.contains(&0), "near-zero-weight row must still appear at least once");
+        assert!(
+            reps.contains(&0),
+            "near-zero-weight row must still appear at least once"
+        );
         let count_extreme = reps.iter().filter(|&&i| i == 2).count();
-        assert!(count_extreme <= 20, "replica count must respect the cap, got {count_extreme}");
+        assert!(
+            count_extreme <= 20,
+            "replica count must respect the cap, got {count_extreme}"
+        );
     }
 }

@@ -9,8 +9,9 @@ use pyo3::prelude::*;
 
 pub(crate) fn make_learner_factory(
     learner_type: &str,
-) -> PyResult<Box<dyn Fn(&smelt_ml::tuning::ParamSet) -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>>
-{
+) -> PyResult<
+    Box<dyn Fn(&smelt_ml::tuning::ParamSet) -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>,
+> {
     use smelt_ml::prelude::*;
     type L = Box<dyn smelt_ml::learner::Learner>;
     type PS = smelt_ml::tuning::ParamSet;
@@ -51,42 +52,47 @@ pub(crate) fn make_learner_factory(
                 let name = v
                     .as_str()
                     .unwrap_or_else(|e| panic!("invalid value for parameter 'objective': {e}"));
-                let obj = crate::learners::boosting::resolve_objective(
-                    name,
-                    get(p, "huber_delta", 1.0),
-                )
-                .unwrap_or_else(|e| panic!("invalid value for parameter 'objective': {e}"));
+                let obj =
+                    crate::learners::boosting::resolve_objective(name, get(p, "huber_delta", 1.0))
+                        .unwrap_or_else(|e| panic!("invalid value for parameter 'objective': {e}"));
                 xgb = xgb.with_objective(obj);
             }
             Box::new(xgb)
         })),
         "catboost" => Ok(Box::new(|p: &PS| -> L {
-            Box::new(CatBoost::new()
-                .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
-                .with_depth(get(p, "depth", 6.0) as usize)
-                .with_learning_rate(get(p, "learning_rate", 0.3))
-                .with_lambda(get(p, "lambda", 1.0)))
+            Box::new(
+                CatBoost::new()
+                    .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
+                    .with_depth(get(p, "depth", 6.0) as usize)
+                    .with_learning_rate(get(p, "learning_rate", 0.3))
+                    .with_lambda(get(p, "lambda", 1.0)),
+            )
         })),
         "lightgbm" => Ok(Box::new(|p: &PS| -> L {
-            Box::new(LightGBM::new()
-                .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
-                .with_num_leaves(get(p, "num_leaves", 31.0) as usize)
-                .with_learning_rate(get(p, "learning_rate", 0.1))
-                .with_max_depth(get(p, "max_depth", 6.0) as usize))
+            Box::new(
+                LightGBM::new()
+                    .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
+                    .with_num_leaves(get(p, "num_leaves", 31.0) as usize)
+                    .with_learning_rate(get(p, "learning_rate", 0.1))
+                    .with_max_depth(get(p, "max_depth", 6.0) as usize),
+            )
         })),
         "random_forest" | "rf" => Ok(Box::new(|p: &PS| -> L {
-            Box::new(RandomForest::new()
-                .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
-                .with_max_depth(get(p, "max_depth", 10.0) as usize))
+            Box::new(
+                RandomForest::new()
+                    .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
+                    .with_max_depth(get(p, "max_depth", 10.0) as usize),
+            )
         })),
         "extra_trees" | "et" => Ok(Box::new(|p: &PS| -> L {
-            Box::new(ExtraTrees::new()
-                .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
-                .with_max_depth(get(p, "max_depth", 10.0) as usize))
+            Box::new(
+                ExtraTrees::new()
+                    .with_n_estimators(get(p, "n_estimators", 100.0) as usize)
+                    .with_max_depth(get(p, "max_depth", 10.0) as usize),
+            )
         })),
         "decision_tree" | "dt" => Ok(Box::new(|p: &PS| -> L {
-            Box::new(DecisionTree::new()
-                .with_max_depth(get(p, "max_depth", 10.0) as usize))
+            Box::new(DecisionTree::new().with_max_depth(get(p, "max_depth", 10.0) as usize))
         })),
         "ridge" => Ok(Box::new(|p: &PS| -> L {
             Box::new(Ridge::new(get(p, "alpha", 1.0)))
@@ -94,7 +100,9 @@ pub(crate) fn make_learner_factory(
         "knn" => Ok(Box::new(|p: &PS| -> L {
             Box::new(KNearestNeighbors::new(get(p, "k", 5.0) as usize))
         })),
-        _ => Err(PyValueError::new_err(format!("Unknown learner type: {learner_type}"))),
+        _ => Err(PyValueError::new_err(format!(
+            "Unknown learner type: {learner_type}"
+        ))),
     }
 }
 
@@ -215,7 +223,8 @@ fn py_to_param_value(v: &Bound<'_, PyAny>) -> PyResult<smelt_ml::tuning::ParamVa
 pub(crate) fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::tuning::ParamSpace> {
     use smelt_ml::tuning::{ParamDistribution, ParamSpace};
 
-    let py_dict: &Bound<'_, pyo3::types::PyDict> = dict.downcast()
+    let py_dict: &Bound<'_, pyo3::types::PyDict> = dict
+        .downcast()
         .map_err(|_| PyValueError::new_err("param_space must be a dict"))?;
 
     let mut space = ParamSpace::new();
@@ -227,17 +236,16 @@ pub(crate) fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::t
         // Or tuple format: (low, high) → uniform
         // Or list format: [1, 2, 3] → choice
         if let Ok(inner_dict) = val.downcast::<pyo3::types::PyDict>() {
-            let dtype: String = inner_dict.get_item("type")?
+            let dtype: String = inner_dict
+                .get_item("type")?
                 .ok_or_else(|| PyValueError::new_err(format!("Missing 'type' for param '{name}'")))?
                 .extract()?;
             let required = |field: &str| -> PyResult<Bound<'_, PyAny>> {
-                inner_dict
-                    .get_item(field)?
-                    .ok_or_else(|| {
-                        PyValueError::new_err(format!(
-                            "param '{name}' of type '{dtype}' requires '{field}'"
-                        ))
-                    })
+                inner_dict.get_item(field)?.ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "param '{name}' of type '{dtype}' requires '{field}'"
+                    ))
+                })
             };
             match dtype.as_str() {
                 "uniform" => {
@@ -259,7 +267,11 @@ pub(crate) fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::t
                         .collect::<PyResult<Vec<_>>>()?;
                     space.insert(name, ParamDistribution::Choice(choices));
                 }
-                _ => return Err(PyValueError::new_err(format!("Unknown param type: {dtype}"))),
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "Unknown param type: {dtype}"
+                    )));
+                }
             }
         } else if let Ok(tup) = val.extract::<(f64, f64)>() {
             // Shorthand: (low, high) → uniform
@@ -272,9 +284,9 @@ pub(crate) fn build_param_space(dict: &Bound<'_, PyAny>) -> PyResult<smelt_ml::t
                 .collect::<PyResult<Vec<_>>>()?;
             space.insert(name, ParamDistribution::Choice(choices));
         } else {
-            return Err(PyValueError::new_err(
-                format!("Invalid param spec for '{name}'. Use dict, tuple (low, high), or list [choices]"),
-            ));
+            return Err(PyValueError::new_err(format!(
+                "Invalid param spec for '{name}'. Use dict, tuple (low, high), or list [choices]"
+            )));
         }
     }
 
@@ -294,7 +306,11 @@ impl PyBayesianOptimizer {
     #[new]
     #[pyo3(signature = (n_iter=30, n_initial=5, seed=42))]
     fn new(n_iter: usize, n_initial: usize, seed: u64) -> Self {
-        Self { n_iter, n_initial, seed }
+        Self {
+            n_iter,
+            n_initial,
+            seed,
+        }
     }
 
     /// Optimize hyperparameters using Bayesian TPE.
@@ -333,13 +349,10 @@ impl PyBayesianOptimizer {
         let measure = resolve_measure(metric)?;
         let cv = smelt_ml::resample::CrossValidation::new(n_folds).with_seed(cv_seed);
 
-        let bo = smelt_ml::tuning::BayesianOptimizer::new(
-            move |params| factory(params),
-            space,
-        )
-        .with_n_iter(self.n_iter)
-        .with_n_initial(self.n_initial)
-        .with_seed(self.seed);
+        let bo = smelt_ml::tuning::BayesianOptimizer::new(move |params| factory(params), space)
+            .with_n_iter(self.n_iter)
+            .with_n_initial(self.n_initial)
+            .with_seed(self.seed);
 
         let features = to_array2(x);
 
@@ -352,8 +365,8 @@ impl PyBayesianOptimizer {
         } else {
             let target: Vec<f64> = y.extract()?;
             crate::common::check_finite_target(&target)?;
-            let task = smelt_ml::task::RegressionTask::new("bo", features, target)
-                .map_err(smelt_err)?;
+            let task =
+                smelt_ml::task::RegressionTask::new("bo", features, target).map_err(smelt_err)?;
             py.allow_threads(|| bo.tune_regress(&task, &cv, &*measure))
                 .map_err(smelt_err)?
         };
@@ -375,7 +388,8 @@ impl PyBayesianOptimizer {
             for (k, v) in params {
                 set_param(&pd, k, v)?;
             }
-            let tup = pyo3::types::PyTuple::new(py, [pd.as_any(), score.into_pyobject(py)?.as_any()])?;
+            let tup =
+                pyo3::types::PyTuple::new(py, [pd.as_any(), score.into_pyobject(py)?.as_any()])?;
             history.append(tup)?;
         }
         dict.set_item("all_results", history)?;
@@ -431,4 +445,3 @@ pub(crate) fn set_param(
         }
     }
 }
-

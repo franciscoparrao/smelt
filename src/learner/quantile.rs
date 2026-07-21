@@ -3,11 +3,11 @@
 //! Predicts conditional quantiles instead of the conditional mean.
 //! Uses the pinball (quantile) loss function.
 
+use crate::Result;
 use crate::learner::tree::TreeBuilder;
 use crate::learner::tree::{LeafValue, Node};
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
 use crate::task::{RegressionTask, Task};
 use ndarray::Array2;
 use rand::SeedableRng;
@@ -126,10 +126,8 @@ impl Learner for QuantileGB {
     }
 
     fn properties(&self) -> LearnerProperties {
-        LearnerProperties::regressor()
-            .with_serializable()
+        LearnerProperties::regressor().with_serializable()
     }
-
 
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         crate::validate::check_no_weights(task.weights(), "QuantileGB")?;
@@ -202,19 +200,24 @@ mod tests {
     /// index computation instead of returning a clean error.
     #[test]
     fn quantile_out_of_open_unit_interval_is_rejected() {
-        let features = Array2::from_shape_vec((10, 1), (0..10).map(|i| i as f64).collect()).unwrap();
+        let features =
+            Array2::from_shape_vec((10, 1), (0..10).map(|i| i as f64).collect()).unwrap();
         let target: Vec<f64> = (0..10).map(|i| i as f64).collect();
         let task = RegressionTask::new("q", features, target).unwrap();
 
         for tau in [0.0, 1.0, -0.1, 1.1] {
             let mut q = QuantileGB::new(tau).with_n_estimators(2);
-            assert!(q.train_regress(&task).is_err(), "tau={tau} should be rejected");
+            assert!(
+                q.train_regress(&task).is_err(),
+                "tau={tau} should be rejected"
+            );
         }
     }
 
     #[test]
     fn predict_rejects_wrong_feature_count() {
-        let features = Array2::from_shape_vec((10, 2), (0..20).map(|i| i as f64).collect()).unwrap();
+        let features =
+            Array2::from_shape_vec((10, 2), (0..20).map(|i| i as f64).collect()).unwrap();
         let target: Vec<f64> = (0..10).map(|i| i as f64).collect();
         let task = RegressionTask::new("q", features, target).unwrap();
         let mut q = QuantileGB::new(0.5).with_n_estimators(2);

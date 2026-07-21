@@ -1,9 +1,12 @@
 //! Miscellaneous learners: KNearestNeighbors, GaussianNB, AdaBoost, EBM,
 //! QuantileForest, QuantileGB, ExtremeLearningMachine.
 
-use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params, declare_weight_support};
-use crate::common::{load_model_checked, save_model};
+use crate::common::{
+    add_explain_methods, add_persistence_methods, declare_params, declare_support,
+    declare_weight_support, define_learner,
+};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
+use crate::common::{load_model_checked, save_model};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 
 use pyo3::prelude::*;
@@ -36,7 +39,11 @@ impl KNearestNeighbors {
     #[new]
     #[pyo3(signature = (k=5))]
     fn new(k: usize) -> Self {
-        Self { trained: None, is_classif: false, k }
+        Self {
+            trained: None,
+            is_classif: false,
+            k,
+        }
     }
 
     /// `sample_weight` (sklearn convention): optional per-sample weights,
@@ -58,11 +65,19 @@ impl KNearestNeighbors {
         Ok(())
     }
 
-    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 
-    fn predict_proba<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+    fn predict_proba<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
         predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 
@@ -80,7 +95,11 @@ impl KNearestNeighbors {
     #[staticmethod]
     #[pyo3(signature = (path, is_classif=false))]
     fn load(path: &str, is_classif: bool) -> PyResult<Self> {
-        let expected = if is_classif { "KnnClassifier" } else { "KnnRegressor" };
+        let expected = if is_classif {
+            "KnnClassifier"
+        } else {
+            "KnnRegressor"
+        };
         Ok(Self {
             trained: Some(load_model_checked(path, expected)?),
             is_classif,
@@ -88,7 +107,6 @@ impl KNearestNeighbors {
         })
     }
 }
-
 
 // ── GaussianNB ─────────────────────────────────────────────────────────
 
@@ -103,7 +121,10 @@ pub(crate) struct GaussianNB {
 impl GaussianNB {
     #[new]
     fn new() -> Self {
-        Self { trained: None, is_classif: false }
+        Self {
+            trained: None,
+            is_classif: false,
+        }
     }
 
     /// `sample_weight` (sklearn convention): optional per-sample weights,
@@ -125,15 +146,22 @@ impl GaussianNB {
         Ok(())
     }
 
-    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 
-    fn predict_proba<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+    fn predict_proba<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
         predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 }
-
 
 define_learner! {
     name = AdaBoost,
@@ -339,7 +367,15 @@ impl QuantileForest {
     ) -> PyResult<PyObject> {
         let model = self.trained.as_ref().ok_or_else(not_fitted)?;
         crate::common::perm_importance_impl(
-            py, model, false, x, y, metric, n_repeats, seed, feature_names,
+            py,
+            model,
+            false,
+            x,
+            y,
+            metric,
+            n_repeats,
+            seed,
+            feature_names,
         )
     }
 
@@ -429,11 +465,19 @@ impl ExtremeLearningMachine {
         Ok(())
     }
 
-    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 
-    fn predict_proba<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+    fn predict_proba<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
         predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 
@@ -463,7 +507,7 @@ impl ExtremeLearningMachine {
                     other => {
                         return Err(pyo3::exceptions::PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"
-                        )))
+                        )));
                     }
                 }
             }
@@ -475,14 +519,21 @@ impl ExtremeLearningMachine {
 // QuantileForest is excluded: it stores its model as a concrete
 // `Option<TrainedQuantileForest>` (not `Option<Box<dyn TrainedModel>>`),
 // so its explain methods are hand-written above.
-add_explain_methods!(KNearestNeighbors, GaussianNB, AdaBoost, EBM, QuantileGB, ExtremeLearningMachine);
+add_explain_methods!(
+    KNearestNeighbors,
+    GaussianNB,
+    AdaBoost,
+    EBM,
+    QuantileGB,
+    ExtremeLearningMachine
+);
 
-declare_support!(KNearestNeighbors, classif = true,  regress = true);
-declare_support!(GaussianNB,        classif = true,  regress = false);
-declare_support!(AdaBoost,          classif = true,  regress = false);
-declare_support!(EBM,               classif = true,  regress = true);
-declare_support!(QuantileForest,    classif = false, regress = true);
-declare_support!(QuantileGB,        classif = false, regress = true);
+declare_support!(KNearestNeighbors, classif = true, regress = true);
+declare_support!(GaussianNB, classif = true, regress = false);
+declare_support!(AdaBoost, classif = true, regress = false);
+declare_support!(EBM, classif = true, regress = true);
+declare_support!(QuantileForest, classif = false, regress = true);
+declare_support!(QuantileGB, classif = false, regress = true);
 declare_support!(ExtremeLearningMachine, classif = true, regress = true);
 
 declare_weight_support!(
@@ -493,7 +544,7 @@ declare_weight_support!(
 );
 
 declare_params!(KNearestNeighbors, { k => "k" });
-declare_params!(GaussianNB,        {});
+declare_params!(GaussianNB, {});
 
 add_persistence_methods!(
     GaussianNB => "GaussianNB",

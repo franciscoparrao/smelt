@@ -2,7 +2,10 @@
 //! GradientBoosting, HoeffdingTree, AdaptiveRandomForest, ObliqueTree,
 //! ObliqueForest.
 
-use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params, declare_weight_support};
+use crate::common::{
+    add_explain_methods, add_persistence_methods, declare_params, declare_support,
+    declare_weight_support, define_learner,
+};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
@@ -93,10 +96,13 @@ impl RandomForest {
 
     #[getter]
     fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
-        Ok(self.trained.as_ref().ok_or_else(not_fitted)?.feature_importance())
+        Ok(self
+            .trained
+            .as_ref()
+            .ok_or_else(not_fitted)?
+            .feature_importance())
     }
 }
-
 
 // ── ExtraTrees ─────────────────────────────────────────────────────────
 
@@ -115,7 +121,13 @@ impl ExtraTrees {
     #[new]
     #[pyo3(signature = (n_estimators=100, max_depth=10, seed=42))]
     fn new(n_estimators: usize, max_depth: Option<usize>, seed: u64) -> Self {
-        Self { trained: None, is_classif: false, n_estimators, max_depth, seed }
+        Self {
+            trained: None,
+            is_classif: false,
+            n_estimators,
+            max_depth,
+            seed,
+        }
     }
 
     /// `sample_weight` (sklearn convention): optional per-sample weights,
@@ -140,11 +152,14 @@ impl ExtraTrees {
         Ok(())
     }
 
-    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 }
-
 
 // ── DecisionTree ───────────────────────────────────────────────────────
 
@@ -199,7 +214,6 @@ impl DecisionTree {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 }
-
 
 define_learner! {
     name = GradientBoosting,
@@ -330,18 +344,29 @@ define_learner! {
     serial_as = "ObliqueForest",
 }
 
-add_explain_methods!(RandomForest, ExtraTrees, DecisionTree, GradientBoosting, HoeffdingTree, AdaptiveRandomForest, DeepForest, MondrianForest, ObliqueTree, ObliqueForest);
+add_explain_methods!(
+    RandomForest,
+    ExtraTrees,
+    DecisionTree,
+    GradientBoosting,
+    HoeffdingTree,
+    AdaptiveRandomForest,
+    DeepForest,
+    MondrianForest,
+    ObliqueTree,
+    ObliqueForest
+);
 
-declare_support!(RandomForest,      classif = true,  regress = true);
-declare_support!(ExtraTrees,        classif = true,  regress = true);
-declare_support!(DecisionTree,      classif = true,  regress = true);
-declare_support!(GradientBoosting,  classif = true,  regress = true);
-declare_support!(HoeffdingTree,     classif = true,  regress = false);
+declare_support!(RandomForest, classif = true, regress = true);
+declare_support!(ExtraTrees, classif = true, regress = true);
+declare_support!(DecisionTree, classif = true, regress = true);
+declare_support!(GradientBoosting, classif = true, regress = true);
+declare_support!(HoeffdingTree, classif = true, regress = false);
 declare_support!(AdaptiveRandomForest, classif = true, regress = false);
-declare_support!(DeepForest,        classif = true,  regress = false);
-declare_support!(MondrianForest,    classif = true,  regress = true);
-declare_support!(ObliqueTree,       classif = true,  regress = true);
-declare_support!(ObliqueForest,     classif = true,  regress = true);
+declare_support!(DeepForest, classif = true, regress = false);
+declare_support!(MondrianForest, classif = true, regress = true);
+declare_support!(ObliqueTree, classif = true, regress = true);
+declare_support!(ObliqueForest, classif = true, regress = true);
 
 declare_weight_support!(
     RandomForest => smelt_ml::prelude::RandomForest::new(),

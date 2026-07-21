@@ -141,8 +141,7 @@ impl ParquetLoader {
                 }
             } else {
                 let strings = Self::column_to_strings(column, n_samples)?;
-                let present: Vec<&str> =
-                    strings.iter().filter_map(|s| s.as_deref()).collect();
+                let present: Vec<&str> = strings.iter().filter_map(|s| s.as_deref()).collect();
                 let encoder = LabelEncoder::fit(&present);
                 for (i, cell) in strings.iter().enumerate() {
                     features[[i, j]] = match cell {
@@ -185,9 +184,7 @@ impl ParquetLoader {
                 .iter()
                 .map(|s| {
                     s.as_deref().ok_or_else(|| {
-                        SmeltError::Parquet(
-                            "target column contains a null value".into(),
-                        )
+                        SmeltError::Parquet("target column contains a null value".into())
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -213,7 +210,9 @@ impl ParquetLoader {
             .into_iter()
             .map(|v| {
                 if v.is_nan() {
-                    Err(SmeltError::Parquet("target column contains a null/NaN value".into()))
+                    Err(SmeltError::Parquet(
+                        "target column contains a null/NaN value".into(),
+                    ))
                 } else {
                     Ok(v)
                 }

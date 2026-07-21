@@ -209,9 +209,10 @@ impl Learner for Pipeline {
 
         // feature_types propagated for the same reason as in train_classif
         // (5th audit, M-3).
-        let mut transformed_task = RegressionTask::new(task.id(), features, task.target().to_vec())?
-            .with_feature_names(names)?
-            .with_feature_types(types)?;
+        let mut transformed_task =
+            RegressionTask::new(task.id(), features, task.target().to_vec())?
+                .with_feature_names(names)?
+                .with_feature_types(types)?;
         // Weights propagated unchanged for the same reason as in
         // train_classif: transformer stages are row-preserving, and the
         // inner learner's guard decides whether weights are supported.
@@ -348,7 +349,11 @@ mod tests {
 
         let direct_model = stumps().train_classif(&task).unwrap();
         let direct = direct_model.predict(task.features()).unwrap();
-        let Prediction::Classification { predicted: direct_pred, .. } = direct else {
+        let Prediction::Classification {
+            predicted: direct_pred,
+            ..
+        } = direct
+        else {
             panic!("expected classification");
         };
         let direct_acc = direct_pred
@@ -365,7 +370,11 @@ mod tests {
         let mut pipe = Pipeline::new(vec![], Box::new(stumps()));
         let pipe_model = pipe.train_classif(&task).unwrap();
         let piped = pipe_model.predict(task.features()).unwrap();
-        let Prediction::Classification { predicted: pipe_pred, .. } = piped else {
+        let Prediction::Classification {
+            predicted: pipe_pred,
+            ..
+        } = piped
+        else {
             panic!("expected classification");
         };
         assert_eq!(
@@ -404,7 +413,10 @@ mod tests {
         // Mark column 1 categorical by hand-copied types (the imbalanced
         // task's values aren't integer codes, so use with_feature_types,
         // which is exactly what fold/resample propagation uses).
-        let types = vec![FeatureType::Numeric, FeatureType::Categorical { n_categories: 7 }];
+        let types = vec![
+            FeatureType::Numeric,
+            FeatureType::Categorical { n_categories: 7 },
+        ];
         let task = task.with_feature_types(types.clone()).unwrap();
 
         let seen = std::sync::Arc::new(std::sync::Mutex::new(None));

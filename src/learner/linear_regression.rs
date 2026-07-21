@@ -195,8 +195,9 @@ impl Learner for LinearRegression {
             }
         };
 
-        let weights = solve(&xtx, &xty)
-            .ok_or_else(|| SmeltError::NumericalError("Singular matrix in normal equation".into()))?;
+        let weights = solve(&xtx, &xty).ok_or_else(|| {
+            SmeltError::NumericalError("Singular matrix in normal equation".into())
+        })?;
 
         Ok(Box::new(TrainedLinearRegression {
             weights,

@@ -79,7 +79,9 @@ impl Smote {
         let smote = smelt_ml::prelude::Smote::new()
             .with_k_neighbors(self.k_neighbors)
             .with_seed(self.seed);
-        let balanced = py.allow_threads(|| smote.balance(&task)).map_err(smelt_err)?;
+        let balanced = py
+            .allow_threads(|| smote.balance(&task))
+            .map_err(smelt_err)?;
         Ok((
             PyArray2::from_owned_array(py, balanced.features().clone()),
             balanced.target().to_vec(),
@@ -124,7 +126,11 @@ impl SpatialSmote {
         x: PyReadonlyArray2<'_, f64>,
         y: &Bound<'_, PyAny>,
         coords: &Bound<'_, PyAny>,
-    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Vec<usize>, Bound<'py, PyArray2<f64>>)> {
+    ) -> PyResult<(
+        Bound<'py, PyArray2<f64>>,
+        Vec<usize>,
+        Bound<'py, PyArray2<f64>>,
+    )> {
         use smelt_ml::task::Task;
         let target = extract_class_labels(y)?;
         let features = to_array2(x);
@@ -161,4 +167,3 @@ impl SpatialSmote {
         ))
     }
 }
-

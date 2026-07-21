@@ -242,7 +242,10 @@ fn pipeline_propagates_weights_through_row_preserving_transformers() {
     let (probe, seen) = make_probe();
     let mut pipe = Pipeline::new(vec![Box::new(StandardScaler::new())], Box::new(probe));
     pipe.train_regress(&rtask).unwrap();
-    assert_eq!(seen.lock().unwrap()[0].0.as_deref(), Some(expected.as_slice()));
+    assert_eq!(
+        seen.lock().unwrap()[0].0.as_deref(),
+        Some(expected.as_slice())
+    );
 }
 
 #[test]
@@ -274,14 +277,24 @@ fn assert_resampling_rejected(err: SmeltError) {
 #[test]
 fn smote_rejects_a_weighted_task() {
     let task = weighted_classif_task(10);
-    assert_resampling_rejected(Smote::new().with_k_neighbors(1).balance(&task).map(|_| ()).unwrap_err());
+    assert_resampling_rejected(
+        Smote::new()
+            .with_k_neighbors(1)
+            .balance(&task)
+            .map(|_| ())
+            .unwrap_err(),
+    );
 }
 
 #[test]
 fn adasyn_rejects_a_weighted_task() {
     let task = weighted_classif_task(10);
     assert_resampling_rejected(
-        Adasyn::new().with_k_neighbors(1).balance(&task).map(|_| ()).unwrap_err(),
+        Adasyn::new()
+            .with_k_neighbors(1)
+            .balance(&task)
+            .map(|_| ())
+            .unwrap_err(),
     );
 }
 
@@ -293,7 +306,8 @@ fn spatial_smote_rejects_a_weighted_task() {
         SpatialSmote::new()
             .with_k_neighbors(1)
             .balance(&task, &coords)
-            .map(|_| ()).unwrap_err(),
+            .map(|_| ())
+            .unwrap_err(),
     );
 }
 

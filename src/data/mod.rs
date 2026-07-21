@@ -149,8 +149,7 @@ impl CsvLoader {
         }
 
         let feature_cols: Vec<usize> = (0..headers.len()).filter(|&i| i != target_idx).collect();
-        let feature_names: Vec<String> =
-            feature_cols.iter().map(|&i| headers[i].clone()).collect();
+        let feature_names: Vec<String> = feature_cols.iter().map(|&i| headers[i].clone()).collect();
 
         let n_samples = rows.len();
         let mut features = Array2::zeros((n_samples, feature_cols.len()));
@@ -220,8 +219,10 @@ impl CsvLoader {
         Self::check_target_not_missing(&rows, target_idx)?;
 
         // Try parsing target as usize first, fall back to label encoding
-        let target_strings: Vec<String> =
-            rows.iter().map(|r| r[target_idx].trim().to_string()).collect();
+        let target_strings: Vec<String> = rows
+            .iter()
+            .map(|r| r[target_idx].trim().to_string())
+            .collect();
 
         let target: Vec<usize> = match target_strings[0].parse::<usize>() {
             Ok(_) => target_strings

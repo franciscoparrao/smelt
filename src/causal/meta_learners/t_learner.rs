@@ -61,24 +61,32 @@ impl TLearner {
     ) -> Result<MetaLearnerResult> {
         validate_causal_inputs(features, treatment, outcome)?;
 
-        let control_idx: Vec<usize> = (0..treatment.len()).filter(|&i| treatment[i] == 0).collect();
-        let treated_idx: Vec<usize> = (0..treatment.len()).filter(|&i| treatment[i] == 1).collect();
+        let control_idx: Vec<usize> = (0..treatment.len())
+            .filter(|&i| treatment[i] == 0)
+            .collect();
+        let treated_idx: Vec<usize> = (0..treatment.len())
+            .filter(|&i| treatment[i] == 1)
+            .collect();
 
         let control_features = features.select(Axis(0), &control_idx);
         let control_target: Vec<f64> = control_idx.iter().map(|&i| outcome[i]).collect();
-        let control_task = RegressionTask::new("t_learner_control", control_features, control_target)?;
+        let control_task =
+            RegressionTask::new("t_learner_control", control_features, control_target)?;
 
         let treated_features = features.select(Axis(0), &treated_idx);
         let treated_target: Vec<f64> = treated_idx.iter().map(|&i| outcome[i]).collect();
-        let treated_task = RegressionTask::new("t_learner_treated", treated_features, treated_target)?;
+        let treated_task =
+            RegressionTask::new("t_learner_treated", treated_features, treated_target)?;
 
         let mu0 = (self.control_factory)().train_regress(&control_task)?;
         let mu1 = (self.treated_factory)().train_regress(&treated_task)?;
 
         let pred0 = mu0.predict(features)?;
         let pred1 = mu1.predict(features)?;
-        let (Prediction::Regression { predicted: p0, .. }, Prediction::Regression { predicted: p1, .. }) =
-            (&pred0, &pred1)
+        let (
+            Prediction::Regression { predicted: p0, .. },
+            Prediction::Regression { predicted: p1, .. },
+        ) = (&pred0, &pred1)
         else {
             return Err(SmeltError::InvalidParameter(
                 "TLearner's base learners must produce regression predictions".into(),
@@ -108,9 +116,15 @@ mod tests {
     #[test]
     fn recovers_linear_heterogeneous_effect() {
         let (features, treatment, outcome, true_cate) = synthetic_linear_cate(300, 1, 0.1);
-        let result = t_learner_rf().estimate(&features, &treatment, &outcome).unwrap();
+        let result = t_learner_rf()
+            .estimate(&features, &treatment, &outcome)
+            .unwrap();
         let pred = Prediction::causal_effect_with_truth(result.cate, true_cate);
-        assert!(Pehe.score(&pred).unwrap() < 1.5, "PEHE too high: {}", Pehe.score(&pred).unwrap());
+        assert!(
+            Pehe.score(&pred).unwrap() < 1.5,
+            "PEHE too high: {}",
+            Pehe.score(&pred).unwrap()
+        );
         assert!(AteBias.score(&pred).unwrap() < 0.5);
     }
 
@@ -121,7 +135,9 @@ mod tests {
         // confounded fixture without crashing or producing garbage-scale output.
         let (features, treatment, outcome, true_cate) =
             synthetic_confounded_nonlinear_cate(300, 2, 0.1);
-        let result = t_learner_rf().estimate(&features, &treatment, &outcome).unwrap();
+        let result = t_learner_rf()
+            .estimate(&features, &treatment, &outcome)
+            .unwrap();
         let pred = Prediction::causal_effect_with_truth(result.cate, true_cate);
         assert!(Pehe.score(&pred).unwrap().is_finite());
     }

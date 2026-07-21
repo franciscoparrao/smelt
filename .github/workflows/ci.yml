@@ -21,6 +21,21 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  fmt:
+    name: cargo fmt (workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch (2026-07-17)
+        with:
+          toolchain: stable
+          components: rustfmt
+      # Enforcing since 2026-07-20: the whole workspace was brought to
+      # rustfmt-clean in one pass (the repo had drifted from the default
+      # style for months because CI only ran clippy, never `fmt --check`).
+      # No cache needed -- this compiles nothing.
+      - run: cargo fmt --all --check
+
   test:
     name: cargo test (default features)
     runs-on: ubuntu-latest

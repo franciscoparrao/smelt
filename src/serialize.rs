@@ -356,7 +356,8 @@ mod tests {
         TrainedELM {
             input_weights: Array2::zeros((1, 1)),
             biases: ndarray::Array1::zeros(1),
-            output_weights: ndarray::Array1::from_vec(vec![2.0 * value]).insert_axis(ndarray::Axis(1)),
+            output_weights: ndarray::Array1::from_vec(vec![2.0 * value])
+                .insert_axis(ndarray::Axis(1)),
             activation: crate::learner::elm::Activation::Sigmoid,
             is_classifier: false,
             n_features: 1,
@@ -432,7 +433,10 @@ mod tests {
         // Tamper with the format_version field.
         let json = fs::read_to_string(&path).unwrap();
         let bumped = json.replacen("\"format_version\": 1", "\"format_version\": 999", 1);
-        assert_ne!(json, bumped, "the replacement should have matched something");
+        assert_ne!(
+            json, bumped,
+            "the replacement should have matched something"
+        );
         fs::write(&path, bumped).unwrap();
 
         match load_json(&path) {

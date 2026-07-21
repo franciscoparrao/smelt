@@ -150,11 +150,15 @@ impl TrainedModel for TrainedCostSensitiveClassifier {
                         (0..n_classes)
                             .map(|j| {
                                 let expected_cost: f64 = (0..n_classes)
-                                    .map(|i| p.get(i).copied().unwrap_or(0.0) * self.cost_matrix[i][j])
+                                    .map(|i| {
+                                        p.get(i).copied().unwrap_or(0.0) * self.cost_matrix[i][j]
+                                    })
                                     .sum();
                                 (j, expected_cost)
                             })
-                            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                            .min_by(|a, b| {
+                                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                            })
                             .map(|(j, _)| j)
                             .unwrap_or(0)
                     })
@@ -205,7 +209,11 @@ mod tests {
         // 3x3 matrix for a 2-class task.
         let mut cs = CostSensitiveClassifier::new(
             || Box::new(LogisticRegression::new()),
-            vec![vec![0.0, 1.0, 2.0], vec![1.0, 0.0, 2.0], vec![1.0, 2.0, 0.0]],
+            vec![
+                vec![0.0, 1.0, 2.0],
+                vec![1.0, 0.0, 2.0],
+                vec![1.0, 2.0, 0.0],
+            ],
         );
         assert!(cs.train_classif(&task).is_err());
     }
@@ -236,26 +244,26 @@ mod tests {
 
         let mut plain = LogisticRegression::new();
         let plain_model = plain.train_classif(&task).unwrap();
-        let mut cost_sensitive = CostSensitiveClassifier::binary(
-            || Box::new(LogisticRegression::new()),
-            1.0,
-            20.0,
-        );
+        let mut cost_sensitive =
+            CostSensitiveClassifier::binary(|| Box::new(LogisticRegression::new()), 1.0, 20.0);
         let cost_model = cost_sensitive.train_classif(&task).unwrap();
 
         // Query points right around the decision boundary, where the base
         // model's probability for class 1 is real but modest -- exactly
         // where cost-sensitivity should flip the decision toward class 1.
-        let boundary_features =
-            Array2::from_shape_vec((3, 1), vec![4.6, 4.7, 4.8]).unwrap();
+        let boundary_features = Array2::from_shape_vec((3, 1), vec![4.6, 4.7, 4.8]).unwrap();
 
-        let Prediction::Classification { predicted: plain_pred, .. } =
-            plain_model.predict(&boundary_features).unwrap()
+        let Prediction::Classification {
+            predicted: plain_pred,
+            ..
+        } = plain_model.predict(&boundary_features).unwrap()
         else {
             panic!("expected classification");
         };
-        let Prediction::Classification { predicted: cost_pred, .. } =
-            cost_model.predict(&boundary_features).unwrap()
+        let Prediction::Classification {
+            predicted: cost_pred,
+            ..
+        } = cost_model.predict(&boundary_features).unwrap()
         else {
             panic!("expected classification");
         };

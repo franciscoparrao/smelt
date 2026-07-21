@@ -1,7 +1,10 @@
 //! Linear learners: LogisticRegression, LinearRegression, Ridge, Lasso,
 //! ElasticNet, LinearSVM.
 
-use crate::common::{define_learner, add_explain_methods, add_persistence_methods, declare_support, declare_params, declare_weight_support};
+use crate::common::{
+    add_explain_methods, add_persistence_methods, declare_params, declare_support,
+    declare_weight_support, define_learner,
+};
 use crate::common::{fit_learner, not_fitted, predict_proba_values, predict_values, to_array2};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
@@ -20,7 +23,10 @@ pub(crate) struct LogisticRegression {
 impl LogisticRegression {
     #[new]
     fn new() -> Self {
-        Self { trained: None, is_classif: false }
+        Self {
+            trained: None,
+            is_classif: false,
+        }
     }
 
     /// `sample_weight` (sklearn convention): optional per-sample weights,
@@ -59,7 +65,6 @@ impl LogisticRegression {
     }
 }
 
-
 // ── LinearRegression ───────────────────────────────────────────────────
 
 #[pyclass]
@@ -73,7 +78,10 @@ pub(crate) struct LinearRegression {
 impl LinearRegression {
     #[new]
     fn new() -> Self {
-        Self { trained: None, is_classif: false }
+        Self {
+            trained: None,
+            is_classif: false,
+        }
     }
 
     /// `sample_weight` (sklearn convention): optional per-sample weights,
@@ -95,11 +103,14 @@ impl LinearRegression {
         Ok(())
     }
 
-    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 }
-
 
 // ── Ridge ──────────────────────────────────────────────────────────────
 
@@ -116,7 +127,11 @@ impl Ridge {
     #[new]
     #[pyo3(signature = (alpha=1.0))]
     fn new(alpha: f64) -> Self {
-        Self { trained: None, is_classif: false, alpha }
+        Self {
+            trained: None,
+            is_classif: false,
+            alpha,
+        }
     }
 
     /// `sample_weight` (sklearn convention): optional per-sample weights,
@@ -138,11 +153,14 @@ impl Ridge {
         Ok(())
     }
 
-    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 }
-
 
 define_learner! {
     name = Lasso,
@@ -175,14 +193,21 @@ define_learner! {
     serial_as = "LinearSVM",
 }
 
-add_explain_methods!(LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet, LinearSVM);
+add_explain_methods!(
+    LogisticRegression,
+    LinearRegression,
+    Ridge,
+    Lasso,
+    ElasticNet,
+    LinearSVM
+);
 
-declare_support!(LogisticRegression, classif = true,  regress = false);
-declare_support!(LinearRegression,   classif = false, regress = true);
-declare_support!(Ridge,              classif = false, regress = true);
-declare_support!(Lasso,              classif = false, regress = true);
-declare_support!(ElasticNet,         classif = false, regress = true);
-declare_support!(LinearSVM,          classif = true,  regress = false);
+declare_support!(LogisticRegression, classif = true, regress = false);
+declare_support!(LinearRegression, classif = false, regress = true);
+declare_support!(Ridge, classif = false, regress = true);
+declare_support!(Lasso, classif = false, regress = true);
+declare_support!(ElasticNet, classif = false, regress = true);
+declare_support!(LinearSVM, classif = true, regress = false);
 
 declare_weight_support!(
     LogisticRegression => smelt_ml::prelude::LogisticRegression::new(),
@@ -191,7 +216,7 @@ declare_weight_support!(
 );
 
 declare_params!(LogisticRegression, {});
-declare_params!(LinearRegression,   {});
+declare_params!(LinearRegression, {});
 declare_params!(Ridge,              { alpha => "alpha" });
 
 add_persistence_methods!(

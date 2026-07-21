@@ -32,7 +32,12 @@ impl KMeans {
                 "k must be at least 1",
             ));
         }
-        Ok(Self { k, max_iter, n_init, seed })
+        Ok(Self {
+            k,
+            max_iter,
+            n_init,
+            seed,
+        })
     }
 
     /// Fit and return `(labels, centroids)`. `labels[i]` is the cluster
@@ -52,9 +57,7 @@ impl KMeans {
                     .fit(&features)
             })
             .map_err(smelt_err)?;
-        let centroids = result
-            .centroids
-            .expect("KMeans::fit always sets centroids");
+        let centroids = result.centroids.expect("KMeans::fit always sets centroids");
         Ok((result.labels, PyArray2::from_owned_array(py, centroids)))
     }
 
@@ -77,7 +80,12 @@ impl KMeans {
                 features.nrows()
             )));
         }
-        let n_clusters = labels.iter().filter(|&&l| l >= 0).map(|&l| l as usize).max().map_or(0, |m| m + 1);
+        let n_clusters = labels
+            .iter()
+            .filter(|&&l| l >= 0)
+            .map(|&l| l as usize)
+            .max()
+            .map_or(0, |m| m + 1);
         let result = smelt_ml::prelude::ClusterResult {
             labels,
             n_clusters,
@@ -129,7 +137,12 @@ impl IsolationForest {
     #[new]
     #[pyo3(signature = (n_estimators=100, max_samples=None, contamination=0.1, seed=42))]
     fn new(n_estimators: usize, max_samples: Option<usize>, contamination: f64, seed: u64) -> Self {
-        Self { n_estimators, max_samples, contamination, seed }
+        Self {
+            n_estimators,
+            max_samples,
+            contamination,
+            seed,
+        }
     }
 
     /// Fit and return `(scores, labels)`. `scores` are anomaly scores in

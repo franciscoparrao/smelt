@@ -131,7 +131,10 @@ impl DrLearner {
         let tau_model = (self.effect_factory)().train_regress(&final_task)?;
 
         let pred = tau_model.predict(features)?;
-        let Prediction::Regression { predicted: cate, .. } = pred else {
+        let Prediction::Regression {
+            predicted: cate, ..
+        } = pred
+        else {
             return Err(SmeltError::InvalidParameter(
                 "DrLearner's effect learner must produce regression predictions".into(),
             ));
@@ -161,9 +164,15 @@ mod tests {
     #[test]
     fn recovers_linear_heterogeneous_effect() {
         let (features, treatment, outcome, true_cate) = synthetic_linear_cate(400, 9, 0.1);
-        let result = dr_learner_rf().estimate(&features, &treatment, &outcome).unwrap();
+        let result = dr_learner_rf()
+            .estimate(&features, &treatment, &outcome)
+            .unwrap();
         let pred = Prediction::causal_effect_with_truth(result.cate, true_cate);
-        assert!(Pehe.score(&pred).unwrap() < 2.0, "PEHE too high: {}", Pehe.score(&pred).unwrap());
+        assert!(
+            Pehe.score(&pred).unwrap() < 2.0,
+            "PEHE too high: {}",
+            Pehe.score(&pred).unwrap()
+        );
         assert!(AteBias.score(&pred).unwrap() < 0.7);
     }
 
@@ -171,7 +180,9 @@ mod tests {
     fn handles_confounded_nonlinear_effect() {
         let (features, treatment, outcome, true_cate) =
             synthetic_confounded_nonlinear_cate(400, 10, 0.1);
-        let result = dr_learner_rf().estimate(&features, &treatment, &outcome).unwrap();
+        let result = dr_learner_rf()
+            .estimate(&features, &treatment, &outcome)
+            .unwrap();
         let pred = Prediction::causal_effect_with_truth(result.cate, true_cate);
         assert!(Pehe.score(&pred).unwrap().is_finite());
     }
@@ -179,14 +190,22 @@ mod tests {
     #[test]
     fn rejects_non_binary_treatment() {
         let features = Array2::from_shape_vec((6, 1), vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
-        let err = dr_learner_rf().estimate(&features, &[0, 1, 2, 0, 1, 0], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let err = dr_learner_rf().estimate(
+            &features,
+            &[0, 1, 2, 0, 1, 0],
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        );
         assert!(err.is_err());
     }
 
     #[test]
     fn rejects_single_arm() {
         let features = Array2::from_shape_vec((6, 1), vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
-        let err = dr_learner_rf().estimate(&features, &[1, 1, 1, 1, 1, 1], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let err = dr_learner_rf().estimate(
+            &features,
+            &[1, 1, 1, 1, 1, 1],
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        );
         assert!(err.is_err());
     }
 }

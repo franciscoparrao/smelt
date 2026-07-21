@@ -57,14 +57,22 @@ fn regress_data(n: usize) -> (Array2<f64>, Vec<f64>) {
 fn classif_data(n: usize) -> (Array2<f64>, Vec<usize>) {
     let features = Array2::from_shape_fn((n, 2), |(i, j)| {
         let t = i as f64;
-        if j == 0 { (t * 0.41).sin() + t * 0.05 } else { (t * 0.67).cos() * 1.3 }
+        if j == 0 {
+            (t * 0.41).sin() + t * 0.05
+        } else {
+            (t * 0.67).cos() * 1.3
+        }
     });
     let target: Vec<usize> = (0..n)
         .map(|i| {
             let x = features.row(i);
             // linear boundary with deterministic label flips (~each 7th)
             let raw = x[0] + 0.8 * x[1] > 0.6;
-            if i % 7 == 3 { usize::from(!raw) } else { usize::from(raw) }
+            if i % 7 == 3 {
+                usize::from(!raw)
+            } else {
+                usize::from(raw)
+            }
         })
         .collect();
     (features, target)
@@ -76,7 +84,11 @@ fn dup_counts(n: usize) -> Vec<usize> {
 }
 
 /// Expands rows in place: row i appears counts[i] consecutive times.
-fn expand<T: Clone>(features: &Array2<f64>, target: &[T], counts: &[usize]) -> (Array2<f64>, Vec<T>) {
+fn expand<T: Clone>(
+    features: &Array2<f64>,
+    target: &[T],
+    counts: &[usize],
+) -> (Array2<f64>, Vec<T>) {
     let total: usize = counts.iter().sum();
     let p = features.ncols();
     let mut out = Array2::zeros((total, p));
@@ -141,20 +153,32 @@ type LearnerEntry = (&'static str, Box<dyn Fn() -> Box<dyn Learner>>, f64);
 /// tolerance.
 fn regress_learners() -> Vec<LearnerEntry> {
     vec![
-        ("linear_regression", Box::new(|| Box::new(LinearRegression::new()) as Box<dyn Learner>), 1e-9),
-        ("ridge", Box::new(|| Box::new(Ridge::new(0.5)) as Box<dyn Learner>), 1e-9),
+        (
+            "linear_regression",
+            Box::new(|| Box::new(LinearRegression::new()) as Box<dyn Learner>),
+            1e-9,
+        ),
+        (
+            "ridge",
+            Box::new(|| Box::new(Ridge::new(0.5)) as Box<dyn Learner>),
+            1e-9,
+        ),
         (
             "lasso",
             Box::new(|| {
-                Box::new(Lasso::new(0.05).with_tol(1e-12).with_max_iter(200_000)) as Box<dyn Learner>
+                Box::new(Lasso::new(0.05).with_tol(1e-12).with_max_iter(200_000))
+                    as Box<dyn Learner>
             }),
             1e-8,
         ),
         (
             "elastic_net",
             Box::new(|| {
-                Box::new(ElasticNet::new(0.05, 0.5).with_tol(1e-12).with_max_iter(200_000))
-                    as Box<dyn Learner>
+                Box::new(
+                    ElasticNet::new(0.05, 0.5)
+                        .with_tol(1e-12)
+                        .with_max_iter(200_000),
+                ) as Box<dyn Learner>
             }),
             1e-8,
         ),
@@ -211,7 +235,11 @@ fn classification_weight_k_equals_k_duplicated_rows() {
 
     // LogisticRegression: tol tiny enough that early stopping never fires,
     // so both runs execute exactly max_iter identical GD steps.
-    let mk_logreg = || LogisticRegression::new().with_tol(1e-14).with_max_iter(2000);
+    let mk_logreg = || {
+        LogisticRegression::new()
+            .with_tol(1e-14)
+            .with_max_iter(2000)
+    };
     let m_w = mk_logreg().train_classif(&weighted_task).unwrap();
     let m_d = mk_logreg().train_classif(&dup_task).unwrap();
     assert_probs_close(
@@ -222,7 +250,11 @@ fn classification_weight_k_equals_k_duplicated_rows() {
     );
 
     // ELM classification (same seed ⇒ same random projection).
-    let mk_elm = || ExtremeLearningMachine::new().with_n_hidden(16).with_seed(11);
+    let mk_elm = || {
+        ExtremeLearningMachine::new()
+            .with_n_hidden(16)
+            .with_seed(11)
+    };
     let m_w = mk_elm().train_classif(&weighted_task).unwrap();
     let m_d = mk_elm().train_classif(&dup_task).unwrap();
     assert_probs_close(
@@ -266,12 +298,22 @@ fn classification_all_ones_weights_are_bit_identical_to_unweighted() {
 
     let mk_logreg = || LogisticRegression::new();
     assert_eq!(
-        classif_probs(mk_logreg().train_classif(&plain).unwrap().as_ref(), &features),
-        classif_probs(mk_logreg().train_classif(&ones).unwrap().as_ref(), &features),
+        classif_probs(
+            mk_logreg().train_classif(&plain).unwrap().as_ref(),
+            &features
+        ),
+        classif_probs(
+            mk_logreg().train_classif(&ones).unwrap().as_ref(),
+            &features
+        ),
         "logistic_regression: all-ones weights must be bit-identical to unweighted"
     );
 
-    let mk_elm = || ExtremeLearningMachine::new().with_n_hidden(16).with_seed(11);
+    let mk_elm = || {
+        ExtremeLearningMachine::new()
+            .with_n_hidden(16)
+            .with_seed(11)
+    };
     assert_eq!(
         classif_probs(mk_elm().train_classif(&plain).unwrap().as_ref(), &features),
         classif_probs(mk_elm().train_classif(&ones).unwrap().as_ref(), &features),
@@ -348,18 +390,38 @@ fn classification_zero_weight_rows_are_excluded_from_the_fit() {
         .with_weights(weights);
     let subset_task = ClassificationTask::new("s", features.clone(), target).unwrap();
 
-    let mk_logreg = || LogisticRegression::new().with_tol(1e-14).with_max_iter(2000);
+    let mk_logreg = || {
+        LogisticRegression::new()
+            .with_tol(1e-14)
+            .with_max_iter(2000)
+    };
     assert_probs_close(
-        &classif_probs(mk_logreg().train_classif(&weighted_task).unwrap().as_ref(), &features),
-        &classif_probs(mk_logreg().train_classif(&subset_task).unwrap().as_ref(), &features),
+        &classif_probs(
+            mk_logreg().train_classif(&weighted_task).unwrap().as_ref(),
+            &features,
+        ),
+        &classif_probs(
+            mk_logreg().train_classif(&subset_task).unwrap().as_ref(),
+            &features,
+        ),
         1e-9,
         "logistic_regression: zero-weight rows vs rows removed",
     );
 
-    let mk_elm = || ExtremeLearningMachine::new().with_n_hidden(16).with_seed(11);
+    let mk_elm = || {
+        ExtremeLearningMachine::new()
+            .with_n_hidden(16)
+            .with_seed(11)
+    };
     assert_probs_close(
-        &classif_probs(mk_elm().train_classif(&weighted_task).unwrap().as_ref(), &features),
-        &classif_probs(mk_elm().train_classif(&subset_task).unwrap().as_ref(), &features),
+        &classif_probs(
+            mk_elm().train_classif(&weighted_task).unwrap().as_ref(),
+            &features,
+        ),
+        &classif_probs(
+            mk_elm().train_classif(&subset_task).unwrap().as_ref(),
+            &features,
+        ),
         1e-7,
         "elm: zero-weight rows vs rows removed",
     );
@@ -460,9 +522,13 @@ fn linear_svm_still_rejects_weighted_tasks() {
     let task = ClassificationTask::new("svmw", features, target)
         .unwrap()
         .with_weights(vec![1.0; 12]);
-    let err = LinearSVM::new().train_classif(&task).map(|_| ()).unwrap_err();
+    let err = LinearSVM::new()
+        .train_classif(&task)
+        .map(|_| ())
+        .unwrap_err();
     assert!(
-        format!("{err}").contains("LinearSVM") && format!("{err}").contains("does not support sample weights"),
+        format!("{err}").contains("LinearSVM")
+            && format!("{err}").contains("does not support sample weights"),
         "guard must name the learner: {err}"
     );
 }
@@ -484,7 +550,10 @@ fn skewed_weights_change_the_fit() {
 
     for (name, factory, _) in regress_learners() {
         let p_plain = reg_preds(factory().train_regress(&plain).unwrap().as_ref(), &features);
-        let p_skew = reg_preds(factory().train_regress(&skewed).unwrap().as_ref(), &features);
+        let p_skew = reg_preds(
+            factory().train_regress(&skewed).unwrap().as_ref(),
+            &features,
+        );
         let max_diff = p_plain
             .iter()
             .zip(&p_skew)

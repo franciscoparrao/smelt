@@ -12,11 +12,11 @@
 //! delta) swaps the background tree in to replace the (presumably now-stale)
 //! foreground tree once triggered.
 
+use crate::Result;
 use crate::learner::hoeffding::HoeffdingTree;
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, Task};
-use crate::Result;
 use ndarray::Array2;
 use rand::Rng;
 use rand::SeedableRng;
@@ -512,7 +512,10 @@ impl Learner for AdaptiveRandomForest {
         }
 
         Ok(Box::new(TrainedAdaptiveRandomForest {
-            trees: std::mem::take(&mut self.trees).into_iter().map(|m| m.tree).collect(),
+            trees: std::mem::take(&mut self.trees)
+                .into_iter()
+                .map(|m| m.tree)
+                .collect(),
             n_features: task.n_features(),
             n_classes: self.n_classes,
         }))
@@ -536,7 +539,10 @@ impl TrainedModel for TrainedAdaptiveRandomForest {
         for row in features.rows() {
             let row_vec: Vec<f64> = row.to_vec();
             let (pred, probs) = majority_vote(self.trees.iter(), &row_vec, self.n_classes)
-                .unwrap_or((0, vec![1.0 / self.n_classes.max(1) as f64; self.n_classes.max(1)]));
+                .unwrap_or((
+                    0,
+                    vec![1.0 / self.n_classes.max(1) as f64; self.n_classes.max(1)],
+                ));
             predicted.push(pred);
             probabilities.push(probs);
         }
@@ -607,7 +613,11 @@ mod tests {
             let mut sorted = member.feature_subset.clone();
             sorted.sort();
             sorted.dedup();
-            assert_eq!(sorted.len(), expected_size, "feature subset must not contain duplicates");
+            assert_eq!(
+                sorted.len(),
+                expected_size,
+                "feature subset must not contain duplicates"
+            );
         }
 
         let distinct_subsets: std::collections::HashSet<Vec<usize>> = arf
@@ -683,7 +693,9 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(3);
         let lambda = 6.0;
         let n = 20_000;
-        let total: u64 = (0..n).map(|_| sample_poisson(&mut rng, lambda) as u64).sum();
+        let total: u64 = (0..n)
+            .map(|_| sample_poisson(&mut rng, lambda) as u64)
+            .sum();
         let mean = total as f64 / n as f64;
         assert!(
             (mean - lambda).abs() < 0.15,
@@ -728,7 +740,10 @@ mod tests {
             plain.partial_fit(&[x0, x1], y, 2);
         }
 
-        assert!(arf.n_drifts() >= 1, "expected at least one drift-triggered replacement");
+        assert!(
+            arf.n_drifts() >= 1,
+            "expected at least one drift-triggered replacement"
+        );
 
         // Evaluate both on a larger, disjoint regime-2 holdout set.
         let mut arf_correct = 0usize;
@@ -740,19 +755,24 @@ mod tests {
             let y = if x1 > 0.5 { 1 } else { 0 };
 
             if let Some((pred, _)) = arf.predict_one(&[x0, x1])
-                && pred == y {
-                    arf_correct += 1;
-                }
+                && pred == y
+            {
+                arf_correct += 1;
+            }
             if let Some((pred, _)) = plain.predict_one(&[x0, x1])
-                && pred == y {
-                    plain_correct += 1;
-                }
+                && pred == y
+            {
+                plain_correct += 1;
+            }
         }
 
         let arf_acc = arf_correct as f64 / n_eval as f64;
         let plain_acc = plain_correct as f64 / n_eval as f64;
 
-        assert!(arf_acc > 0.85, "ARF regime-2 accuracy should be high after adapting, got {arf_acc}");
+        assert!(
+            arf_acc > 0.85,
+            "ARF regime-2 accuracy should be high after adapting, got {arf_acc}"
+        );
         assert!(
             plain_acc < 0.7,
             "plain HoeffdingTree should still be hindered by its stale root split, got {plain_acc}"
@@ -781,13 +801,15 @@ mod tests {
             let x1 = rng.random::<f64>();
             let y = if x0 > 0.5 { 1 } else { 0 };
             if let Some((pred, _)) = arf.predict_one(&[x0, x1])
-                && pred == y {
-                    arf_correct += 1;
-                }
+                && pred == y
+            {
+                arf_correct += 1;
+            }
             if let Some((pred, _)) = plain.predict_one(&[x0, x1])
-                && pred == y {
-                    plain_correct += 1;
-                }
+                && pred == y
+            {
+                plain_correct += 1;
+            }
         }
 
         let arf_acc = arf_correct as f64 / n_eval as f64;
@@ -823,6 +845,9 @@ mod tests {
             .filter(|(p, t)| *p == *t)
             .count();
         let acc = correct as f64 / predicted.len() as f64;
-        assert!(acc > 0.85, "batch-trained ARF should fit this simple threshold rule well, got {acc}");
+        assert!(
+            acc > 0.85,
+            "batch-trained ARF should fit this simple threshold rule well, got {acc}"
+        );
     }
 }

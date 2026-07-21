@@ -102,12 +102,9 @@ fn main() {
         let tr_task = RegressionTask::new("loso_train", tr_feat, tr_tgt).unwrap();
 
         // (a) Regression Kriging = XGBoost trend + kriged residuals (the paper's method)
-        let mut rk = KrigingHybrid::new(
-            || Box::new(xgb()) as Box<dyn Learner>,
-            tr_coords,
-        )
-        .with_variogram_model(VariogramModel::Spherical)
-        .with_n_neighbors(20);
+        let mut rk = KrigingHybrid::new(|| Box::new(xgb()) as Box<dyn Learner>, tr_coords)
+            .with_variogram_model(VariogramModel::Spherical)
+            .with_n_neighbors(20);
         let rk_model = rk.train_regress_geo(&tr_task).unwrap();
         let rk_pred = rk_model.predict_spatial(&te_feat, &te_coords).unwrap();
         let rk_truth = rk_pred.with_truth_regress(te_tgt.clone());

@@ -2,10 +2,10 @@
 //!
 //! Binary classification with sigmoid. Multiclass via one-vs-rest.
 
+use crate::Result;
 use crate::learner::math::sigmoid;
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
 use crate::task::{ClassificationTask, Task};
 use ndarray::{Array1, Array2};
 
@@ -273,8 +273,7 @@ impl Learner for LogisticRegression {
                 for j in 0..n_features {
                     let col = x.column(j);
                     let mean = col.sum() / n_samples;
-                    let var =
-                        col.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n_samples;
+                    let var = col.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n_samples;
                     means[j] = mean;
                     stds[j] = if var > 0.0 { var.sqrt() } else { 1.0 };
                 }
@@ -283,8 +282,7 @@ impl Learner for LogisticRegression {
                 let total: f64 = w.iter().sum();
                 for j in 0..n_features {
                     let col = x.column(j);
-                    let mean =
-                        col.iter().zip(w).map(|(&v, &wi)| wi * v).sum::<f64>() / total;
+                    let mean = col.iter().zip(w).map(|(&v, &wi)| wi * v).sum::<f64>() / total;
                     let var = col
                         .iter()
                         .zip(w)

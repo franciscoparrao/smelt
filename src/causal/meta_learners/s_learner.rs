@@ -60,13 +60,15 @@ impl SLearner {
         validate_causal_inputs(features, treatment, outcome)?;
 
         let n = features.nrows();
-        let treatment_col = Array2::from_shape_vec(
-            (n, 1),
-            treatment.iter().map(|&t| t as f64).collect(),
-        )
-        .expect("treatment column shape matches n_samples");
-        let augmented = concatenate(Axis(1), &[features.view(), treatment_col.view()])
-            .map_err(|e| SmeltError::Other(format!("failed to augment features with treatment column: {e}")))?;
+        let treatment_col =
+            Array2::from_shape_vec((n, 1), treatment.iter().map(|&t| t as f64).collect())
+                .expect("treatment column shape matches n_samples");
+        let augmented =
+            concatenate(Axis(1), &[features.view(), treatment_col.view()]).map_err(|e| {
+                SmeltError::Other(format!(
+                    "failed to augment features with treatment column: {e}"
+                ))
+            })?;
 
         let task = RegressionTask::new("s_learner", augmented, outcome.to_vec())?;
         let model = (self.factory)().train_regress(&task)?;
@@ -80,8 +82,10 @@ impl SLearner {
 
         let pred1 = model.predict(&treated_input)?;
         let pred0 = model.predict(&control_input)?;
-        let (Prediction::Regression { predicted: p1, .. }, Prediction::Regression { predicted: p0, .. }) =
-            (&pred1, &pred0)
+        let (
+            Prediction::Regression { predicted: p1, .. },
+            Prediction::Regression { predicted: p0, .. },
+        ) = (&pred1, &pred0)
         else {
             return Err(SmeltError::InvalidParameter(
                 "SLearner's base learner must produce regression predictions".into(),
@@ -112,10 +116,15 @@ mod tests {
         // approximating the interaction the way T/X/R/DR-learner's tests
         // all rely on RandomForest to do.
         let (features, treatment, outcome, true_cate) = synthetic_linear_cate(300, 3, 0.1);
-        let s_learner = SLearner::new(|| Box::new(RandomForest::new().with_n_estimators(50).with_seed(1)));
+        let s_learner =
+            SLearner::new(|| Box::new(RandomForest::new().with_n_estimators(50).with_seed(1)));
         let result = s_learner.estimate(&features, &treatment, &outcome).unwrap();
         let pred = Prediction::causal_effect_with_truth(result.cate, true_cate);
-        assert!(Pehe.score(&pred).unwrap() < 2.5, "PEHE too high: {}", Pehe.score(&pred).unwrap());
+        assert!(
+            Pehe.score(&pred).unwrap() < 2.5,
+            "PEHE too high: {}",
+            Pehe.score(&pred).unwrap()
+        );
         assert!(AteBias.score(&pred).unwrap() < 0.7);
     }
 
@@ -124,7 +133,8 @@ mod tests {
         // A *constant* (non-heterogeneous) effect has no X*T interaction to
         // miss, so a plain linear base recovers it fine -- this is the case
         // the module doc's example demonstrates too.
-        let features = Array2::from_shape_vec((8, 1), vec![0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0]).unwrap();
+        let features =
+            Array2::from_shape_vec((8, 1), vec![0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0]).unwrap();
         let treatment = vec![0, 0, 0, 0, 1, 1, 1, 1];
         let outcome = vec![1.0, 2.0, 3.0, 4.0, 6.0, 7.0, 8.0, 9.0]; // true effect = 5.0
         let s_learner = SLearner::new(|| Box::new(LinearRegression::new()));

@@ -1,8 +1,8 @@
 //! Linear Support Vector Machine via Stochastic Gradient Descent.
 
+use crate::Result;
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
 use crate::task::{ClassificationTask, Task};
 use ndarray::{Array1, Array2};
 use rand::SeedableRng;
@@ -236,9 +236,7 @@ impl TrainedModel for TrainedLinearSVM {
     }
 
     fn to_serializable(&self) -> Option<crate::serialize::SerializableModel> {
-        Some(crate::serialize::SerializableModel::LinearSVM(
-            self.clone(),
-        ))
+        Some(crate::serialize::SerializableModel::LinearSVM(self.clone()))
     }
 }
 

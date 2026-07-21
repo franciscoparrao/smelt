@@ -5,14 +5,29 @@ use numpy::PyReadonlyArray2;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
-pub(crate) fn make_rfe_factory(learner_type: &str) -> PyResult<Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>> {
+pub(crate) fn make_rfe_factory(
+    learner_type: &str,
+) -> PyResult<Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>> {
     match learner_type {
-        "decision_tree" => Ok(Box::new(|| Box::new(smelt_ml::prelude::DecisionTree::default()) as Box<dyn smelt_ml::learner::Learner>)),
-        "random_forest" => Ok(Box::new(|| Box::new(smelt_ml::prelude::RandomForest::new()) as Box<dyn smelt_ml::learner::Learner>)),
-        "extra_trees" => Ok(Box::new(|| Box::new(smelt_ml::prelude::ExtraTrees::new()) as Box<dyn smelt_ml::learner::Learner>)),
-        "xgboost" => Ok(Box::new(|| Box::new(smelt_ml::prelude::XGBoost::new()) as Box<dyn smelt_ml::learner::Learner>)),
-        "ridge" => Ok(Box::new(|| Box::new(smelt_ml::prelude::Ridge::new(1.0)) as Box<dyn smelt_ml::learner::Learner>)),
-        _ => Err(PyRuntimeError::new_err(format!("Unknown learner for RFE: {learner_type}"))),
+        "decision_tree" => Ok(Box::new(|| {
+            Box::new(smelt_ml::prelude::DecisionTree::default())
+                as Box<dyn smelt_ml::learner::Learner>
+        })),
+        "random_forest" => Ok(Box::new(|| {
+            Box::new(smelt_ml::prelude::RandomForest::new()) as Box<dyn smelt_ml::learner::Learner>
+        })),
+        "extra_trees" => Ok(Box::new(|| {
+            Box::new(smelt_ml::prelude::ExtraTrees::new()) as Box<dyn smelt_ml::learner::Learner>
+        })),
+        "xgboost" => Ok(Box::new(|| {
+            Box::new(smelt_ml::prelude::XGBoost::new()) as Box<dyn smelt_ml::learner::Learner>
+        })),
+        "ridge" => Ok(Box::new(|| {
+            Box::new(smelt_ml::prelude::Ridge::new(1.0)) as Box<dyn smelt_ml::learner::Learner>
+        })),
+        _ => Err(PyRuntimeError::new_err(format!(
+            "Unknown learner for RFE: {learner_type}"
+        ))),
     }
 }
 
@@ -52,11 +67,11 @@ pub(crate) fn rfe<'py>(
         .selected_indices()
         .ok_or_else(|| PyRuntimeError::new_err("RFE selector was not fitted"))?;
 
-    let names: Vec<String> = feature_names.unwrap_or_else(|| (0..n_feat).map(|i| format!("f{i}")).collect());
+    let names: Vec<String> =
+        feature_names.unwrap_or_else(|| (0..n_feat).map(|i| format!("f{i}")).collect());
     let result: Vec<(String, usize)> = indices.iter().map(|&i| (names[i].clone(), i)).collect();
     Ok(result.into_pyobject(py)?.into_any().unbind())
 }
-
 
 // ── Feature Selection Filters ──────────────────────────────────────────
 
@@ -165,4 +180,3 @@ filter_fn!(filter_jmi, "jmi");
 filter_fn!(filter_jmim, "jmim");
 filter_fn!(filter_cmim, "cmim");
 filter_fn!(filter_relief, "relief");
-

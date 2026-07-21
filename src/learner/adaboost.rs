@@ -1,8 +1,8 @@
 //! AdaBoost (Adaptive Boosting) classifier via SAMME algorithm.
 
+use crate::Result;
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
 use crate::task::{ClassificationTask, Task};
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
@@ -365,7 +365,17 @@ mod tests {
         // 3 classes in blocks -- a single split can separate at most 2 of
         // the 3 blocks perfectly, so `err > 0` and the log-ratio term is
         // exercised (not the degenerate err=0 early-stop path above).
-        let features = array![[0.0], [1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+        let features = array![
+            [0.0],
+            [1.0],
+            [2.0],
+            [3.0],
+            [4.0],
+            [5.0],
+            [6.0],
+            [7.0],
+            [8.0]
+        ];
         let target = vec![0usize, 0, 0, 1, 1, 1, 2, 2, 2];
         let task = ClassificationTask::new("ada_lr_zero", features, target).unwrap();
 
@@ -402,7 +412,11 @@ mod tests {
                 feats.push(((i * 7 + j * 13) % 10) as f64);
             }
             // Class loosely tied to feature 1, with deliberate impurity.
-            target.push(if i % 11 == 0 { 2 } else { ((i * 7 + 13) % 10) / 5 });
+            target.push(if i % 11 == 0 {
+                2
+            } else {
+                ((i * 7 + 13) % 10) / 5
+            });
             weights.push(1.0 + 0.01 * ((i as f64 * 3.7).sin()));
         }
         let features = Array2::from_shape_vec((n, p), feats).unwrap();
@@ -447,7 +461,11 @@ mod tests {
                 let (lc, rc) = (argmax(&left_counts), argmax(&right_counts));
                 let mut e = 0.0;
                 for idx in 0..n {
-                    let pred = if features[[idx, feat]] <= threshold { lc } else { rc };
+                    let pred = if features[[idx, feat]] <= threshold {
+                        lc
+                    } else {
+                        rc
+                    };
                     if pred != target[idx] {
                         e += weights[idx];
                     }

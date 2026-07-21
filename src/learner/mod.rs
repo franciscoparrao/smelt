@@ -30,8 +30,8 @@ pub mod oblique;
 pub mod properties;
 pub mod quantile;
 pub mod quantile_forest;
-pub mod regularized;
 pub mod registry;
+pub mod regularized;
 pub mod stacking;
 pub mod svm;
 pub mod target_transform;
@@ -68,11 +68,13 @@ pub use oblique::{ObliqueForest, ObliqueTree};
 pub use properties::LearnerProperties;
 pub use quantile::QuantileGB;
 pub use quantile_forest::{QuantileForest, TrainedQuantileForest};
-pub use regularized::{ElasticNet, Lasso, Ridge};
 pub use registry::{learner_from_id, learner_properties, registered_learner_ids};
+pub use regularized::{ElasticNet, Lasso, Ridge};
 pub use stacking::Stacking;
 pub use svm::LinearSVM;
-pub use target_transform::{TargetTransform, TargetTransformRegressor, TrainedTargetTransformRegressor};
+pub use target_transform::{
+    TargetTransform, TargetTransformRegressor, TrainedTargetTransformRegressor,
+};
 pub use threshold::{ThresholdedClassifier, TrainedThresholdedClassifier};
 pub use tree::decision_tree::DecisionTree;
 pub use tree::extra_trees::ExtraTrees;

@@ -5,11 +5,11 @@
 //! hardcoding a `match` at every call site.
 
 use super::{
-    AdaBoost, AdaptiveRandomForest, CatBoost, DecisionTree, DeepForest, ElasticNet, ExtraTrees,
-    ExtremeLearningMachine, GaussianNB, GradientBoosting, HoeffdingTree, KNearestNeighbors, Lasso,
-    Learner, LearnerProperties, LightGBM, LinearRegression, LinearSVM, LogisticRegression,
-    MondrianForest, MondrianTree, ObliqueForest, ObliqueTree, QuantileForest, QuantileGB,
-    RandomForest, Ridge, XGBoost, EBM,
+    AdaBoost, AdaptiveRandomForest, CatBoost, DecisionTree, DeepForest, EBM, ElasticNet,
+    ExtraTrees, ExtremeLearningMachine, GaussianNB, GradientBoosting, HoeffdingTree,
+    KNearestNeighbors, Lasso, Learner, LearnerProperties, LightGBM, LinearRegression, LinearSVM,
+    LogisticRegression, MondrianForest, MondrianTree, ObliqueForest, ObliqueTree, QuantileForest,
+    QuantileGB, RandomForest, Ridge, XGBoost,
 };
 use crate::{Result, SmeltError};
 
@@ -133,7 +133,11 @@ mod tests {
     fn every_registered_id_constructs_and_matches_its_own_id() {
         for &id in registered_learner_ids() {
             let learner = learner_from_id(id).unwrap_or_else(|e| panic!("{id}: {e}"));
-            assert_eq!(learner.id(), id, "learner_from_id(\"{id}\") returned a learner whose id() disagrees");
+            assert_eq!(
+                learner.id(),
+                id,
+                "learner_from_id(\"{id}\") returned a learner whose id() disagrees"
+            );
         }
     }
 

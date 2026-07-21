@@ -47,14 +47,14 @@
 //! online behavior -- new points outside current coverage introduce
 //! consistent new splits -- is implemented in full.
 
+use crate::Result;
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
-use crate::Result;
 use ndarray::Array2;
-use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 
 /// Samples from `Exponential(rate)` via inverse-CDF (`-ln(U) / rate`). No
@@ -86,8 +86,7 @@ fn weighted_choice(rng: &mut impl Rng, weights: &[f64]) -> usize {
 /// Per-node running statistics: class counts for classification, or
 /// Welford's online mean/variance for regression. `Vec`-backed and O(1)
 /// update/space per point, like `HoeffdingTree`'s `FeatureStats`.
-#[derive(Clone, Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 enum NodeStats {
     Classification { counts: Vec<usize> },
     Regression { n: usize, mean: f64, m2: f64 },
@@ -202,7 +201,11 @@ mod tau_serde {
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
-        if v.is_finite() { s.serialize_f64(*v) } else { s.serialize_none() }
+        if v.is_finite() {
+            s.serialize_f64(*v)
+        } else {
+            s.serialize_none()
+        }
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
@@ -296,8 +299,12 @@ fn sample_mondrian_block(
         });
     }
 
-    let left = sample_mondrian_block(&left_idx, features, labels, targets, n_classes, tau, lifetime, rng);
-    let right = sample_mondrian_block(&right_idx, features, labels, targets, n_classes, tau, lifetime, rng);
+    let left = sample_mondrian_block(
+        &left_idx, features, labels, targets, n_classes, tau, lifetime, rng,
+    );
+    let right = sample_mondrian_block(
+        &right_idx, features, labels, targets, n_classes, tau, lifetime, rng,
+    );
 
     Box::new(MondrianNode {
         min_d,
@@ -360,12 +367,10 @@ fn extend_node(
         let mut new_stats = match sample {
             Sample::Classif { .. } => NodeStats::new_classif(n_classes),
             Sample::Regress { .. } => NodeStats::new_regress(),
-            
         };
         match sample {
             Sample::Classif { label } => new_stats.update_classif(*label),
             Sample::Regress { y } => new_stats.update_regress(*y),
-            
         }
         let new_leaf = MondrianNode::new_leaf_singleton(x, new_stats, lifetime);
 
@@ -401,16 +406,26 @@ fn extend_node(
         MondrianNodeKind::Leaf { stats } => match sample {
             Sample::Classif { label } => stats.update_classif(*label),
             Sample::Regress { y } => stats.update_regress(*y),
-            
         },
-        MondrianNodeKind::Split { feature, value, left, right } => {
+        MondrianNodeKind::Split {
+            feature,
+            value,
+            left,
+            right,
+        } => {
             let go_left = x[*feature] <= *value;
             let tau_here = node.tau;
             if go_left {
-                let child = std::mem::replace(left, MondrianNode::new_leaf_singleton(x, NodeStats::new_regress(), lifetime));
+                let child = std::mem::replace(
+                    left,
+                    MondrianNode::new_leaf_singleton(x, NodeStats::new_regress(), lifetime),
+                );
                 *left = extend_node(child, tau_here, x, sample, n_classes, lifetime, rng);
             } else {
-                let child = std::mem::replace(right, MondrianNode::new_leaf_singleton(x, NodeStats::new_regress(), lifetime));
+                let child = std::mem::replace(
+                    right,
+                    MondrianNode::new_leaf_singleton(x, NodeStats::new_regress(), lifetime),
+                );
                 *right = extend_node(child, tau_here, x, sample, n_classes, lifetime, rng);
             }
         }
@@ -421,7 +436,12 @@ fn extend_node(
 fn find_leaf_stats<'a>(node: &'a MondrianNode, x: &[f64]) -> &'a NodeStats {
     match &node.kind {
         MondrianNodeKind::Leaf { stats } => stats,
-        MondrianNodeKind::Split { feature, value, left, right } => {
+        MondrianNodeKind::Split {
+            feature,
+            value,
+            left,
+            right,
+        } => {
             if x[*feature] <= *value {
                 find_leaf_stats(left, x)
             } else {
@@ -511,7 +531,15 @@ impl MondrianTree {
                 stats.update_classif(label);
                 MondrianNode::new_leaf_singleton(x, stats, self.lifetime)
             }
-            Some(root) => extend_node(root, 0.0, x, &sample, self.n_classes, self.lifetime, &mut self.rng),
+            Some(root) => extend_node(
+                root,
+                0.0,
+                x,
+                &sample,
+                self.n_classes,
+                self.lifetime,
+                &mut self.rng,
+            ),
         });
     }
 
@@ -526,7 +554,15 @@ impl MondrianTree {
                 stats.update_regress(y);
                 MondrianNode::new_leaf_singleton(x, stats, self.lifetime)
             }
-            Some(root) => extend_node(root, 0.0, x, &sample, self.n_classes, self.lifetime, &mut self.rng),
+            Some(root) => extend_node(
+                root,
+                0.0,
+                x,
+                &sample,
+                self.n_classes,
+                self.lifetime,
+                &mut self.rng,
+            ),
         });
     }
 
@@ -548,7 +584,12 @@ impl MondrianTree {
     /// ([`sample_mondrian_block`]) instead of replaying points one at a
     /// time -- identical in distribution, and what [`Learner::train_classif`]
     /// uses under the hood.
-    pub fn fit_batch_classif(&mut self, features: &Array2<f64>, labels: &[usize], n_classes: usize) {
+    pub fn fit_batch_classif(
+        &mut self,
+        features: &Array2<f64>,
+        labels: &[usize],
+        n_classes: usize,
+    ) {
         self.is_classifier = true;
         self.n_features = features.ncols();
         self.n_classes = n_classes;
@@ -726,7 +767,11 @@ impl MondrianForest {
         if self.trees.is_empty() {
             return None;
         }
-        let preds: Vec<f64> = self.trees.iter().filter_map(|t| t.predict_one_regress(x)).collect();
+        let preds: Vec<f64> = self
+            .trees
+            .iter()
+            .filter_map(|t| t.predict_one_regress(x))
+            .collect();
         if preds.is_empty() {
             None
         } else {
@@ -995,15 +1040,13 @@ mod tests {
         let features = Array2::from_shape_fn((6, 1), |(i, _)| i as f64);
         let classif =
             ClassificationTask::new("mt_life_c", features.clone(), vec![0, 0, 0, 1, 1, 1]).unwrap();
-        let regress = RegressionTask::new(
-            "mt_life_r",
-            features,
-            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
-        )
-        .unwrap();
+        let regress =
+            RegressionTask::new("mt_life_r", features, vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
 
         for bad in [-1.0, f64::NAN, f64::NEG_INFINITY] {
-            let Err(err) = MondrianTree::new().with_lifetime(bad).train_classif(&classif)
+            let Err(err) = MondrianTree::new()
+                .with_lifetime(bad)
+                .train_classif(&classif)
             else {
                 panic!("bad lifetime must be rejected (tree, classif)");
             };
@@ -1013,22 +1056,34 @@ mod tests {
                 "got: {err}"
             );
             assert!(
-                MondrianTree::new().with_lifetime(bad).train_regress(&regress).is_err(),
+                MondrianTree::new()
+                    .with_lifetime(bad)
+                    .train_regress(&regress)
+                    .is_err(),
                 "bad lifetime must be rejected (tree, regress)"
             );
             assert!(
-                MondrianForest::new().with_lifetime(bad).train_classif(&classif).is_err(),
+                MondrianForest::new()
+                    .with_lifetime(bad)
+                    .train_classif(&classif)
+                    .is_err(),
                 "bad lifetime must be rejected (forest, classif)"
             );
             assert!(
-                MondrianForest::new().with_lifetime(bad).train_regress(&regress).is_err(),
+                MondrianForest::new()
+                    .with_lifetime(bad)
+                    .train_regress(&regress)
+                    .is_err(),
                 "bad lifetime must be rejected (forest, regress)"
             );
         }
 
         // The infinite default (and an explicit finite budget) remain valid.
         MondrianTree::new().train_classif(&classif).unwrap();
-        MondrianForest::new().with_lifetime(5.0).train_regress(&regress).unwrap();
+        MondrianForest::new()
+            .with_lifetime(5.0)
+            .train_regress(&regress)
+            .unwrap();
     }
 
     #[test]
@@ -1059,7 +1114,10 @@ mod tests {
             counts[weighted_choice(&mut rng, &[1.0, 0.0, 9.0])] += 1;
         }
         assert_eq!(counts[1], 0, "zero-weight option should never be picked");
-        assert!(counts[2] > counts[0] * 5, "index 2 (weight 9) should dominate index 0 (weight 1)");
+        assert!(
+            counts[2] > counts[0] * 5,
+            "index 2 (weight 9) should dominate index 0 (weight 1)"
+        );
     }
 
     #[test]
@@ -1088,9 +1146,16 @@ mod tests {
         let Prediction::Classification { predicted, .. } = pred else {
             panic!("expected classification");
         };
-        let correct = predicted.iter().zip(&target).filter(|(p, t)| *p == *t).count();
+        let correct = predicted
+            .iter()
+            .zip(&target)
+            .filter(|(p, t)| *p == *t)
+            .count();
         let acc = correct as f64 / n as f64;
-        assert!(acc > 0.85, "should fit a simple threshold rule well, got acc={acc}");
+        assert!(
+            acc > 0.85,
+            "should fit a simple threshold rule well, got acc={acc}"
+        );
     }
 
     #[test]
@@ -1120,7 +1185,10 @@ mod tests {
             .sum::<f64>()
             / n as f64)
             .sqrt();
-        assert!(rmse < 2.0, "should fit a clear linear trend reasonably well, got RMSE={rmse}");
+        assert!(
+            rmse < 2.0,
+            "should fit a clear linear trend reasonably well, got RMSE={rmse}"
+        );
     }
 
     /// Regression test for the actual differentiator: a point arriving
@@ -1150,9 +1218,18 @@ mod tests {
         let (pred_low, _) = tree.predict_one_classif(&[-6.0]).unwrap();
         let (pred_high, _) = tree.predict_one_classif(&[15.0]).unwrap();
         let (pred_mid, _) = tree.predict_one_classif(&[0.5]).unwrap();
-        assert_eq!(pred_low, 1, "far-below-original-range point should be captured by the extended tree");
-        assert_eq!(pred_high, 1, "far-above-original-range point should be captured by the extended tree");
-        assert_eq!(pred_mid, 0, "original-range point should still be classified as before");
+        assert_eq!(
+            pred_low, 1,
+            "far-below-original-range point should be captured by the extended tree"
+        );
+        assert_eq!(
+            pred_high, 1,
+            "far-above-original-range point should be captured by the extended tree"
+        );
+        assert_eq!(
+            pred_mid, 0,
+            "original-range point should still be classified as before"
+        );
     }
 
     #[test]
@@ -1176,7 +1253,8 @@ mod tests {
             target.push(noisy_label);
         }
         let features = Array2::from_shape_vec((n, 2), feats).unwrap();
-        let task = ClassificationTask::new("mondrian_noisy", features.clone(), target.clone()).unwrap();
+        let task =
+            ClassificationTask::new("mondrian_noisy", features.clone(), target.clone()).unwrap();
 
         let mut single = MondrianTree::new().with_seed(1);
         let single_model = single.train_classif(&task).unwrap();
@@ -1184,10 +1262,16 @@ mod tests {
         let forest_model = forest.train_classif(&task).unwrap();
 
         let acc = |model: &dyn TrainedModel| {
-            let Prediction::Classification { predicted, .. } = model.predict(&features).unwrap() else {
+            let Prediction::Classification { predicted, .. } = model.predict(&features).unwrap()
+            else {
                 panic!("expected classification");
             };
-            predicted.iter().zip(&target).filter(|(p, t)| *p == *t).count() as f64 / n as f64
+            predicted
+                .iter()
+                .zip(&target)
+                .filter(|(p, t)| *p == *t)
+                .count() as f64
+                / n as f64
         };
         let single_acc = acc(&*single_model);
         let forest_acc = acc(&*forest_model);
@@ -1205,7 +1289,10 @@ mod tests {
         let mut forest = MondrianForest::new().with_n_trees(3).with_seed(1);
         let model = forest.train_classif(&task).unwrap();
         let pred = model.predict(&features);
-        assert!(pred.is_ok(), "zero-variance (duplicate) points must not panic");
+        assert!(
+            pred.is_ok(),
+            "zero-variance (duplicate) points must not panic"
+        );
     }
 
     #[test]

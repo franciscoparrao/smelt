@@ -182,7 +182,13 @@ impl Measure for Precision {
                 // phantom gap classes, deflating the score (see n_observed).
                 let sum: f64 = counts
                     .iter()
-                    .map(|&(tp, fp, _)| if tp + fp > 0 { tp as f64 / (tp + fp) as f64 } else { 0.0 })
+                    .map(|&(tp, fp, _)| {
+                        if tp + fp > 0 {
+                            tp as f64 / (tp + fp) as f64
+                        } else {
+                            0.0
+                        }
+                    })
                     .sum();
                 let denom = n_observed(&counts);
                 Ok(if denom > 0 { sum / denom as f64 } else { 0.0 })
@@ -218,7 +224,13 @@ impl Measure for Recall {
                 // just defined-recall ones and not phantom gap classes.
                 let sum: f64 = counts
                     .iter()
-                    .map(|&(tp, _, fn_)| if tp + fn_ > 0 { tp as f64 / (tp + fn_) as f64 } else { 0.0 })
+                    .map(|&(tp, _, fn_)| {
+                        if tp + fn_ > 0 {
+                            tp as f64 / (tp + fn_) as f64
+                        } else {
+                            0.0
+                        }
+                    })
                     .sum();
                 let denom = n_observed(&counts);
                 Ok(if denom > 0 { sum / denom as f64 } else { 0.0 })
@@ -259,9 +271,21 @@ impl Measure for F1Score {
                 let sum: f64 = counts
                     .iter()
                     .map(|&(tp, fp, fn_)| {
-                        let prec = if tp + fp > 0 { tp as f64 / (tp + fp) as f64 } else { 0.0 };
-                        let rec = if tp + fn_ > 0 { tp as f64 / (tp + fn_) as f64 } else { 0.0 };
-                        if prec + rec > 0.0 { 2.0 * prec * rec / (prec + rec) } else { 0.0 }
+                        let prec = if tp + fp > 0 {
+                            tp as f64 / (tp + fp) as f64
+                        } else {
+                            0.0
+                        };
+                        let rec = if tp + fn_ > 0 {
+                            tp as f64 / (tp + fn_) as f64
+                        } else {
+                            0.0
+                        };
+                        if prec + rec > 0.0 {
+                            2.0 * prec * rec / (prec + rec)
+                        } else {
+                            0.0
+                        }
                     })
                     .sum();
                 let denom = n_observed(&counts);
@@ -308,7 +332,9 @@ impl Measure for LogLoss {
             Prediction::Classification {
                 probabilities: None,
                 ..
-            } => Err(SmeltError::IncompatiblePrediction("LogLoss requires probabilities".into())),
+            } => Err(SmeltError::IncompatiblePrediction(
+                "LogLoss requires probabilities".into(),
+            )),
             _ => Err(SmeltError::IncompatiblePrediction(
                 "LogLoss requires classification prediction with truth and probabilities".into(),
             )),
@@ -361,7 +387,9 @@ impl Measure for AucRoc {
             Prediction::Classification {
                 probabilities: None,
                 ..
-            } => Err(SmeltError::IncompatiblePrediction("AUC-ROC requires probabilities".into())),
+            } => Err(SmeltError::IncompatiblePrediction(
+                "AUC-ROC requires probabilities".into(),
+            )),
             _ => Err(SmeltError::IncompatiblePrediction(
                 "AUC-ROC requires classification prediction with truth and probabilities".into(),
             )),
@@ -598,7 +626,9 @@ impl Measure for Brier {
             Prediction::Classification {
                 probabilities: None,
                 ..
-            } => Err(SmeltError::IncompatiblePrediction("Brier requires probabilities".into())),
+            } => Err(SmeltError::IncompatiblePrediction(
+                "Brier requires probabilities".into(),
+            )),
             _ => Err(SmeltError::IncompatiblePrediction(
                 "Brier requires classification prediction with truth and probabilities".into(),
             )),
@@ -818,7 +848,10 @@ mod tests {
         let prec = Precision.score(&pred).unwrap();
         let rec = Recall.score(&pred).unwrap();
         let f1 = F1Score.score(&pred).unwrap();
-        assert!((prec - 0.25).abs() < 1e-9, "precision: expected 0.25 (sklearn zero_division=0), got {prec}");
+        assert!(
+            (prec - 0.25).abs() < 1e-9,
+            "precision: expected 0.25 (sklearn zero_division=0), got {prec}"
+        );
         assert!((rec - 0.5).abs() < 1e-9, "recall: expected 0.5, got {rec}");
         assert!(
             (f1 - 0.3333333333333333).abs() < 1e-9,
@@ -836,10 +869,16 @@ mod tests {
         let mae = Mae.score(&pred).unwrap();
         let r2 = RSquared.score(&pred).unwrap();
         let mape = Mape.score(&pred).unwrap();
-        assert!((rmse - 0.42426406871192857).abs() < 1e-9, "rmse: got {rmse}");
+        assert!(
+            (rmse - 0.42426406871192857).abs() < 1e-9,
+            "rmse: got {rmse}"
+        );
         assert!((mae - 0.4000000000000001).abs() < 1e-9, "mae: got {mae}");
         assert!((r2 - 0.9358415841584158).abs() < 1e-9, "r2: got {r2}");
-        assert!((mape - 0.09666971916971918).abs() < 1e-9, "mape: got {mape}");
+        assert!(
+            (mape - 0.09666971916971918).abs() < 1e-9,
+            "mape: got {mape}"
+        );
     }
 
     /// AUC-ROC and LogLoss golden values match `sklearn.metrics.roc_auc_score`
@@ -866,7 +905,10 @@ mod tests {
         let auc = AucRoc.score(&pred).unwrap();
         let logloss = LogLoss.score(&pred).unwrap();
         let brier = Brier.score(&pred).unwrap();
-        assert!((auc - 0.76).abs() < 1e-9, "auc: expected 0.76 (sklearn roc_auc_score), got {auc}");
+        assert!(
+            (auc - 0.76).abs() < 1e-9,
+            "auc: expected 0.76 (sklearn roc_auc_score), got {auc}"
+        );
         assert!(
             (logloss - 0.5818524458999963).abs() < 1e-9,
             "logloss: expected 0.5818524458999963 (sklearn log_loss), got {logloss}"

@@ -48,7 +48,11 @@ impl CsvLoader {
     fn load_classif<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Bound<'py, PyArray1<i64>>, Vec<String>)> {
+    ) -> PyResult<(
+        Bound<'py, PyArray2<f64>>,
+        Bound<'py, PyArray1<i64>>,
+        Vec<String>,
+    )> {
         // File I/O + parsing can take seconds on large files: release the GIL.
         let task = py
             .allow_threads(|| self.build().load_classif())
@@ -66,7 +70,11 @@ impl CsvLoader {
     fn load_regress<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Bound<'py, PyArray1<f64>>, Vec<String>)> {
+    ) -> PyResult<(
+        Bound<'py, PyArray2<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Vec<String>,
+    )> {
         // File I/O + parsing can take seconds on large files: release the GIL.
         let task = py
             .allow_threads(|| self.build().load_regress())
@@ -121,7 +129,11 @@ impl ParquetLoader {
     fn load_classif<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Bound<'py, PyArray1<i64>>, Vec<String>)> {
+    ) -> PyResult<(
+        Bound<'py, PyArray2<f64>>,
+        Bound<'py, PyArray1<i64>>,
+        Vec<String>,
+    )> {
         // File I/O + parsing can take seconds on large files: release the GIL.
         let task = py
             .allow_threads(|| self.build().load_classif())
@@ -139,7 +151,11 @@ impl ParquetLoader {
     fn load_regress<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyArray2<f64>>, Bound<'py, PyArray1<f64>>, Vec<String>)> {
+    ) -> PyResult<(
+        Bound<'py, PyArray2<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Vec<String>,
+    )> {
         // File I/O + parsing can take seconds on large files: release the GIL.
         let task = py
             .allow_threads(|| self.build().load_regress())

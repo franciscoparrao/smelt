@@ -35,7 +35,8 @@ pub(crate) fn oof_regression(
         let pred = model.predict(&test_features)?;
         let Prediction::Regression { predicted, .. } = pred else {
             return Err(SmeltError::InvalidParameter(
-                "oof_regression requires a base learner that produces regression predictions".into(),
+                "oof_regression requires a base learner that produces regression predictions"
+                    .into(),
             ));
         };
         for (j, &idx) in test_idx.iter().enumerate() {
@@ -113,8 +114,16 @@ pub(crate) fn oof_regression_by_arm(
     let mut mu0 = vec![0.0; n];
     let mut mu1 = vec![0.0; n];
     for (train_idx, test_idx) in &splits {
-        let control_train: Vec<usize> = train_idx.iter().copied().filter(|&i| treatment[i] == 0).collect();
-        let treated_train: Vec<usize> = train_idx.iter().copied().filter(|&i| treatment[i] == 1).collect();
+        let control_train: Vec<usize> = train_idx
+            .iter()
+            .copied()
+            .filter(|&i| treatment[i] == 0)
+            .collect();
+        let treated_train: Vec<usize> = train_idx
+            .iter()
+            .copied()
+            .filter(|&i| treatment[i] == 1)
+            .collect();
         if control_train.is_empty() || treated_train.is_empty() {
             return Err(SmeltError::InvalidParameter(
                 "a cross-fitting fold has no units in one treatment arm; use fewer folds or more data".into(),
@@ -140,7 +149,8 @@ pub(crate) fn oof_regression_by_arm(
         ) = (&pred0, &pred1)
         else {
             return Err(SmeltError::InvalidParameter(
-                "oof_regression_by_arm requires base learners that produce regression predictions".into(),
+                "oof_regression_by_arm requires base learners that produce regression predictions"
+                    .into(),
             ));
         };
         for (j, &idx) in test_idx.iter().enumerate() {

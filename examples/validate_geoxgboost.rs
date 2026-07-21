@@ -68,13 +68,21 @@ fn main() {
     let target = task.target().to_vec();
     let n_features = features.ncols();
 
-    println!("Loaded: {} samples, {} features (excl. coords)", target.len(), n_features);
+    println!(
+        "Loaded: {} samples, {} features (excl. coords)",
+        target.len(),
+        n_features
+    );
 
     // ── Load train/test indices from Python ────────────────────────────
     let train_idx = read_indices("paper/replication/geoxgb_train_idx.csv");
     let test_idx = read_indices("paper/replication/geoxgb_test_idx.csv");
 
-    println!("Train: {}, Test: {} (indices from Python)\n", train_idx.len(), test_idx.len());
+    println!(
+        "Train: {}, Test: {} (indices from Python)\n",
+        train_idx.len(),
+        test_idx.len()
+    );
 
     let tr_feat = features.select(Axis(0), &train_idx).to_owned();
     let tr_tgt: Vec<f64> = train_idx.iter().map(|&i| target[i]).collect();
@@ -157,7 +165,10 @@ fn main() {
     let gxgb_rmse = rmse(&gxgb_vals, &te_tgt);
     let gxgb_r2 = r2(&gxgb_vals, &te_tgt);
 
-    println!("In-sample  RMSE: {:.4}, R²: {:.4}", gxgb_train_rmse, gxgb_train_r2);
+    println!(
+        "In-sample  RMSE: {:.4}, R²: {:.4}",
+        gxgb_train_rmse, gxgb_train_r2
+    );
     println!("Out-sample RMSE: {:.4}, R²: {:.4}", gxgb_rmse, gxgb_r2);
     println!("Time: {:.2}s\n", gxgb_train_time.as_secs_f64());
 
@@ -196,18 +207,30 @@ fn main() {
     println!("═══════════════════════════════════════════════════════════");
     println!("{:<30} {:>8} {:>8}", "Method", "RMSE", "R²");
     println!("{}", "-".repeat(50));
-    println!("{:<30} {:>8.4} {:>8.4}", "XGBoost (smelt-ml)", xgb_rmse, xgb_r2);
-    println!("{:<30} {:>8.4} {:>8.4}", "GeoXGBoost (smelt-ml)", gxgb_rmse, gxgb_r2);
+    println!(
+        "{:<30} {:>8.4} {:>8.4}",
+        "XGBoost (smelt-ml)", xgb_rmse, xgb_r2
+    );
+    println!(
+        "{:<30} {:>8.4} {:>8.4}",
+        "GeoXGBoost (smelt-ml)", gxgb_rmse, gxgb_r2
+    );
 
     if !py_xgb.is_empty() {
         let py_xgb_rmse = rmse(&py_xgb, &te_tgt);
         let py_xgb_r2 = r2(&py_xgb, &te_tgt);
-        println!("{:<30} {:>8.4} {:>8.4}", "XGBoost (official C++)", py_xgb_rmse, py_xgb_r2);
+        println!(
+            "{:<30} {:>8.4} {:>8.4}",
+            "XGBoost (official C++)", py_xgb_rmse, py_xgb_r2
+        );
     }
     if !py_geoxgb.is_empty() {
         let py_geoxgb_rmse = rmse(&py_geoxgb, &te_tgt);
         let py_geoxgb_r2 = r2(&py_geoxgb, &te_tgt);
-        println!("{:<30} {:>8.4} {:>8.4}", "geoxgboost (Grekousis)", py_geoxgb_rmse, py_geoxgb_r2);
+        println!(
+            "{:<30} {:>8.4} {:>8.4}",
+            "geoxgboost (Grekousis)", py_geoxgb_rmse, py_geoxgb_r2
+        );
     }
 
     // Per-point correlation between implementations

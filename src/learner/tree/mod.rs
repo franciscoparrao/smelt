@@ -298,7 +298,13 @@ impl TreeBuilder {
                     best_gain = gain;
                     let threshold_mid =
                         (features[[sorted[pos - 1], feat]] + features[[sorted[pos], feat]]) / 2.0;
-                    best = Some((feat, threshold_mid, left_idx.to_vec(), right_idx.to_vec(), gain));
+                    best = Some((
+                        feat,
+                        threshold_mid,
+                        left_idx.to_vec(),
+                        right_idx.to_vec(),
+                        gain,
+                    ));
                 }
                 continue;
             }
@@ -405,7 +411,13 @@ impl TreeBuilder {
                     best_gain = gain;
                     let threshold_mid =
                         (features[[sorted[pos - 1], feat]] + features[[sorted[pos], feat]]) / 2.0;
-                    best = Some((feat, threshold_mid, left_idx.to_vec(), right_idx.to_vec(), gain));
+                    best = Some((
+                        feat,
+                        threshold_mid,
+                        left_idx.to_vec(),
+                        right_idx.to_vec(),
+                        gain,
+                    ));
                 }
                 continue;
             }
@@ -516,7 +528,13 @@ impl TreeBuilder {
         let candidates = self.candidate_features(rng);
         if let Some((feat, threshold, left_idx, right_idx, gain)) = self
             .best_split_classif_weighted(
-                features, target, weights, indices, n_classes, &candidates, rng,
+                features,
+                target,
+                weights,
+                indices,
+                n_classes,
+                &candidates,
+                rng,
             )
         {
             if left_idx.len() < self.min_samples_leaf || right_idx.len() < self.min_samples_leaf {
@@ -531,10 +549,22 @@ impl TreeBuilder {
             let node_weight: f64 = indices.iter().map(|&i| weights[i]).sum();
             self.feature_importances[feat] += gain * node_weight;
             let left = self.build_classifier_weighted(
-                features, target, weights, &left_idx, n_classes, depth + 1, rng,
+                features,
+                target,
+                weights,
+                &left_idx,
+                n_classes,
+                depth + 1,
+                rng,
             );
             let right = self.build_classifier_weighted(
-                features, target, weights, &right_idx, n_classes, depth + 1, rng,
+                features,
+                target,
+                weights,
+                &right_idx,
+                n_classes,
+                depth + 1,
+                rng,
             );
 
             Node::Split {
@@ -578,8 +608,14 @@ impl TreeBuilder {
             self.feature_importances[feat] += gain * node_weight;
             let left =
                 self.build_regressor_weighted(features, target, weights, &left_idx, depth + 1, rng);
-            let right = self
-                .build_regressor_weighted(features, target, weights, &right_idx, depth + 1, rng);
+            let right = self.build_regressor_weighted(
+                features,
+                target,
+                weights,
+                &right_idx,
+                depth + 1,
+                rng,
+            );
 
             Node::Split {
                 feature: feat,
@@ -646,7 +682,13 @@ impl TreeBuilder {
                     best_gain = gain;
                     let threshold_mid =
                         (features[[sorted[pos - 1], feat]] + features[[sorted[pos], feat]]) / 2.0;
-                    best = Some((feat, threshold_mid, left_idx.to_vec(), right_idx.to_vec(), gain));
+                    best = Some((
+                        feat,
+                        threshold_mid,
+                        left_idx.to_vec(),
+                        right_idx.to_vec(),
+                        gain,
+                    ));
                 }
                 continue;
             }
@@ -747,7 +789,13 @@ impl TreeBuilder {
                     best_gain = gain;
                     let threshold_mid =
                         (features[[sorted[pos - 1], feat]] + features[[sorted[pos], feat]]) / 2.0;
-                    best = Some((feat, threshold_mid, left_idx.to_vec(), right_idx.to_vec(), gain));
+                    best = Some((
+                        feat,
+                        threshold_mid,
+                        left_idx.to_vec(),
+                        right_idx.to_vec(),
+                        gain,
+                    ));
                 }
                 continue;
             }
@@ -860,10 +908,7 @@ pub(crate) fn gini_from_counts(counts: &[usize], n: f64) -> f64 {
     if n <= 0.0 {
         return 0.0;
     }
-    1.0 - counts
-        .iter()
-        .map(|&c| (c as f64 / n).powi(2))
-        .sum::<f64>()
+    1.0 - counts.iter().map(|&c| (c as f64 / n).powi(2)).sum::<f64>()
 }
 
 /// MSE (variance) from a running sum and sum-of-squares over `n` samples --
@@ -1010,7 +1055,10 @@ mod tests {
     fn fraction_zero_or_negative_falls_back_to_sqrt_heuristic() {
         let sqrt_resolved = MaxFeatures::Sqrt.resolve(48, false);
         assert_eq!(MaxFeatures::Fraction(0.0).resolve(48, false), sqrt_resolved);
-        assert_eq!(MaxFeatures::Fraction(-1.0).resolve(48, false), sqrt_resolved);
+        assert_eq!(
+            MaxFeatures::Fraction(-1.0).resolve(48, false),
+            sqrt_resolved
+        );
         assert_eq!(sqrt_resolved, Some(7)); // ceil(sqrt(48)) = 7
     }
 
@@ -1095,7 +1143,10 @@ mod tests {
         );
         assert_eq!(left.len(), 3);
         assert_eq!(right.len(), 3);
-        assert!(gain > 0.49, "a perfect split should recover ~all of the parent's gini: {gain}");
+        assert!(
+            gain > 0.49,
+            "a perfect split should recover ~all of the parent's gini: {gain}"
+        );
     }
 
     /// Same golden check for the regression (MSE) path: an obvious step
@@ -1122,7 +1173,10 @@ mod tests {
         assert_eq!(right.len(), 3);
         // Parent MSE is variance of {0,0,0,10,10,10} = 25; a perfect split
         // (both children constant) should recover essentially all of it.
-        assert!(gain > 24.9, "a perfect split should recover ~all of the parent's mse: {gain}");
+        assert!(
+            gain > 24.9,
+            "a perfect split should recover ~all of the parent's mse: {gain}"
+        );
     }
 
     /// Regression test for the catastrophic-cancellation follow-up to the
@@ -1138,8 +1192,7 @@ mod tests {
         use rand::rngs::StdRng;
 
         let n = 400;
-        let features =
-            Array2::from_shape_fn((n, 1), |(i, _)| i as f64 / n as f64 * 10.0);
+        let features = Array2::from_shape_fn((n, 1), |(i, _)| i as f64 / n as f64 * 10.0);
         let base: Vec<f64> = (0..n)
             .map(|i| {
                 let x = features[[i, 0]];

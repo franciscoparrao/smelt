@@ -160,7 +160,12 @@ fn power_iteration_deflation(matrix: &Array2<f64>, k: usize) -> Array2<f64> {
     let mut mat = matrix.clone();
     let mut eigenvectors = Array2::zeros((k, p));
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-    let orig_norm = matrix.iter().map(|&x| x * x).sum::<f64>().sqrt().max(1e-300);
+    let orig_norm = matrix
+        .iter()
+        .map(|&x| x * x)
+        .sum::<f64>()
+        .sqrt()
+        .max(1e-300);
 
     for component in 0..k {
         // If deflation has already removed (numerically) all of the

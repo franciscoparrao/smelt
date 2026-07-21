@@ -1,8 +1,8 @@
 //! Gaussian Naive Bayes classifier.
 
+use crate::Result;
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
-use crate::Result;
 use crate::task::{ClassificationTask, Task};
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};

@@ -379,7 +379,12 @@ fn refit_leaf_newton(
             // not the common path.
         }
         Node::Leaf(LeafValue::Class(..)) => {} // not produced by build_regressor
-        Node::Split { feature, threshold, left, right } => {
+        Node::Split {
+            feature,
+            threshold,
+            left,
+            right,
+        } => {
             let (mut left_idx, mut right_idx) = (Vec::new(), Vec::new());
             for &i in indices {
                 if features[[i, *feature]] <= *threshold {
@@ -585,8 +590,10 @@ impl GradientBoosting {
                 // elsewhere for multiclass boosting (e.g. CatBoost's
                 // `train_multiclass`). Weighted: Σw·g / Σw·h via pre-scaled
                 // per-sample gradient/hessian, as in `train_binary`.
-                let hess: Vec<f64> =
-                    probs.iter().map(|p| (p[c] * (1.0 - p[c])).max(1e-15)).collect();
+                let hess: Vec<f64> = probs
+                    .iter()
+                    .map(|p| (p[c] * (1.0 - p[c])).max(1e-15))
+                    .collect();
                 match weights {
                     None => refit_leaf_newton(&mut root, features, &indices, &residuals, &hess),
                     Some(w) => {
@@ -658,8 +665,14 @@ mod tests {
         let Node::Leaf(LeafValue::Value(rv)) = **right else {
             panic!("expected leaf")
         };
-        assert!((lv - 0.5).abs() < 1e-12, "left leaf should be sum(grad)/sum(hess)=0.5, got {lv}");
-        assert!((rv - 2.0).abs() < 1e-12, "right leaf should be sum(grad)/sum(hess)=2.0, got {rv}");
+        assert!(
+            (lv - 0.5).abs() < 1e-12,
+            "left leaf should be sum(grad)/sum(hess)=0.5, got {lv}"
+        );
+        assert!(
+            (rv - 2.0).abs() < 1e-12,
+            "right leaf should be sum(grad)/sum(hess)=2.0, got {rv}"
+        );
     }
 
     /// A leaf whose routed samples have (near-)zero total hessian has no
@@ -673,6 +686,9 @@ mod tests {
         let Node::Leaf(LeafValue::Value(v)) = tree else {
             panic!("expected leaf")
         };
-        assert!((v - 0.42).abs() < 1e-12, "zero-hessian leaf must keep its prior value, got {v}");
+        assert!(
+            (v - 0.42).abs() < 1e-12,
+            "zero-hessian leaf must keep its prior value, got {v}"
+        );
     }
 }

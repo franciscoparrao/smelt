@@ -57,7 +57,9 @@ use measures::{
 };
 use preprocess::{Smote, SpatialSmote, StandardScaler};
 use py_stats::{bootstrap_ci, sign_test, wilcoxon_signed_rank};
-use resample::{CrossValidation, GroupCV, SpatialBlockCV, SpatialBufferCV, StratifiedCV, TimeSeriesCV};
+use resample::{
+    CrossValidation, GroupCV, SpatialBlockCV, SpatialBufferCV, StratifiedCV, TimeSeriesCV,
+};
 use tuning::PyBayesianOptimizer;
 
 #[pymodule]

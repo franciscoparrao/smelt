@@ -276,7 +276,10 @@ mod tests {
         let features = ndarray::array![[0.0, 0.0], [0.1, 0.1], [1.0, 1.0], [1.1, 0.9]];
         let target = vec![0, 0, 0, 1];
         let task = ClassificationTask::new("k0", features, target).unwrap();
-        let err = Adasyn::new().with_k_neighbors(0).balance(&task).unwrap_err();
+        let err = Adasyn::new()
+            .with_k_neighbors(0)
+            .balance(&task)
+            .unwrap_err();
         assert!(err.to_string().contains("k_neighbors"), "got: {err}");
     }
 
@@ -335,6 +338,9 @@ mod tests {
                  (dist_a={dist_a}, dist_b={dist_b}), not cross into the majority-occupied gap"
             );
         }
-        assert!(checked_any, "test should have generated at least one synthetic minority sample");
+        assert!(
+            checked_any,
+            "test should have generated at least one synthetic minority sample"
+        );
     }
 }

@@ -359,9 +359,18 @@ mod tests {
         let cases: Vec<(&str, ParamDistribution)> = vec![
             ("uniform_inverted", ParamDistribution::Uniform(5.0, 1.0)),
             ("uniform_nan", ParamDistribution::Uniform(f64::NAN, 1.0)),
-            ("loguniform_zero_low", ParamDistribution::LogUniform(0.0, 10.0)),
-            ("loguniform_negative", ParamDistribution::LogUniform(-1.0, 10.0)),
-            ("loguniform_inverted", ParamDistribution::LogUniform(10.0, 1.0)),
+            (
+                "loguniform_zero_low",
+                ParamDistribution::LogUniform(0.0, 10.0),
+            ),
+            (
+                "loguniform_negative",
+                ParamDistribution::LogUniform(-1.0, 10.0),
+            ),
+            (
+                "loguniform_inverted",
+                ParamDistribution::LogUniform(10.0, 1.0),
+            ),
             ("choice_empty", ParamDistribution::Choice(vec![])),
         ];
         for (name, dist) in cases {

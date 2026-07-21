@@ -413,8 +413,10 @@ mod tests {
 
         let mut default_rf = RandomForest::new().with_n_estimators(50).with_seed(1);
         let default_model = default_rf.train_regress(&task).unwrap();
-        let Prediction::Regression { predicted: default_pred, .. } =
-            default_model.predict(&features).unwrap()
+        let Prediction::Regression {
+            predicted: default_pred,
+            ..
+        } = default_model.predict(&features).unwrap()
         else {
             panic!("expected regression");
         };
@@ -425,7 +427,10 @@ mod tests {
             .with_seed(1)
             .with_max_features_sqrt();
         let sqrt_model = sqrt_rf.train_regress(&task).unwrap();
-        let Prediction::Regression { predicted: sqrt_pred, .. } = sqrt_model.predict(&features).unwrap()
+        let Prediction::Regression {
+            predicted: sqrt_pred,
+            ..
+        } = sqrt_model.predict(&features).unwrap()
         else {
             panic!("expected regression");
         };

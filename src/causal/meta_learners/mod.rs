@@ -167,7 +167,11 @@ pub(crate) mod test_fixtures {
             features[[i, 0]] = x0;
             features[[i, 1]] = x1;
             let propensity = 1.0 / (1.0 + (-x0).exp()); // sigmoid(x0)
-            let t = if rng.random::<f64>() < propensity { 1 } else { 0 };
+            let t = if rng.random::<f64>() < propensity {
+                1
+            } else {
+                0
+            };
             let tau = x0 * x1;
             let noise = (rng.random::<f64>() - 0.5) * 2.0 * noise_sd;
             let y = x1 + tau * t as f64 + noise;

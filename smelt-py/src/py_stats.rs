@@ -47,7 +47,8 @@ pub(crate) fn bootstrap_ci(
     n_bootstrap: usize,
     seed: u64,
 ) -> PyResult<(f64, f64, f64)> {
-    let r = smelt_ml::stats::bootstrap_ci(&scores, confidence, n_bootstrap, seed).map_err(smelt_err)?;
+    let r =
+        smelt_ml::stats::bootstrap_ci(&scores, confidence, n_bootstrap, seed).map_err(smelt_err)?;
     Ok((r.estimate, r.lower, r.upper))
 }
 
@@ -61,4 +62,3 @@ pub(crate) fn sign_test(a: Vec<f64>, b: Vec<f64>) -> PyResult<TestResult> {
         significant: r.significant,
     })
 }
-

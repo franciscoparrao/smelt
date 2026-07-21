@@ -276,11 +276,23 @@ mod tests {
         assert_eq!(c_factor(0), 0.0);
         assert_eq!(c_factor(1), 0.0);
         assert_eq!(c_factor(2), 1.0);
-        assert!((c_factor(10) - 3.7488806).abs() < 1e-5, "c(10) = {}", c_factor(10));
-        assert!((c_factor(256) - 10.244770).abs() < 1e-5, "c(256) = {}", c_factor(256));
+        assert!(
+            (c_factor(10) - 3.7488806).abs() < 1e-5,
+            "c(10) = {}",
+            c_factor(10)
+        );
+        assert!(
+            (c_factor(256) - 10.244770).abs() < 1e-5,
+            "c(256) = {}",
+            c_factor(256)
+        );
         // Must never be negative for any n >= 1 (the old bug gave -0.42 at n=2).
         for n in 1..1000 {
-            assert!(c_factor(n) >= 0.0, "c_factor({n}) = {} is negative", c_factor(n));
+            assert!(
+                c_factor(n) >= 0.0,
+                "c_factor({n}) = {} is negative",
+                c_factor(n)
+            );
         }
     }
 

@@ -184,7 +184,9 @@ pub fn tree_shap_regress(
     let predict_scalar = |p: &Prediction| -> Result<f64> {
         match p {
             Prediction::Regression { predicted, .. } => Ok(predicted[0]),
-            _ => Err(crate::SmeltError::IncompatiblePrediction("Expected regression".into())),
+            _ => Err(crate::SmeltError::IncompatiblePrediction(
+                "Expected regression".into(),
+            )),
         }
     };
 
@@ -192,7 +194,11 @@ pub fn tree_shap_regress(
     let bg_pred = model.predict(&bg_features)?;
     let bg_vals = match &bg_pred {
         Prediction::Regression { predicted, .. } => predicted.clone(),
-        _ => return Err(crate::SmeltError::IncompatiblePrediction("Expected regression".into())),
+        _ => {
+            return Err(crate::SmeltError::IncompatiblePrediction(
+                "Expected regression".into(),
+            ));
+        }
     };
     let base_value = bg_vals.iter().sum::<f64>() / bg_vals.len() as f64;
 
@@ -219,7 +225,10 @@ pub fn tree_shap_regress(
     }
 
     let global_importance = global_importance_from(&explanations, &names, n_features);
-    Ok(ShapResult { explanations, global_importance })
+    Ok(ShapResult {
+        explanations,
+        global_importance,
+    })
 }
 
 /// Compute permutation-SHAP values for classification (targets one class's
@@ -238,7 +247,10 @@ pub fn tree_shap_classif(
     let bg_indices = sample_background_indices(n_samples, n_background, 42);
     let predict_scalar = move |p: &Prediction| -> Result<f64> {
         match p {
-            Prediction::Classification { probabilities: Some(probs), .. } => probs
+            Prediction::Classification {
+                probabilities: Some(probs),
+                ..
+            } => probs
                 .first()
                 .and_then(|row| row.get(target_class))
                 .copied()
@@ -247,17 +259,24 @@ pub fn tree_shap_classif(
                         "target_class {target_class} out of range"
                     ))
                 }),
-            _ => Err(crate::SmeltError::IncompatiblePrediction("Requires probabilities".into())),
+            _ => Err(crate::SmeltError::IncompatiblePrediction(
+                "Requires probabilities".into(),
+            )),
         }
     };
 
     let bg_features = features.select(ndarray::Axis(0), &bg_indices);
     let bg_pred = model.predict(&bg_features)?;
     let base_value = match &bg_pred {
-        Prediction::Classification { probabilities: Some(probs), .. } => {
-            probs.iter().map(|p| p[target_class]).sum::<f64>() / probs.len() as f64
+        Prediction::Classification {
+            probabilities: Some(probs),
+            ..
+        } => probs.iter().map(|p| p[target_class]).sum::<f64>() / probs.len() as f64,
+        _ => {
+            return Err(crate::SmeltError::IncompatiblePrediction(
+                "Requires probabilities".into(),
+            ));
         }
-        _ => return Err(crate::SmeltError::IncompatiblePrediction("Requires probabilities".into())),
     };
 
     let mut rng = StdRng::seed_from_u64(7);
@@ -283,7 +302,10 @@ pub fn tree_shap_classif(
     }
 
     let global_importance = global_importance_from(&explanations, &names, n_features);
-    Ok(ShapResult { explanations, global_importance })
+    Ok(ShapResult {
+        explanations,
+        global_importance,
+    })
 }
 
 #[cfg(test)]

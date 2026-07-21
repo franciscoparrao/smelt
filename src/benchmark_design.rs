@@ -102,7 +102,8 @@ pub fn benchmark_classif(
         let task_entries: Result<Vec<BenchmarkEntry>> = learners
             .par_iter_mut()
             .map(|learner| {
-                let result = benchmark::resample_classif(&mut **learner, task, resampling, measures)?;
+                let result =
+                    benchmark::resample_classif(&mut **learner, task, resampling, measures)?;
                 let means = result.mean_scores();
                 Ok(BenchmarkEntry {
                     learner_id: result.learner_id,
@@ -132,7 +133,8 @@ pub fn benchmark_regress(
         let task_entries: Result<Vec<BenchmarkEntry>> = learners
             .par_iter_mut()
             .map(|learner| {
-                let result = benchmark::resample_regress(&mut **learner, task, resampling, measures)?;
+                let result =
+                    benchmark::resample_regress(&mut **learner, task, resampling, measures)?;
                 let means = result.mean_scores();
                 Ok(BenchmarkEntry {
                     learner_id: result.learner_id,

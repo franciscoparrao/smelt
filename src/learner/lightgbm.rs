@@ -25,8 +25,12 @@ use rand::seq::SliceRandom;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::eval::{EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress};
-use super::histogram::{HistBins, NAN_BIN, accumulate_histogram, best_categorical_split, best_numeric_split};
+use super::eval::{
+    EarlyStopper, EvalSet, EvalTarget, validate_eval_classif, validate_eval_regress,
+};
+use super::histogram::{
+    HistBins, NAN_BIN, accumulate_histogram, best_categorical_split, best_numeric_split,
+};
 
 /// LightGBM-inspired leaf-wise GBM with GOSS sampling.
 ///
@@ -552,7 +556,11 @@ fn build_leaf_wise_tree(
     feature_importances: &mut [f64],
 ) -> LGBNode {
     let root_hist = build_leaf_hist(bins, grads, hess, weights, &indices, col_indices);
-    let mut arena: Vec<ArenaNode> = vec![ArenaNode::Leaf { indices, depth: 0, hist: root_hist }];
+    let mut arena: Vec<ArenaNode> = vec![ArenaNode::Leaf {
+        indices,
+        depth: 0,
+        hist: root_hist,
+    }];
     let mut active_leaves: Vec<usize> = vec![0];
     let mut leaf_count = 1usize;
 
@@ -560,7 +568,12 @@ fn build_leaf_wise_tree(
         let mut best: Option<(usize, LeafCandidate)> = None;
 
         for &li in &active_leaves {
-            let ArenaNode::Leaf { indices: leaf_indices, depth, hist } = &arena[li] else {
+            let ArenaNode::Leaf {
+                indices: leaf_indices,
+                depth,
+                hist,
+            } = &arena[li]
+            else {
                 unreachable!("active_leaves only ever references Leaf arena slots")
             };
             if let Some(md) = max_depth
@@ -575,7 +588,8 @@ fn build_leaf_wise_tree(
             if h_sum < min_child_weight {
                 continue;
             }
-            if let Some(cand) = find_best_from_cache(bins, hist, col_indices, lambda, min_child_weight)
+            if let Some(cand) =
+                find_best_from_cache(bins, hist, col_indices, lambda, min_child_weight)
             {
                 let is_better = match &best {
                     None => true,
@@ -597,11 +611,15 @@ fn build_leaf_wise_tree(
             left: usize::MAX,
             right: usize::MAX,
         };
-        let (leaf_indices, depth, parent_hist) = match std::mem::replace(&mut arena[li], placeholder)
-        {
-            ArenaNode::Leaf { indices, depth, hist } => (indices, depth, hist),
-            ArenaNode::Split { .. } => unreachable!(),
-        };
+        let (leaf_indices, depth, parent_hist) =
+            match std::mem::replace(&mut arena[li], placeholder) {
+                ArenaNode::Leaf {
+                    indices,
+                    depth,
+                    hist,
+                } => (indices, depth, hist),
+                ArenaNode::Split { .. } => unreachable!(),
+            };
 
         let mut left_idx = Vec::new();
         let mut right_idx = Vec::new();
@@ -623,7 +641,11 @@ fn build_leaf_wise_tree(
             // Degenerate split (shouldn't happen given find_best_from_cache
             // only proposes splits with points on both sides, but guard
             // anyway): revert the slot to a leaf and stop trying to split it.
-            arena[li] = ArenaNode::Leaf { indices: leaf_indices, depth, hist: parent_hist };
+            arena[li] = ArenaNode::Leaf {
+                indices: leaf_indices,
+                depth,
+                hist: parent_hist,
+            };
             active_leaves.retain(|&x| x != li);
             continue;
         }
@@ -650,9 +672,17 @@ fn build_leaf_wise_tree(
         };
 
         let left_arena_idx = arena.len();
-        arena.push(ArenaNode::Leaf { indices: left_idx, depth: depth + 1, hist: left_hist });
+        arena.push(ArenaNode::Leaf {
+            indices: left_idx,
+            depth: depth + 1,
+            hist: left_hist,
+        });
         let right_arena_idx = arena.len();
-        arena.push(ArenaNode::Leaf { indices: right_idx, depth: depth + 1, hist: right_hist });
+        arena.push(ArenaNode::Leaf {
+            indices: right_idx,
+            depth: depth + 1,
+            hist: right_hist,
+        });
         if let ArenaNode::Split { left, right, .. } = &mut arena[li] {
             *left = left_arena_idx;
             *right = right_arena_idx;
@@ -672,11 +702,21 @@ fn build_leaf_wise_tree(
         weights: &[f64],
         lambda: f64,
     ) -> LGBNode {
-        match arena[idx].take().expect("each arena slot is converted exactly once") {
+        match arena[idx]
+            .take()
+            .expect("each arena slot is converted exactly once")
+        {
             ArenaNode::Leaf { indices, .. } => LGBNode::Leaf {
                 weight: leaf_weight(grads, hess, weights, &indices, lambda),
             },
-            ArenaNode::Split { feature, threshold, nan_left, left_cats, left, right } => {
+            ArenaNode::Split {
+                feature,
+                threshold,
+                nan_left,
+                left_cats,
+                left,
+                right,
+            } => {
                 let l = Box::new(to_lgb_node(arena, left, grads, hess, weights, lambda));
                 let r = Box::new(to_lgb_node(arena, right, grads, hess, weights, lambda));
                 match left_cats {
@@ -795,7 +835,9 @@ impl TrainedModel for TrainedLightGBM {
                         let pred = probs
                             .iter()
                             .enumerate()
-                            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                            .max_by(|a, b| {
+                                a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)
+                            })
                             .unwrap()
                             .0;
                         (pred, probs)
@@ -920,8 +962,14 @@ impl Learner for LightGBM {
             }
 
             let bag = self.sample_rows(&mut rng, ns);
-            let (selected, weights) =
-                goss_sample(&grads, &hess, &bag, self.top_rate, self.other_rate, &mut rng);
+            let (selected, weights) = goss_sample(
+                &grads,
+                &hess,
+                &bag,
+                self.top_rate,
+                self.other_rate,
+                &mut rng,
+            );
             let cols = self.sample_cols(&mut rng, nf);
 
             let tree = build_leaf_wise_tree(
@@ -966,7 +1014,11 @@ impl Learner for LightGBM {
                                 / wsum
                         }
                         None => {
-                            preds.iter().zip(target).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+                            preds
+                                .iter()
+                                .zip(target)
+                                .map(|(p, y)| (p - y).powi(2))
+                                .sum::<f64>()
                                 / ns as f64
                         }
                     }
@@ -1045,8 +1097,14 @@ impl LightGBM {
                 }
             }
             let bag = self.sample_rows(&mut rng, ns);
-            let (selected, weights) =
-                goss_sample(&grads, &hess, &bag, self.top_rate, self.other_rate, &mut rng);
+            let (selected, weights) = goss_sample(
+                &grads,
+                &hess,
+                &bag,
+                self.top_rate,
+                self.other_rate,
+                &mut rng,
+            );
             let cols = self.sample_cols(&mut rng, nf);
 
             let tree = build_leaf_wise_tree(
@@ -1084,7 +1142,10 @@ impl LightGBM {
                 // property); train-loss fallback weighted to track the
                 // weighted objective actually being fit.
                 let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
-                    efv.iter().zip(et).map(|(&f, &y)| logloss(f, y)).sum::<f64>()
+                    efv.iter()
+                        .zip(et)
+                        .map(|(&f, &y)| logloss(f, y))
+                        .sum::<f64>()
                         / efv.len() as f64
                 } else {
                     match sw {
@@ -1098,7 +1159,10 @@ impl LightGBM {
                                 / wsum
                         }
                         None => {
-                            fv.iter().zip(target).map(|(&f, &y)| logloss(f, y)).sum::<f64>()
+                            fv.iter()
+                                .zip(target)
+                                .map(|(&f, &y)| logloss(f, y))
+                                .sum::<f64>()
                                 / ns as f64
                         }
                     }
@@ -1175,8 +1239,14 @@ impl LightGBM {
                         hess[i] *= w[i];
                     }
                 }
-                let (selected, weights) =
-                    goss_sample(&grads, &hess, &bag, self.top_rate, self.other_rate, &mut rng);
+                let (selected, weights) = goss_sample(
+                    &grads,
+                    &hess,
+                    &bag,
+                    self.top_rate,
+                    self.other_rate,
+                    &mut rng,
+                );
                 let tree = build_leaf_wise_tree(
                     &bins,
                     &grads,
@@ -1206,7 +1276,9 @@ impl LightGBM {
                 // Eval-set metric unweighted; weighted train-loss fallback.
                 let loss = if let (Some(efv), Some((_, et))) = (&eval_fv, eval) {
                     let ep: Vec<Vec<f64>> = efv.iter().map(|f| softmax(f)).collect();
-                    (0..et.len()).map(|i| -ep[i][et[i]].max(eps).ln()).sum::<f64>()
+                    (0..et.len())
+                        .map(|i| -ep[i][et[i]].max(eps).ln())
+                        .sum::<f64>()
                         / et.len() as f64
                 } else {
                     let pn: Vec<Vec<f64>> = fv.iter().map(|f| softmax(f)).collect();
@@ -1251,10 +1323,16 @@ mod tests {
     #[test]
     fn leaf_weight_and_split_gain_stay_finite_at_zero_hessian_and_lambda() {
         let lw = leaf_weight(&[1.0], &[0.0], &[1.0], &[0], 0.0);
-        assert!(lw.is_finite(), "leaf_weight with h=0, lambda=0 must not be NaN/Inf, got {lw}");
+        assert!(
+            lw.is_finite(),
+            "leaf_weight with h=0, lambda=0 must not be NaN/Inf, got {lw}"
+        );
 
         let g = split_gain(1.0, 0.0, -1.0, 0.0, 0.0);
-        assert!(g.is_finite(), "split_gain with hl=hr=0, lambda=0 must not be NaN/Inf, got {g}");
+        assert!(
+            g.is_finite(),
+            "split_gain with hl=hr=0, lambda=0 must not be NaN/Inf, got {g}"
+        );
     }
 
     /// Regression test for the histogram binning boundary bug (src/learner/histogram.rs):
@@ -1272,7 +1350,9 @@ mod tests {
             target[i] = bit * 10.0;
         }
         let task = RegressionTask::new("binary", features.clone(), target.clone()).unwrap();
-        let mut model = LightGBM::new().with_n_estimators(20).with_learning_rate(0.5);
+        let mut model = LightGBM::new()
+            .with_n_estimators(20)
+            .with_learning_rate(0.5);
         let trained = model.train_regress(&task).unwrap();
         let pred = match trained.predict(&features).unwrap() {
             Prediction::Regression { predicted, .. } => predicted,
@@ -1285,7 +1365,10 @@ mod tests {
             .sum::<f64>()
             / n as f64)
             .sqrt();
-        assert!(rmse < 1.0, "binary feature should be perfectly splittable, got RMSE={rmse}");
+        assert!(
+            rmse < 1.0,
+            "binary feature should be perfectly splittable, got RMSE={rmse}"
+        );
     }
 
     /// Regression test (5th audit, LOW-A): the plain-GBDT default
@@ -1375,8 +1458,14 @@ mod tests {
         assert_eq!(sel_shortcut, candidates, "shortcut keeps every candidate");
         let mut sorted_general = sel_general;
         sorted_general.sort_unstable();
-        assert_eq!(sorted_general, candidates, "general path also keeps every candidate");
-        assert_eq!(w_shortcut, w_general, "weights must be identical (1.0 on candidates)");
+        assert_eq!(
+            sorted_general, candidates,
+            "general path also keeps every candidate"
+        );
+        assert_eq!(
+            w_shortcut, w_general,
+            "weights must be identical (1.0 on candidates)"
+        );
         assert_eq!(
             rng_shortcut.random::<u64>(),
             rng_general.random::<u64>(),
@@ -1473,7 +1562,10 @@ mod tests {
         let (selected, weights) = goss_sample(&grads, &hess, &all, 0.1, 0.1, &mut rng);
 
         for i in 0..20 {
-            assert!(selected.contains(&i), "top-gradient sample {i} should always be selected");
+            assert!(
+                selected.contains(&i),
+                "top-gradient sample {i} should always be selected"
+            );
             assert_eq!(weights[i], 1.0, "top-gradient samples must have weight 1.0");
         }
     }
@@ -1502,11 +1594,26 @@ mod tests {
         let mut full = LightGBM::new().with_n_estimators(20).with_subsample(1.0);
         let mut bagged = LightGBM::new().with_n_estimators(20).with_subsample(0.05);
 
-        let pred_full = full.train_regress(&task).unwrap().predict(&features).unwrap();
-        let pred_bagged = bagged.train_regress(&task).unwrap().predict(&features).unwrap();
+        let pred_full = full
+            .train_regress(&task)
+            .unwrap()
+            .predict(&features)
+            .unwrap();
+        let pred_bagged = bagged
+            .train_regress(&task)
+            .unwrap()
+            .predict(&features)
+            .unwrap();
 
-        let (Prediction::Regression { predicted: p_full, .. }, Prediction::Regression { predicted: p_bagged, .. }) =
-            (pred_full, pred_bagged)
+        let (
+            Prediction::Regression {
+                predicted: p_full, ..
+            },
+            Prediction::Regression {
+                predicted: p_bagged,
+                ..
+            },
+        ) = (pred_full, pred_bagged)
         else {
             panic!("expected regression predictions");
         };
@@ -1553,14 +1660,22 @@ mod tests {
             let Prediction::Regression { predicted, .. } = m.predict(&features).unwrap() else {
                 unreachable!()
             };
-            (predicted.iter().zip(&target).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+            (predicted
+                .iter()
+                .zip(&target)
+                .map(|(p, y)| (p - y).powi(2))
+                .sum::<f64>()
                 / n as f64)
                 .sqrt()
         };
 
         let m_cat = stumps().train_regress(&cat_task).unwrap();
         let m_num = stumps().train_regress(&num_task).unwrap();
-        assert!(rmse(&*m_cat) < 1.0, "categorical split should fit parity, got {}", rmse(&*m_cat));
+        assert!(
+            rmse(&*m_cat) < 1.0,
+            "categorical split should fit parity, got {}",
+            rmse(&*m_cat)
+        );
         assert!(
             rmse(&*m_num) > 2.0,
             "numeric thresholds cannot fit parity with 3 single-split trees, got {}",
@@ -1601,7 +1716,11 @@ mod tests {
             let Prediction::Regression { predicted, .. } = m.predict(&va_f).unwrap() else {
                 panic!("expected regression")
             };
-            (predicted.iter().zip(&va_t).map(|(p, y)| (p - y).powi(2)).sum::<f64>()
+            (predicted
+                .iter()
+                .zip(&va_t)
+                .map(|(p, y)| (p - y).powi(2))
+                .sum::<f64>()
                 / va_t.len() as f64)
                 .sqrt()
         };

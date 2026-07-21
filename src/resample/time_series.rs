@@ -220,8 +220,18 @@ mod tests {
     fn rejects_degenerate_configs_and_too_few_samples() {
         assert!(TimeSeriesCV::new(0).splits(10).is_err());
         assert!(TimeSeriesCV::new(2).with_step(0).splits(10).is_err());
-        assert!(TimeSeriesCV::new(2).with_min_train_size(0).splits(10).is_err());
-        assert!(TimeSeriesCV::new(2).with_sliding_window(0).splits(10).is_err());
+        assert!(
+            TimeSeriesCV::new(2)
+                .with_min_train_size(0)
+                .splits(10)
+                .is_err()
+        );
+        assert!(
+            TimeSeriesCV::new(2)
+                .with_sliding_window(0)
+                .splits(10)
+                .is_err()
+        );
         // min_train(4) + gap(2) + horizon(2) = 8 > 7
         assert!(
             TimeSeriesCV::new(2)

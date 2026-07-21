@@ -180,14 +180,9 @@ impl Learner for DecisionTree {
         // if a max_features knob is ever wired up).
         let mut rng = StdRng::seed_from_u64(0);
         let root = match task.weights() {
-            None => builder.build_classifier(
-                &features.view(),
-                target,
-                &indices,
-                n_classes,
-                0,
-                &mut rng,
-            ),
+            None => {
+                builder.build_classifier(&features.view(), target, &indices, n_classes, 0, &mut rng)
+            }
             Some(w) => {
                 // Weight 0.0 = sample excluded: dropping the row here (not
                 // just letting it contribute nothing) keeps candidate split

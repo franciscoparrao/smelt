@@ -55,11 +55,18 @@ impl Activation {
 /// the catalog, at zero asymptotic cost.
 fn standardize_fit(features: &Array2<f64>) -> (Array2<f64>, Array1<f64>, Array1<f64>) {
     let n = features.nrows() as f64;
-    let mean = features.mean_axis(ndarray::Axis(0)).expect("features has at least one row");
+    let mean = features
+        .mean_axis(ndarray::Axis(0))
+        .expect("features has at least one row");
     let n_features = mean.len();
     let mut std = Array1::zeros(n_features);
     for j in 0..n_features {
-        let var = features.column(j).iter().map(|&v| (v - mean[j]).powi(2)).sum::<f64>() / n;
+        let var = features
+            .column(j)
+            .iter()
+            .map(|&v| (v - mean[j]).powi(2))
+            .sum::<f64>()
+            / n;
         std[j] = if var.sqrt() < 1e-12 { 1.0 } else { var.sqrt() };
     }
     let standardized = standardize_apply(features, &mean, &std);
@@ -248,7 +255,12 @@ impl ExtremeLearningMachine {
         (w, b)
     }
 
-    fn hidden_output(&self, features: &Array2<f64>, w: &Array2<f64>, b: &Array1<f64>) -> Array2<f64> {
+    fn hidden_output(
+        &self,
+        features: &Array2<f64>,
+        w: &Array2<f64>,
+        b: &Array1<f64>,
+    ) -> Array2<f64> {
         let mut h = features.dot(w);
         for mut row in h.rows_mut() {
             for (v, &bias) in row.iter_mut().zip(b.iter()) {
@@ -293,7 +305,8 @@ impl ExtremeLearningMachine {
             let col = hty.column(k).to_owned();
             let solved = solve_spd(&hth, &col).ok_or_else(|| {
                 SmeltError::NumericalError(
-                    "singular system solving ELM output weights -- try increasing regularization".into(),
+                    "singular system solving ELM output weights -- try increasing regularization"
+                        .into(),
                 )
             })?;
             beta.column_mut(k).assign(&solved);
@@ -465,10 +478,13 @@ mod tests {
     #[test]
     fn zero_hidden_units_is_rejected_at_train() {
         let features = Array2::from_shape_vec((4, 1), vec![0.0, 1.0, 2.0, 3.0]).unwrap();
-        let classif = ClassificationTask::new("elm0_c", features.clone(), vec![0, 0, 1, 1]).unwrap();
+        let classif =
+            ClassificationTask::new("elm0_c", features.clone(), vec![0, 0, 1, 1]).unwrap();
         let regress = RegressionTask::new("elm0_r", features, vec![0.0, 1.0, 2.0, 3.0]).unwrap();
 
-        let Err(err) = ExtremeLearningMachine::new().with_n_hidden(0).train_classif(&classif)
+        let Err(err) = ExtremeLearningMachine::new()
+            .with_n_hidden(0)
+            .train_classif(&classif)
         else {
             panic!("n_hidden=0 must be rejected for classification");
         };
@@ -477,7 +493,9 @@ mod tests {
             "got: {err}"
         );
 
-        let Err(err) = ExtremeLearningMachine::new().with_n_hidden(0).train_regress(&regress)
+        let Err(err) = ExtremeLearningMachine::new()
+            .with_n_hidden(0)
+            .train_regress(&regress)
         else {
             panic!("n_hidden=0 must be rejected for regression");
         };
@@ -514,7 +532,10 @@ mod tests {
             .sum::<f64>()
             / n as f64)
             .sqrt();
-        assert!(rmse < 1.0, "should fit a clear linear trend well, got RMSE={rmse}");
+        assert!(
+            rmse < 1.0,
+            "should fit a clear linear trend well, got RMSE={rmse}"
+        );
     }
 
     #[test]
@@ -531,31 +552,53 @@ mod tests {
             target.push(if x0 + x1 > 1.0 { 1usize } else { 0 });
         }
         let features = Array2::from_shape_vec((n, 2), feats).unwrap();
-        let task = ClassificationTask::new("elm_classif", features.clone(), target.clone()).unwrap();
+        let task =
+            ClassificationTask::new("elm_classif", features.clone(), target.clone()).unwrap();
 
         let mut elm = ExtremeLearningMachine::new().with_n_hidden(50).with_seed(4);
         let model = elm.train_classif(&task).unwrap();
         let pred = model.predict(&features).unwrap();
-        let Prediction::Classification { predicted, probabilities, .. } = pred else {
+        let Prediction::Classification {
+            predicted,
+            probabilities,
+            ..
+        } = pred
+        else {
             panic!("expected classification");
         };
-        let correct = predicted.iter().zip(&target).filter(|(p, t)| *p == *t).count();
+        let correct = predicted
+            .iter()
+            .zip(&target)
+            .filter(|(p, t)| *p == *t)
+            .count();
         let acc = correct as f64 / n as f64;
-        assert!(acc > 0.85, "should separate a simple linear boundary well, got acc={acc}");
+        assert!(
+            acc > 0.85,
+            "should separate a simple linear boundary well, got acc={acc}"
+        );
 
         let probs = probabilities.unwrap();
         for row in &probs {
             let sum: f64 = row.iter().sum();
-            assert!((sum - 1.0).abs() < 1e-6, "probabilities should sum to 1, got {sum}");
+            assert!(
+                (sum - 1.0).abs() < 1e-6,
+                "probabilities should sum to 1, got {sum}"
+            );
         }
     }
 
     #[test]
     fn multiclass_probabilities_are_well_formed() {
         let features = array![
-            [0.0, 0.0], [0.1, 0.1], [0.2, 0.0],
-            [5.0, 5.0], [5.1, 4.9], [4.9, 5.1],
-            [10.0, 0.0], [10.1, 0.1], [9.9, -0.1],
+            [0.0, 0.0],
+            [0.1, 0.1],
+            [0.2, 0.0],
+            [5.0, 5.0],
+            [5.1, 4.9],
+            [4.9, 5.1],
+            [10.0, 0.0],
+            [10.1, 0.1],
+            [9.9, -0.1],
         ];
         let target = vec![0usize, 0, 0, 1, 1, 1, 2, 2, 2];
         let task = ClassificationTask::new("elm_multi", features.clone(), target.clone()).unwrap();
@@ -566,8 +609,15 @@ mod tests {
         let Prediction::Classification { predicted, .. } = pred else {
             panic!("expected classification");
         };
-        let correct = predicted.iter().zip(&target).filter(|(p, t)| *p == *t).count();
-        assert!(correct as f64 / target.len() as f64 > 0.6, "should do reasonably on 3 well-separated clusters");
+        let correct = predicted
+            .iter()
+            .zip(&target)
+            .filter(|(p, t)| *p == *t)
+            .count();
+        assert!(
+            correct as f64 / target.len() as f64 > 0.6,
+            "should do reasonably on 3 well-separated clusters"
+        );
     }
 
     #[test]
@@ -601,13 +651,20 @@ mod tests {
         let features = Array2::from_shape_vec((n, 1), feats).unwrap();
         let task = RegressionTask::new("elm_gis_scale", features.clone(), target.clone()).unwrap();
 
-        let mut elm = ExtremeLearningMachine::new().with_n_hidden(100).with_seed(2);
+        let mut elm = ExtremeLearningMachine::new()
+            .with_n_hidden(100)
+            .with_seed(2);
         let model = elm.train_regress(&task).unwrap();
         let pred = model.predict(&features).unwrap();
         let Prediction::Regression { predicted, .. } = pred else {
             panic!("expected regression");
         };
-        let mse: f64 = predicted.iter().zip(&target).map(|(p, t)| (p - t).powi(2)).sum::<f64>() / n as f64;
+        let mse: f64 = predicted
+            .iter()
+            .zip(&target)
+            .map(|(p, t)| (p - t).powi(2))
+            .sum::<f64>()
+            / n as f64;
         let target_var: f64 = {
             let mean = target.iter().sum::<f64>() / n as f64;
             target.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / n as f64

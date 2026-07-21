@@ -105,13 +105,10 @@ impl AutoTuner {
 
         let resampling = smelt_ml::resample::CrossValidation::new(self.cv).with_seed(self.seed);
         let measure = resolve_measure(&self.metric)?;
-        Ok(CoreAutoTuner::new(
-            move |p| factory(p),
-            spec,
-            Box::new(resampling),
-            measure,
+        Ok(
+            CoreAutoTuner::new(move |p| factory(p), spec, Box::new(resampling), measure)
+                .with_seed(self.seed),
         )
-        .with_seed(self.seed))
     }
 }
 
@@ -228,8 +225,8 @@ impl AutoTuner {
         } else {
             let target: Vec<f64> = y.extract()?;
             check_finite_target(&target)?;
-            let mut task = smelt_ml::task::RegressionTask::new("py", features, target)
-                .map_err(smelt_err)?;
+            let mut task =
+                smelt_ml::task::RegressionTask::new("py", features, target).map_err(smelt_err)?;
             if let Some(w) = sample_weight {
                 task = task.with_weights(w);
             }
@@ -344,7 +341,7 @@ impl AutoTuner {
                 other => {
                     return Err(PyValueError::new_err(format!(
                         "invalid parameter '{other}' for this estimator"
-                    )))
+                    )));
                 }
             }
         }

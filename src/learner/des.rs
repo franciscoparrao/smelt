@@ -293,7 +293,9 @@ mod tests {
     use ndarray::array;
 
     fn one_learner() -> Vec<Box<dyn Fn() -> Box<dyn Learner> + Send + Sync>> {
-        vec![Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>)]
+        vec![Box::new(|| {
+            Box::new(DecisionTree::default()) as Box<dyn Learner>
+        })]
     }
 
     /// Mock whose trained model answers every predict with a Regression
@@ -343,10 +345,7 @@ mod tests {
             Err(e) => e,
             Ok(_) => panic!("a non-classification base model must fail training"),
         };
-        assert!(
-            err.to_string().contains("non-classification"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("non-classification"), "got: {err}");
     }
 
     /// Regression test (5th audit, LOW-B): `TrainedDES::predict` was the one
@@ -378,7 +377,13 @@ mod tests {
             .predict(&narrow)
             .expect_err("1-column query against a 2-feature model must be rejected");
         assert!(
-            matches!(err, SmeltError::DimensionMismatch { expected: 2, got: 1 }),
+            matches!(
+                err,
+                SmeltError::DimensionMismatch {
+                    expected: 2,
+                    got: 1
+                }
+            ),
             "got: {err:?}"
         );
 
@@ -387,7 +392,13 @@ mod tests {
             .predict(&wide)
             .expect_err("3-column query against a 2-feature model must be rejected");
         assert!(
-            matches!(err, SmeltError::DimensionMismatch { expected: 2, got: 3 }),
+            matches!(
+                err,
+                SmeltError::DimensionMismatch {
+                    expected: 2,
+                    got: 3
+                }
+            ),
             "got: {err:?}"
         );
     }
@@ -401,13 +412,21 @@ mod tests {
     #[test]
     fn dsel_split_size_respects_fraction_and_stays_within_bounds() {
         let des = DynamicEnsemble::new(one_learner());
-        assert_eq!(des.dsel_split_size(10), 3, "default 0.3 fraction on n=10 should give dsel=3");
+        assert_eq!(
+            des.dsel_split_size(10),
+            3,
+            "default 0.3 fraction on n=10 should give dsel=3"
+        );
 
         let tiny_dsel = DynamicEnsemble::new(one_learner()).with_dsel_fraction(0.01);
         assert_eq!(tiny_dsel.dsel_split_size(10), 1, "dsel must never be empty");
 
         let huge_dsel = DynamicEnsemble::new(one_learner()).with_dsel_fraction(0.99);
-        assert_eq!(huge_dsel.dsel_split_size(10), 9, "training set must never be empty (n-1 cap)");
+        assert_eq!(
+            huge_dsel.dsel_split_size(10),
+            9,
+            "training set must never be empty (n-1 cap)"
+        );
     }
 
     #[test]
@@ -427,15 +446,25 @@ mod tests {
     #[test]
     fn train_classif_with_dsel_holdout_still_fits_separable_data() {
         let features = array![
-            [0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [0.15, 0.05], [0.05, 0.18],
-            [1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.9], [1.05, 0.95], [0.95, 1.08],
+            [0.0, 0.0],
+            [0.1, 0.1],
+            [0.2, 0.0],
+            [0.0, 0.2],
+            [0.15, 0.05],
+            [0.05, 0.18],
+            [1.0, 1.0],
+            [1.1, 0.9],
+            [0.9, 1.1],
+            [1.0, 0.9],
+            [1.05, 0.95],
+            [0.95, 1.08],
         ];
         let target = vec![0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1];
         let task = ClassificationTask::new("des", features.clone(), target.clone()).unwrap();
 
-        let mut des = DynamicEnsemble::new(vec![
-            Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>),
-        ])
+        let mut des = DynamicEnsemble::new(vec![Box::new(|| {
+            Box::new(DecisionTree::default()) as Box<dyn Learner>
+        })])
         .with_dsel_fraction(0.3)
         .with_seed(3);
         let model = des.train_classif(&task).unwrap();
@@ -443,7 +472,11 @@ mod tests {
         let Prediction::Classification { predicted, .. } = pred else {
             panic!("expected classification");
         };
-        let correct = predicted.iter().zip(&target).filter(|(p, t)| *p == *t).count();
+        let correct = predicted
+            .iter()
+            .zip(&target)
+            .filter(|(p, t)| *p == *t)
+            .count();
         assert!(
             correct as f64 / target.len() as f64 >= 0.8,
             "DES with a held-out DSEL should still fit clearly separable data well"

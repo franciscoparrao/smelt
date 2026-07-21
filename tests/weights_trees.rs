@@ -174,7 +174,9 @@ fn dt_classif_integer_weights_equal_row_duplication_bit_identical() {
     let (dup_features, dup_target) = duplicate_rows(&features, &target, &weights);
     let dup_task = ClassificationTask::new("dup", dup_features, dup_target).unwrap();
 
-    let ma = DecisionTree::default().train_classif(&weighted_task).unwrap();
+    let ma = DecisionTree::default()
+        .train_classif(&weighted_task)
+        .unwrap();
     let mb = DecisionTree::default().train_classif(&dup_task).unwrap();
 
     let pa = ma.predict(&features).unwrap();
@@ -193,7 +195,9 @@ fn dt_regress_integer_weights_equal_row_duplication_bit_identical() {
     let (dup_features, dup_target) = duplicate_rows(&features, &target, &weights);
     let dup_task = RegressionTask::new("dup", dup_features, dup_target).unwrap();
 
-    let ma = DecisionTree::default().train_regress(&weighted_task).unwrap();
+    let ma = DecisionTree::default()
+        .train_regress(&weighted_task)
+        .unwrap();
     let mb = DecisionTree::default().train_regress(&dup_task).unwrap();
 
     let pa = ma.predict(&features).unwrap();
@@ -225,8 +229,12 @@ fn dt_classif_zero_weight_equals_row_removal_bit_identical() {
         .unwrap()
         .with_weights(kept_weights);
 
-    let ma = DecisionTree::default().train_classif(&weighted_task).unwrap();
-    let mb = DecisionTree::default().train_classif(&removed_task).unwrap();
+    let ma = DecisionTree::default()
+        .train_classif(&weighted_task)
+        .unwrap();
+    let mb = DecisionTree::default()
+        .train_classif(&removed_task)
+        .unwrap();
 
     let pa = ma.predict(&features).unwrap();
     let pb = mb.predict(&features).unwrap();
@@ -255,8 +263,12 @@ fn dt_regress_zero_weight_equals_row_removal_bit_identical() {
         .unwrap()
         .with_weights(kept_weights);
 
-    let ma = DecisionTree::default().train_regress(&weighted_task).unwrap();
-    let mb = DecisionTree::default().train_regress(&removed_task).unwrap();
+    let ma = DecisionTree::default()
+        .train_regress(&weighted_task)
+        .unwrap();
+    let mb = DecisionTree::default()
+        .train_regress(&removed_task)
+        .unwrap();
 
     let pa = ma.predict(&features).unwrap();
     let pb = mb.predict(&features).unwrap();

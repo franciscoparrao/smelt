@@ -69,7 +69,11 @@ impl SplitConformal {
     /// targets (1D array-likes of equal, non-zero length). Raises ValueError
     /// on mismatched lengths or an empty calibration set. Returns None;
     /// after this, `predict_interval` is available.
-    fn calibrate_from_predictions(&mut self, cal_pred: Vec<f64>, cal_truth: Vec<f64>) -> PyResult<()> {
+    fn calibrate_from_predictions(
+        &mut self,
+        cal_pred: Vec<f64>,
+        cal_truth: Vec<f64>,
+    ) -> PyResult<()> {
         if cal_pred.is_empty() || cal_truth.is_empty() {
             return Err(PyValueError::new_err(
                 "calibration set is empty; conformal calibration needs at least \
@@ -84,9 +88,7 @@ impl SplitConformal {
             )));
         }
         let sc = smelt_ml::conformal::SplitConformal::calibrate_from_predictions(
-            &cal_pred,
-            &cal_truth,
-            self.alpha,
+            &cal_pred, &cal_truth, self.alpha,
         )
         .map_err(smelt_err)?;
         self.calibrated = Some(sc);

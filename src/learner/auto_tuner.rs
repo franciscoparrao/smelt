@@ -341,7 +341,6 @@ impl Learner for AutoTuner {
     fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
         Ok(Box::new(self.fit_regress(task)?))
     }
-
 }
 
 /// A trained [`AutoTuner`]: the refit best model, plus the tuning outcome
@@ -448,10 +447,10 @@ mod tests {
         // Classification: RandomSearch over max_depth, inner CV=3.
         let task = classif_task(40);
         let mut space = ParamSpace::new();
-        space.insert("max_depth".into(), ParamDistribution::Choice(vec![
-            ParamValue::Int(2),
-            ParamValue::Int(6),
-        ]));
+        space.insert(
+            "max_depth".into(),
+            ParamDistribution::Choice(vec![ParamValue::Int(2), ParamValue::Int(6)]),
+        );
         let mut auto = AutoTuner::new(
             |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"].as_usize().unwrap())),
             TunerSpec::Random { space, n_iter: 4 },
@@ -460,9 +459,16 @@ mod tests {
         );
         let model = auto.train_classif(&task).unwrap();
         let preds = predicted_classif(model.predict(task.features()).unwrap());
-        let acc = preds.iter().zip(task.target()).filter(|(p, t)| p == t).count() as f64
+        let acc = preds
+            .iter()
+            .zip(task.target())
+            .filter(|(p, t)| p == t)
+            .count() as f64
             / task.n_samples() as f64;
-        assert!(acc > 0.9, "tuned tree should separate the blobs, got acc={acc}");
+        assert!(
+            acc > 0.9,
+            "tuned tree should separate the blobs, got acc={acc}"
+        );
 
         // Regression: Grid over Ridge alpha, inner CV=3, minimize RMSE.
         let rtask = regress_task(30);
@@ -487,7 +493,10 @@ mod tests {
                     .sum::<f64>()
                     / rtask.n_samples() as f64)
                     .sqrt();
-                assert!(rmse < 5.0, "tuned ridge should fit the linear target, rmse={rmse}");
+                assert!(
+                    rmse < 5.0,
+                    "tuned ridge should fit the linear target, rmse={rmse}"
+                );
             }
             _ => panic!("expected regression prediction"),
         }
@@ -507,9 +516,18 @@ mod tests {
         // and again at x=9.5, so a single threshold caps out at ~0.67 accuracy
         // while a depth-2 tree (each split has real gain) reaches 100%.)
         let features = ndarray::array![
-            [0.0], [1.0], [2.0], [3.0],       // class 1 (x < 4.5)
-            [5.0], [6.0], [7.0], [8.0],       // class 0 (4.5 < x < 9.5)
-            [10.0], [11.0], [12.0], [13.0]    // class 1 (x > 9.5)
+            [0.0],
+            [1.0],
+            [2.0],
+            [3.0], // class 1 (x < 4.5)
+            [5.0],
+            [6.0],
+            [7.0],
+            [8.0], // class 0 (4.5 < x < 9.5)
+            [10.0],
+            [11.0],
+            [12.0],
+            [13.0] // class 1 (x > 9.5)
         ];
         let target = vec![1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1];
         let task = ClassificationTask::new("two_threshold", features, target).unwrap();
@@ -524,15 +542,28 @@ mod tests {
 
         // best_params must come from the grid.
         let chosen = trained.best_params()["max_depth"].as_i64().unwrap();
-        assert!(chosen == 1 || chosen == 8, "best_params must be a grid value, got {chosen}");
-        assert_eq!(chosen, 8, "the two-threshold target needs depth > 1, tuner must pick 8");
+        assert!(
+            chosen == 1 || chosen == 8,
+            "best_params must be a grid value, got {chosen}"
+        );
+        assert_eq!(
+            chosen, 8,
+            "the two-threshold target needs depth > 1, tuner must pick 8"
+        );
 
         // The refit final model must actually be the deep one: it fits the
         // training data perfectly, which a depth-1 stump cannot.
         let preds = predicted_classif(trained.predict(task.features()).unwrap());
-        let acc = preds.iter().zip(task.target()).filter(|(p, t)| p == t).count() as f64
+        let acc = preds
+            .iter()
+            .zip(task.target())
+            .filter(|(p, t)| p == t)
+            .count() as f64
             / task.n_samples() as f64;
-        assert!((acc - 1.0).abs() < 1e-9, "depth-8 refit should fit the target perfectly, acc={acc}");
+        assert!(
+            (acc - 1.0).abs() < 1e-9,
+            "depth-8 refit should fit the target perfectly, acc={acc}"
+        );
 
         // history carries every evaluated config (2 grid points).
         assert_eq!(trained.history().len(), 2);
@@ -561,7 +592,12 @@ mod tests {
             "row_probe"
         }
         fn train_classif(&mut self, task: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
-            let rows: Vec<u64> = task.features().column(0).iter().map(|&v| v as u64).collect();
+            let rows: Vec<u64> = task
+                .features()
+                .column(0)
+                .iter()
+                .map(|&v| v as u64)
+                .collect();
             self.seen.lock().unwrap().push(rows);
             Ok(Box::new(ProbeModel))
         }
@@ -651,9 +687,13 @@ mod tests {
             Box::new(Accuracy),
         );
         let outer = CrossValidation::new(3).with_seed(1);
-        let bench = crate::benchmark::resample_classif(&mut auto, &task, &outer, &[&Accuracy]).unwrap();
+        let bench =
+            crate::benchmark::resample_classif(&mut auto, &task, &outer, &[&Accuracy]).unwrap();
         assert_eq!(bench.scores.len(), 3, "one score row per outer fold");
-        assert!(bench.mean_scores()[0] > 0.8, "nested CV accuracy on separable blobs");
+        assert!(
+            bench.mean_scores()[0] > 0.8,
+            "nested CV accuracy on separable blobs"
+        );
     }
 
     // ── Test 4: weights ──────────────────────────────────────────────────
@@ -673,7 +713,10 @@ mod tests {
         // a weighted task trains cleanly end to end.
         let task = weighted_regress_task(20);
         let mut grid = ParamGrid::new();
-        grid.insert("alpha".into(), vec![ParamValue::Float(0.1), ParamValue::Float(1.0)]);
+        grid.insert(
+            "alpha".into(),
+            vec![ParamValue::Float(0.1), ParamValue::Float(1.0)],
+        );
         let mut auto = AutoTuner::new(
             |p| Box::new(Ridge::new(p["alpha"].as_f64().unwrap())),
             TunerSpec::Grid(grid),
@@ -681,18 +724,30 @@ mod tests {
             Box::new(Rmse),
         );
         assert!(auto.supports_weights(), "Ridge base is weight-aware");
-        assert!(auto.train_regress(&task).is_ok(), "weighted task must train");
+        assert!(
+            auto.train_regress(&task).is_ok(),
+            "weighted task must train"
+        );
 
         // A weight-aware forest classifier too.
         let mut cspace = ParamSpace::new();
-        cspace.insert("max_depth".into(), ParamDistribution::Choice(vec![ParamValue::Int(3)]));
+        cspace.insert(
+            "max_depth".into(),
+            ParamDistribution::Choice(vec![ParamValue::Int(3)]),
+        );
         let rf_auto = AutoTuner::new(
             |p| Box::new(RandomForest::new().with_max_depth(p["max_depth"].as_usize().unwrap())),
-            TunerSpec::Random { space: cspace, n_iter: 1 },
+            TunerSpec::Random {
+                space: cspace,
+                n_iter: 1,
+            },
             Box::new(CrossValidation::new(2).with_seed(0)),
             Box::new(Accuracy),
         );
-        assert!(rf_auto.supports_weights(), "RandomForest base is weight-aware");
+        assert!(
+            rf_auto.supports_weights(),
+            "RandomForest base is weight-aware"
+        );
     }
 
     #[test]
@@ -725,7 +780,9 @@ mod tests {
             let mut space = ParamSpace::new();
             space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 12.0));
             AutoTuner::new(
-                |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"].as_usize().unwrap())),
+                |p| {
+                    Box::new(DecisionTree::new().with_max_depth(p["max_depth"].as_usize().unwrap()))
+                },
                 TunerSpec::Random { space, n_iter: 8 },
                 Box::new(CrossValidation::new(3).with_seed(0)),
                 Box::new(Accuracy),
@@ -735,7 +792,8 @@ mod tests {
         let a = make().fit_classif(&task).unwrap();
         let b = make().fit_classif(&task).unwrap();
         assert_eq!(
-            a.best_params()["max_depth"], b.best_params()["max_depth"],
+            a.best_params()["max_depth"],
+            b.best_params()["max_depth"],
             "same tuner seed must select the same best_params"
         );
         assert_eq!(a.best_score(), b.best_score(), "and the same best_score");
@@ -759,9 +817,20 @@ mod tests {
 
         let specs = vec![
             TunerSpec::Grid(depth_grid(vec![2, 4, 6])),
-            TunerSpec::Random { space: depth_space(), n_iter: 5 },
-            TunerSpec::Bayesian { space: depth_space(), n_iter: 8, n_initial: 3 },
-            TunerSpec::Hyperband { space: depth_space(), max_folds: 4, eta: 2 },
+            TunerSpec::Random {
+                space: depth_space(),
+                n_iter: 5,
+            },
+            TunerSpec::Bayesian {
+                space: depth_space(),
+                n_iter: 8,
+                n_initial: 3,
+            },
+            TunerSpec::Hyperband {
+                space: depth_space(),
+                max_folds: 4,
+                eta: 2,
+            },
         ];
 
         for spec in specs {
@@ -800,6 +869,10 @@ mod tests {
 
         let grid: HashMap<String, Vec<ParamValue>> = depth_grid(vec![3, 7, 9]);
         let gp = TunerSpec::Grid(grid).representative_params();
-        assert_eq!(gp["max_depth"], ParamValue::Int(3), "grid takes the first value");
+        assert_eq!(
+            gp["max_depth"],
+            ParamValue::Int(3),
+            "grid takes the first value"
+        );
     }
 }

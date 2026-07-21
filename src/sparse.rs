@@ -143,7 +143,8 @@ mod tests {
 
     #[test]
     fn to_dense_round_trips() {
-        let csr = CsrMatrix::from_triplets(2, 3, vec![(0, 0, 1.0), (0, 2, 3.0), (1, 1, 2.0)]).unwrap();
+        let csr =
+            CsrMatrix::from_triplets(2, 3, vec![(0, 0, 1.0), (0, 2, 3.0), (1, 1, 2.0)]).unwrap();
         let dense = csr.to_dense();
         assert_eq!(dense, ndarray::array![[1.0, 0.0, 3.0], [0.0, 2.0, 0.0]]);
     }

@@ -29,7 +29,11 @@ impl StratifiedCV {
     /// Create a stratified K-fold CV that preserves class proportions of
     /// `labels` in every fold.
     pub fn new(n_folds: usize, labels: Vec<usize>) -> Self {
-        Self { n_folds, labels, seed: 42 }
+        Self {
+            n_folds,
+            labels,
+            seed: 42,
+        }
     }
 
     /// Set the RNG seed used to shuffle within each class before
@@ -112,7 +116,11 @@ impl GroupCV {
     /// Create a group K-fold CV that keeps every sample sharing a group id
     /// in `groups` together in the same fold.
     pub fn new(n_folds: usize, groups: Vec<usize>) -> Self {
-        Self { n_folds, groups, seed: 42 }
+        Self {
+            n_folds,
+            groups,
+            seed: 42,
+        }
     }
 
     /// Set the RNG seed used to shuffle groups before distributing

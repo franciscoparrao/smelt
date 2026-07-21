@@ -1350,8 +1350,16 @@ fn one_hot_encoder_transform_sparse_high_cardinality_is_mostly_zero() {
     let sparse = enc.transform_sparse(&data).unwrap();
     assert_eq!(sparse.n_rows(), n);
     assert_eq!(sparse.n_cols(), n);
-    assert_eq!(sparse.nnz(), n, "exactly one nonzero per row for a pure one-hot column");
-    assert!(sparse.density() < 0.01, "density should be ~1/n, got {}", sparse.density());
+    assert_eq!(
+        sparse.nnz(),
+        n,
+        "exactly one nonzero per row for a pure one-hot column"
+    );
+    assert!(
+        sparse.density() < 0.01,
+        "density should be ~1/n, got {}",
+        sparse.density()
+    );
 }
 
 // ── LabelEncoder tests ────────────────────────────────────────────
@@ -1515,7 +1523,10 @@ fn resamplers_reject_nan_features() {
 
     let err = Smote::new().with_k_neighbors(2).balance(&task).unwrap_err();
     assert!(format!("{err}").contains("impute"), "got: {err}");
-    let err = Adasyn::new().with_k_neighbors(2).balance(&task).unwrap_err();
+    let err = Adasyn::new()
+        .with_k_neighbors(2)
+        .balance(&task)
+        .unwrap_err();
     assert!(format!("{err}").contains("impute"), "got: {err}");
 }
 
@@ -1701,7 +1712,9 @@ fn grid_search_classif_finds_best() {
     grid.insert("max_depth".into(), vec![1.0.into(), 3.0.into(), 5.0.into()]);
 
     let gs = GridSearch::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
+        |params| {
+            Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap()))
+        },
         grid,
     );
     let cv = CrossValidation::new(4).with_seed(42);
@@ -1737,7 +1750,9 @@ fn grid_search_regress() {
     grid.insert("max_depth".into(), vec![1.0.into(), 3.0.into(), 5.0.into()]);
 
     let gs = GridSearch::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
+        |params| {
+            Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap()))
+        },
         grid,
     );
     let ho = Holdout::new(0.8).with_seed(42);
@@ -1810,8 +1825,14 @@ fn grid_search_parallel_evaluation_is_deterministic() {
     let task = ClassificationTask::new("gs_det", features, target).unwrap();
 
     let mut grid = ParamGrid::new();
-    grid.insert("max_depth".into(), vec![1.0.into(), 2.0.into(), 3.0.into(), 4.0.into(), 5.0.into()]);
-    grid.insert("min_samples_split".into(), vec![2.0.into(), 3.0.into(), 4.0.into()]);
+    grid.insert(
+        "max_depth".into(),
+        vec![1.0.into(), 2.0.into(), 3.0.into(), 4.0.into(), 5.0.into()],
+    );
+    grid.insert(
+        "min_samples_split".into(),
+        vec![2.0.into(), 3.0.into(), 4.0.into()],
+    );
     let cv = CrossValidation::new(2).with_seed(42);
 
     let make_gs = || {
@@ -1870,7 +1891,9 @@ fn random_search_classif() {
     );
 
     let rs = RandomSearch::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
+        |params| {
+            Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap()))
+        },
         space,
     )
     .with_n_iter(5)
@@ -1937,7 +1960,9 @@ fn random_search_uniform() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 10.0));
 
     let rs = RandomSearch::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
+        |params| {
+            Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap()))
+        },
         space,
     )
     .with_n_iter(8)
@@ -1964,7 +1989,13 @@ fn random_search_deterministic() {
     let mut space = ParamSpace::new();
     space.insert(
         "max_depth".into(),
-        ParamDistribution::Choice(vec![1.0.into(), 2.0.into(), 3.0.into(), 4.0.into(), 5.0.into()]),
+        ParamDistribution::Choice(vec![
+            1.0.into(),
+            2.0.into(),
+            3.0.into(),
+            4.0.into(),
+            5.0.into(),
+        ]),
     );
 
     let cv = CrossValidation::new(2).with_seed(42);
@@ -2185,9 +2216,21 @@ fn spatial_block_with_block_size_uses_fixed_cell_size_not_n_folds() {
     for fold in &mut test_by_fold {
         fold.sort();
     }
-    assert_eq!(test_by_fold[0], vec![0, 1], "fold 0 should hold the first pair");
-    assert_eq!(test_by_fold[1], vec![4, 5], "fold 1 should hold the third pair");
-    assert_eq!(test_by_fold[2], vec![2, 3], "fold 2 should hold the second pair");
+    assert_eq!(
+        test_by_fold[0],
+        vec![0, 1],
+        "fold 0 should hold the first pair"
+    );
+    assert_eq!(
+        test_by_fold[1],
+        vec![4, 5],
+        "fold 1 should hold the third pair"
+    );
+    assert_eq!(
+        test_by_fold[2],
+        vec![2, 3],
+        "fold 2 should hold the second pair"
+    );
 }
 
 #[test]
@@ -2282,14 +2325,20 @@ fn load_csv_rejects_missing_target_values() {
     std::fs::write(&path, "x,y\n1.0,2.0\n3.0,NaN\n5.0,10.0\n").unwrap();
     let err = CsvLoader::from_path(&path).target("y").load_regress();
     let msg = format!("{}", err.unwrap_err());
-    assert!(msg.contains("row 1") && msg.contains("missing"), "got: {msg}");
+    assert!(
+        msg.contains("row 1") && msg.contains("missing"),
+        "got: {msg}"
+    );
 
     // Regression: "inf" parses but is unusable as a target
     let path = dir.path().join("inf_target.csv");
     std::fs::write(&path, "x,y\n1.0,2.0\n3.0,inf\n").unwrap();
     let msg = format!(
         "{}",
-        CsvLoader::from_path(&path).target("y").load_regress().unwrap_err()
+        CsvLoader::from_path(&path)
+            .target("y")
+            .load_regress()
+            .unwrap_err()
     );
     assert!(msg.contains("not finite"), "got: {msg}");
 
@@ -2298,15 +2347,24 @@ fn load_csv_rejects_missing_target_values() {
     std::fs::write(&path, "x,label\n1.0,a\n2.0,NA\n3.0,b\n").unwrap();
     let msg = format!(
         "{}",
-        CsvLoader::from_path(&path).target("label").load_classif().unwrap_err()
+        CsvLoader::from_path(&path)
+            .target("label")
+            .load_classif()
+            .unwrap_err()
     );
-    assert!(msg.contains("row 1") && msg.contains("missing"), "got: {msg}");
+    assert!(
+        msg.contains("row 1") && msg.contains("missing"),
+        "got: {msg}"
+    );
 
     // Missing values in FEATURES stay allowed (NaN pipeline), only the
     // target is strict.
     let path = dir.path().join("na_feature.csv");
     std::fs::write(&path, "x,y\nNA,2.0\n3.0,6.0\n").unwrap();
-    let task = CsvLoader::from_path(&path).target("y").load_regress().unwrap();
+    let task = CsvLoader::from_path(&path)
+        .target("y")
+        .load_regress()
+        .unwrap();
     assert!(task.features()[[0, 0]].is_nan());
 }
 
@@ -2359,11 +2417,17 @@ fn load_csv_missing_values_become_nan() {
     )
     .unwrap();
 
-    let task = CsvLoader::from_path(&path).target("y").load_regress().unwrap();
+    let task = CsvLoader::from_path(&path)
+        .target("y")
+        .load_regress()
+        .unwrap();
     let f = task.features();
     assert!(f[[0, 1]].is_nan(), "empty cell must load as NaN");
     assert!(f[[1, 0]].is_nan(), "NA must load as NaN");
-    assert!(f[[2, 0]].is_nan() && f[[2, 1]].is_nan(), "nan/NULL must load as NaN");
+    assert!(
+        f[[2, 0]].is_nan() && f[[2, 1]].is_nan(),
+        "nan/NULL must load as NaN"
+    );
     assert!(f[[3, 0]].is_nan(), "? must load as NaN");
     assert_eq!(f[[0, 0]], 1.0);
     assert_eq!(f[[3, 1]], 8.0);
@@ -2381,7 +2445,10 @@ fn load_csv_string_column_auto_categorical() {
     )
     .unwrap();
 
-    let task = CsvLoader::from_path(&path).target("y").load_regress().unwrap();
+    let task = CsvLoader::from_path(&path)
+        .target("y")
+        .load_regress()
+        .unwrap();
     assert_eq!(task.categorical_features(), vec![0]);
     assert_eq!(
         task.feature_types()[0],
@@ -2403,7 +2470,10 @@ fn load_csv_forced_categorical_column() {
     std::fs::write(&path, "region,x,y\n3,1.0,0\n7,2.0,1\n3,3.0,0\n").unwrap();
 
     // Without forcing, "region" parses as numeric.
-    let plain = CsvLoader::from_path(&path).target("y").load_classif().unwrap();
+    let plain = CsvLoader::from_path(&path)
+        .target("y")
+        .load_classif()
+        .unwrap();
     assert!(plain.categorical_features().is_empty());
 
     let task = CsvLoader::from_path(&path)
@@ -2524,8 +2594,13 @@ mod parquet_tests {
             ],
         );
 
-        let err = ParquetLoader::from_path(&path).target("species").load_classif();
-        assert!(err.is_err(), "null in string target must error, not become a phantom \"\" class");
+        let err = ParquetLoader::from_path(&path)
+            .target("species")
+            .load_classif();
+        assert!(
+            err.is_err(),
+            "null in string target must error, not become a phantom \"\" class"
+        );
     }
 
     #[test]
@@ -2541,7 +2616,9 @@ mod parquet_tests {
             ],
         );
 
-        let err = ParquetLoader::from_path(&path).target("missing").load_classif();
+        let err = ParquetLoader::from_path(&path)
+            .target("missing")
+            .load_classif();
         assert!(err.is_err());
     }
 
@@ -2647,8 +2724,12 @@ fn nan_features_rejected_by_non_nan_learners_accepted_by_boosting() {
         [4.0, 5.0],
         [5.0, 6.0]
     ];
-    let rtask = RegressionTask::new("nan_policy", features.clone(), vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
-        .unwrap();
+    let rtask = RegressionTask::new(
+        "nan_policy",
+        features.clone(),
+        vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+    )
+    .unwrap();
     let ctask = ClassificationTask::new("nan_policy", features, vec![0, 1, 0, 1, 0, 1]).unwrap();
 
     // Non-NaN-capable learners: clear error at train time.
@@ -2659,7 +2740,12 @@ fn nan_features_rejected_by_non_nan_learners_accepted_by_boosting() {
     assert!(LogisticRegression::new().train_classif(&ctask).is_err());
 
     // Boosting engines: NaN is a first-class missing value.
-    assert!(XGBoost::new().with_n_estimators(5).train_regress(&rtask).is_ok());
+    assert!(
+        XGBoost::new()
+            .with_n_estimators(5)
+            .train_regress(&rtask)
+            .is_ok()
+    );
     assert!(
         LightGBM::new()
             .with_n_estimators(5)
@@ -2668,7 +2754,12 @@ fn nan_features_rejected_by_non_nan_learners_accepted_by_boosting() {
             .train_regress(&rtask)
             .is_ok()
     );
-    assert!(CatBoost::new().with_n_estimators(5).train_regress(&rtask).is_ok());
+    assert!(
+        CatBoost::new()
+            .with_n_estimators(5)
+            .train_regress(&rtask)
+            .is_ok()
+    );
 }
 
 #[test]
@@ -3393,7 +3484,11 @@ fn linear_svm_defaults_learn_separable_data_at_realistic_n() {
         let n = 400;
         let features = Array2::from_shape_fn((n, 2), |(i, j)| {
             let raw = ((i * 7 + j * 3) % 100) as f64 / 100.0;
-            if j == 0 { raw * scale_x } else { raw * scale_y + offset }
+            if j == 0 {
+                raw * scale_x
+            } else {
+                raw * scale_y + offset
+            }
         });
         let target: Vec<usize> = (0..n)
             .map(|i| {
@@ -3410,7 +3505,12 @@ fn linear_svm_defaults_learn_separable_data_at_realistic_n() {
         let pred = model.predict(&features).unwrap();
         let acc = match pred {
             Prediction::Classification { predicted, .. } => {
-                predicted.iter().zip(&target).filter(|(a, b)| a == b).count() as f64 / n as f64
+                predicted
+                    .iter()
+                    .zip(&target)
+                    .filter(|(a, b)| a == b)
+                    .count() as f64
+                    / n as f64
             }
             _ => panic!("expected classification"),
         };
@@ -3947,7 +4047,9 @@ fn split_conformal_matches_model_driven_calibration() {
     let intervals = via_preds.intervals_for(&test_pred);
     assert_eq!(intervals.len(), 2);
     assert_eq!(intervals[0].prediction, 3.0);
-    assert!((intervals[0].upper - intervals[0].lower - 2.0 * via_preds.interval_width()).abs() < 1e-12);
+    assert!(
+        (intervals[0].upper - intervals[0].lower - 2.0 * via_preds.interval_width()).abs() < 1e-12
+    );
 }
 
 /// Mismatched calibration lengths must be a clean error, not a silent
@@ -3982,7 +4084,7 @@ fn split_conformal_calibrates_kriging_predict_spatial() {
             let (cx, cy) = coords_all[i];
             features_all[[i, 0]] * 3.0
                 + (cx * 0.3).sin() + (cy * 0.4).cos()          // spatial signal
-                + ((i as f64 * 12.9898).sin() * 0.2)           // pseudo-noise
+                + ((i as f64 * 12.9898).sin() * 0.2) // pseudo-noise
         })
         .collect();
 
@@ -3996,7 +4098,9 @@ fn split_conformal_calibrates_kriging_predict_spatial() {
         (
             features_all.select(Axis(0), idx).to_owned(),
             idx.iter().map(|&i| target_all[i]).collect::<Vec<f64>>(),
-            idx.iter().map(|&i| coords_all[i]).collect::<Vec<(f64, f64)>>(),
+            idx.iter()
+                .map(|&i| coords_all[i])
+                .collect::<Vec<(f64, f64)>>(),
         )
     };
     let (tr_f, tr_t, tr_c) = sel(&tr_idx);
@@ -4071,8 +4175,7 @@ fn conformal_rejects_alpha_out_of_range() {
 
     for bad_alpha in [0.0, 1.0, 1.5, -0.1] {
         assert!(
-            ConformalRegressor::calibrate(&*model, &cal_features, &cal_targets, bad_alpha)
-                .is_err(),
+            ConformalRegressor::calibrate(&*model, &cal_features, &cal_targets, bad_alpha).is_err(),
             "alpha={bad_alpha} should be rejected"
         );
     }
@@ -4090,9 +4193,7 @@ fn conformal_rejects_empty_calibration_set() {
 
     let empty_features = Array2::<f64>::zeros((0, 1));
     let empty_targets: Vec<f64> = vec![];
-    assert!(
-        ConformalRegressor::calibrate(&*model, &empty_features, &empty_targets, 0.1).is_err()
-    );
+    assert!(ConformalRegressor::calibrate(&*model, &empty_features, &empty_targets, 0.1).is_err());
 }
 
 /// Regression test: previously, when the calibration set was too small to
@@ -4267,7 +4368,9 @@ fn stacking_classif_survives_fold_missing_a_class() {
     let task = ClassificationTask::new("stack_imbalanced", features, target).unwrap();
 
     let mut stack = Stacking::new(
-        vec![Box::new(|| Box::new(DecisionTree::default()) as Box<dyn Learner>)],
+        vec![Box::new(|| {
+            Box::new(DecisionTree::default()) as Box<dyn Learner>
+        })],
         || Box::new(LogisticRegression::new().with_max_iter(500)),
     )
     .with_cv_folds(3);
@@ -4432,14 +4535,25 @@ fn ebm_feature_importance() {
 #[test]
 fn ebm_rejects_multiclass_target() {
     let features = array![
-        [0.0], [0.1], [0.2], [1.0], [1.1], [1.2], [2.0], [2.1], [2.2]
+        [0.0],
+        [0.1],
+        [0.2],
+        [1.0],
+        [1.1],
+        [1.2],
+        [2.0],
+        [2.1],
+        [2.2]
     ];
     let target = vec![0, 0, 0, 1, 1, 1, 2, 2, 2];
     let task = ClassificationTask::new("ebm_multiclass", features, target).unwrap();
 
     let mut ebm = EBM::new().with_n_rounds(10);
     let err = ebm.train_classif(&task);
-    assert!(err.is_err(), "EBM must reject a 3-class target instead of silently treating it as binary");
+    assert!(
+        err.is_err(),
+        "EBM must reject a 3-class target instead of silently treating it as binary"
+    );
 }
 
 // ── SMOTE tests ────────────────────────────────────────────────────
@@ -4708,7 +4822,9 @@ fn bayesian_optimizer_classif() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 10.0));
 
     let bo = BayesianOptimizer::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
+        |params| {
+            Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap()))
+        },
         space,
     )
     .with_n_iter(15)
@@ -4746,7 +4862,9 @@ fn bayesian_optimizer_regress() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 8.0));
 
     let bo = BayesianOptimizer::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
+        |params| {
+            Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap()))
+        },
         space,
     )
     .with_n_iter(12)
@@ -5534,7 +5652,9 @@ fn filter_relief_selects_informative() {
         [11.0, 99.0],
         [12.0, 55.0],
     ];
-    let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0];
+    let target = vec![
+        2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0,
+    ];
 
     let mut selector = FilterSelector::relief(1);
     selector.fit_supervised(&features, &target).unwrap();
@@ -5723,7 +5843,10 @@ fn mondrian_forest_works_through_generic_benchmark_cv() {
     let cv = CrossValidation::new(3).with_seed(0);
     let result = benchmark::resample_classif(&mut forest, &task, &cv, &[&Accuracy]).unwrap();
     let mean_acc = result.mean_scores()[0];
-    assert!(mean_acc > 0.8, "MondrianForest via generic CV should fit this threshold rule well, got {mean_acc}");
+    assert!(
+        mean_acc > 0.8,
+        "MondrianForest via generic CV should fit this threshold rule well, got {mean_acc}"
+    );
 }
 
 #[test]
@@ -5745,7 +5868,10 @@ fn mondrian_tree_regress_via_learner_trait() {
         .sum::<f64>()
         / target.len() as f64)
         .sqrt();
-    assert!(rmse < 1.0, "should fit a simple linear trend well, got RMSE={rmse}");
+    assert!(
+        rmse < 1.0,
+        "should fit a simple linear trend well, got RMSE={rmse}"
+    );
 }
 
 // ── Prioridad 3 quick items: ELM, Cost-Sensitive, Deep Forest ───────
@@ -5770,29 +5896,42 @@ fn elm_works_through_generic_benchmark_cv() {
     let cv = CrossValidation::new(3).with_seed(0);
     let result = benchmark::resample_classif(&mut elm, &task, &cv, &[&Accuracy]).unwrap();
     let mean_acc = result.mean_scores()[0];
-    assert!(mean_acc > 0.8, "ELM via generic CV should fit this boundary well, got {mean_acc}");
+    assert!(
+        mean_acc > 0.8,
+        "ELM via generic CV should fit this boundary well, got {mean_acc}"
+    );
 }
 
 #[test]
 fn cost_sensitive_classifier_works_through_generic_learner_trait() {
     let features = array![
-        [0.0], [0.5], [1.0], [1.5], [2.0], [2.5],
-        [7.0], [7.5], [8.0], [8.5], [9.0], [9.5]
+        [0.0],
+        [0.5],
+        [1.0],
+        [1.5],
+        [2.0],
+        [2.5],
+        [7.0],
+        [7.5],
+        [8.0],
+        [8.5],
+        [9.0],
+        [9.5]
     ];
     let target = vec![0usize, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1];
     let task = ClassificationTask::new("cost_cv", features.clone(), target.clone()).unwrap();
 
-    let mut cs = CostSensitiveClassifier::binary(
-        || Box::new(LogisticRegression::new()),
-        1.0,
-        5.0,
-    );
+    let mut cs = CostSensitiveClassifier::binary(|| Box::new(LogisticRegression::new()), 1.0, 5.0);
     let model = cs.train_classif(&task).unwrap();
     let pred = model.predict(&features).unwrap();
     let Prediction::Classification { predicted, .. } = pred else {
         panic!("expected classification");
     };
-    let correct = predicted.iter().zip(&target).filter(|(p, t)| *p == *t).count();
+    let correct = predicted
+        .iter()
+        .zip(&target)
+        .filter(|(p, t)| *p == *t)
+        .count();
     assert!(
         correct as f64 / target.len() as f64 > 0.8,
         "cost-sensitive wrapper should still separate a clearly separable dataset well"
@@ -5822,7 +5961,10 @@ fn deep_forest_works_through_generic_benchmark_cv() {
     let cv = CrossValidation::new(3).with_seed(0);
     let result = benchmark::resample_classif(&mut df, &task, &cv, &[&Accuracy]).unwrap();
     let mean_acc = result.mean_scores()[0];
-    assert!(mean_acc > 0.8, "DeepForest via generic CV should fit this boundary well, got {mean_acc}");
+    assert!(
+        mean_acc > 0.8,
+        "DeepForest via generic CV should fit this boundary well, got {mean_acc}"
+    );
 }
 
 // ── Hyperband tests ────────────────────────────────────────────────
@@ -5856,7 +5998,9 @@ fn hyperband_classif() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 8.0));
 
     let hb = Hyperband::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
+        |params| {
+            Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap()))
+        },
         space,
     )
     .with_max_folds(4)
@@ -5898,7 +6042,11 @@ fn hyperband_parallel_evaluation_is_deterministic() {
         let mut space = ParamSpace::new();
         space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 8.0));
         Hyperband::new(
-            |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
+            |params| {
+                Box::new(
+                    DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap()),
+                )
+            },
             space,
         )
         .with_max_folds(4)
@@ -6128,8 +6276,6 @@ fn qrf_predicts_median() {
 
 #[test]
 fn qrf_quantile_ordering() {
-    
-
     let features = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
     let target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
     let task = RegressionTask::new("qrf_q", features.clone(), target).unwrap();
@@ -6334,14 +6480,22 @@ fn cqr_calibrate_rejects_mismatched_calibration_lengths() {
     // 3 calibration rows but only 2 targets.
     let cal_features = array![[6.0], [7.0], [8.0]];
     let cal_targets = vec![12.0, 14.0];
-    let Err(err) = CQR::calibrate(&*lower_model, &*upper_model, &cal_features, &cal_targets, 0.1)
-    else {
+    let Err(err) = CQR::calibrate(
+        &*lower_model,
+        &*upper_model,
+        &cal_features,
+        &cal_targets,
+        0.1,
+    ) else {
         panic!("mismatched calibration lengths must be rejected, not zip-truncated");
     };
     assert!(
         matches!(
             err,
-            smelt_ml::SmeltError::DimensionMismatch { expected: 2, got: 3 }
+            smelt_ml::SmeltError::DimensionMismatch {
+                expected: 2,
+                got: 3
+            }
         ),
         "got: {err:?}"
     );
@@ -6363,14 +6517,16 @@ fn conformal_classifier_calibrate_rejects_mismatched_calibration_lengths() {
     // 3 calibration rows but only 2 targets.
     let cal_features = array![[0.5], [1.0], [2.0]];
     let cal_targets = vec![0, 1];
-    let Err(err) = ConformalClassifier::calibrate(&*model, &cal_features, &cal_targets, 0.1)
-    else {
+    let Err(err) = ConformalClassifier::calibrate(&*model, &cal_features, &cal_targets, 0.1) else {
         panic!("mismatched calibration lengths must be rejected, not zip-truncated");
     };
     assert!(
         matches!(
             err,
-            smelt_ml::SmeltError::DimensionMismatch { expected: 2, got: 3 }
+            smelt_ml::SmeltError::DimensionMismatch {
+                expected: 2,
+                got: 3
+            }
         ),
         "got: {err:?}"
     );
@@ -7342,7 +7498,9 @@ fn hyperband_regress() {
     space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 6.0));
 
     let hb = Hyperband::new(
-        |params| Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap())),
+        |params| {
+            Box::new(DecisionTree::new().with_max_depth(params["max_depth"].as_usize().unwrap()))
+        },
         space,
     )
     .with_max_folds(3)
@@ -7503,7 +7661,8 @@ fn target_transform_composes_with_cv_resampling() {
     }
     let task = RegressionTask::new("cv_log", features, target).unwrap();
 
-    let mut ttr = TargetTransformRegressor::new(|| Box::new(LinearRegression), TargetTransform::Log);
+    let mut ttr =
+        TargetTransformRegressor::new(|| Box::new(LinearRegression), TargetTransform::Log);
     let cv = CrossValidation::new(5).with_seed(42);
     let result = benchmark::resample_regress(&mut ttr, &task, &cv, &[&Rmse]).unwrap();
     let mean_rmse = result.mean_scores()[0];
@@ -7532,10 +7691,8 @@ fn target_transform_feature_metadata_reaches_base_learner() {
             "meta_probe"
         }
         fn train_regress(&mut self, task: &RegressionTask) -> Result<Box<dyn TrainedModel>> {
-            *self.seen.lock().unwrap() = Some((
-                task.feature_names().to_vec(),
-                task.feature_types().to_vec(),
-            ));
+            *self.seen.lock().unwrap() =
+                Some((task.feature_names().to_vec(), task.feature_types().to_vec()));
             LinearRegression.train_regress(task)
         }
     }

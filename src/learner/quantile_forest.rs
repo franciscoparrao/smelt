@@ -8,8 +8,8 @@
 use crate::learner::tree::{MaxFeatures, mse_from_sums};
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
-use crate::{Result, SmeltError};
 use crate::task::{RegressionTask, Task};
+use crate::{Result, SmeltError};
 use ndarray::Array2;
 use rand::Rng;
 use rand::SeedableRng;
@@ -496,10 +496,16 @@ mod tests {
             target.push(y);
         }
         let features = Array2::from_shape_vec((n, p), feats).unwrap();
-        let task = RegressionTask::new("qrf_sparse_signal", features.clone(), target.clone()).unwrap();
+        let task =
+            RegressionTask::new("qrf_sparse_signal", features.clone(), target.clone()).unwrap();
 
         let rmse = |predicted: &[f64]| -> f64 {
-            (predicted.iter().zip(&target).map(|(p, t)| (p - t).powi(2)).sum::<f64>() / n as f64)
+            (predicted
+                .iter()
+                .zip(&target)
+                .map(|(p, t)| (p - t).powi(2))
+                .sum::<f64>()
+                / n as f64)
                 .sqrt()
         };
 
@@ -512,7 +518,9 @@ mod tests {
 
         let mut default_qrf = QuantileForest::new().with_n_estimators(50).with_seed(1);
         let default_model = default_qrf.train_regress(&task).unwrap();
-        let default_rmse = rmse(&regression_values(default_model.predict(&features).unwrap()));
+        let default_rmse = rmse(&regression_values(
+            default_model.predict(&features).unwrap(),
+        ));
 
         let mut sqrt_qrf = QuantileForest::new()
             .with_n_estimators(50)
@@ -553,8 +561,9 @@ mod tests {
             let target: Vec<f64> = base.iter().map(|y| y + offset).collect();
             let mut rng = StdRng::seed_from_u64(0);
             let mut imp = vec![0.0; 1];
-            let root =
-                build_qrf_tree(&features, &target, &indices, None, 1, 1, None, 0, &mut rng, &mut imp);
+            let root = build_qrf_tree(
+                &features, &target, &indices, None, 1, 1, None, 0, &mut rng, &mut imp,
+            );
             let QRFNode::Split { threshold, .. } = root else {
                 panic!("a step signal must produce a root split, got a leaf at offset {offset}");
             };
@@ -604,7 +613,9 @@ mod tests {
             assert!(
                 q10[i] <= q50[i] && q50[i] <= q90[i],
                 "quantiles must be ordered at sample {i}: q10={} q50={} q90={}",
-                q10[i], q50[i], q90[i]
+                q10[i],
+                q50[i],
+                q90[i]
             );
         }
 
@@ -615,7 +626,10 @@ mod tests {
 
         let intervals = model.predict_interval(&features, 0.2).unwrap();
         for (i, &(lo, hi)) in intervals.iter().enumerate() {
-            assert!((lo, hi) == (q10[i], q90[i]), "alpha=0.2 interval must span q10..q90");
+            assert!(
+                (lo, hi) == (q10[i], q90[i]),
+                "alpha=0.2 interval must span q10..q90"
+            );
         }
 
         for bad_q in [-0.1, 1.5, f64::NAN] {
@@ -660,7 +674,10 @@ mod tests {
         assert_eq!(imp.len(), p);
         assert_eq!(imp[0].0, "x0");
         let total: f64 = imp.iter().map(|(_, v)| v).sum();
-        assert!((total - 1.0).abs() < 1e-9, "importances must be normalized, sum={total}");
+        assert!(
+            (total - 1.0).abs() < 1e-9,
+            "importances must be normalized, sum={total}"
+        );
         for (name, v) in imp.iter().skip(1) {
             assert!(
                 imp[0].1 > *v,

@@ -147,7 +147,10 @@ impl ThresholdedClassifier {
             Prediction::Classification {
                 probabilities: Some(p),
                 ..
-            } => Ok(p.iter().map(|row| row.get(1).copied().unwrap_or(0.0)).collect()),
+            } => Ok(p
+                .iter()
+                .map(|row| row.get(1).copied().unwrap_or(0.0))
+                .collect()),
             Prediction::Classification {
                 probabilities: None,
                 ..
@@ -245,7 +248,11 @@ impl ThresholdedClassifier {
         let maximize = measure.maximize();
         let probs: Vec<Vec<f64>> = p1.iter().map(|&p| vec![1.0 - p, p]).collect();
         let mut best_t = 0.5_f64;
-        let mut best_score = if maximize { f64::NEG_INFINITY } else { f64::INFINITY };
+        let mut best_score = if maximize {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        };
         for &t in &candidates {
             let predicted: Vec<usize> = p1.iter().map(|&p| usize::from(p >= t)).collect();
             let pred = Prediction::Classification {
@@ -376,8 +383,8 @@ mod tests {
 
     #[test]
     fn registered_id_and_best_threshold_exposed() {
-        let tc = ThresholdedClassifier::new(|| Box::new(LogisticRegression::new()))
-            .with_threshold(0.42);
+        let tc =
+            ThresholdedClassifier::new(|| Box::new(LogisticRegression::new())).with_threshold(0.42);
         assert_eq!(tc.id(), "thresholded");
         let (x, y) = imbalanced(80, 1);
         let task = ClassificationTask::new("t", x, y).unwrap();
@@ -439,7 +446,10 @@ mod tests {
             _ => panic!(),
         };
         let n = x.nrows();
-        assert!(count1(&hi) <= n / 20, "threshold 0.99 => almost all class 0");
+        assert!(
+            count1(&hi) <= n / 20,
+            "threshold 0.99 => almost all class 0"
+        );
         assert_eq!(count1(&lo), n, "threshold 0.0 => all class 1");
     }
 

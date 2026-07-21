@@ -546,16 +546,16 @@ mod tests {
     }
 
     fn brier_on(model: &dyn TrainedModel, x: &Array2<f64>, y: &[usize]) -> f64 {
-        let pred = model
-            .predict(x)
-            .unwrap()
-            .with_truth_classif(y.to_vec());
+        let pred = model.predict(x).unwrap().with_truth_classif(y.to_vec());
         Brier.score(&pred).unwrap()
     }
 
     #[test]
     fn registered_id() {
-        let cc = CalibratedClassifier::new(|| Box::new(DecisionTree::default()), CalibrationMethod::Platt);
+        let cc = CalibratedClassifier::new(
+            || Box::new(DecisionTree::default()),
+            CalibrationMethod::Platt,
+        );
         assert_eq!(cc.id(), "calibrated");
     }
 
@@ -594,7 +594,12 @@ mod tests {
 
         let raw_model = LogisticRegression::new().train_classif(&task).unwrap();
         let raw_auc = AucRoc
-            .score(&raw_model.predict(&xte).unwrap().with_truth_classif(yte.clone()))
+            .score(
+                &raw_model
+                    .predict(&xte)
+                    .unwrap()
+                    .with_truth_classif(yte.clone()),
+            )
             .unwrap();
 
         let mut cc = CalibratedClassifier::new(
@@ -701,18 +706,15 @@ mod tests {
             fn properties(&self) -> LearnerProperties {
                 LearnerProperties::classifier()
             }
-            fn train_classif(
-                &mut self,
-                _t: &ClassificationTask,
-            ) -> Result<Box<dyn TrainedModel>> {
+            fn train_classif(&mut self, _t: &ClassificationTask) -> Result<Box<dyn TrainedModel>> {
                 Ok(Box::new(NoProbaModel))
             }
         }
 
         let (x, y) = noisy_binary(60, 4);
         let task = ClassificationTask::new("t", x, y).unwrap();
-        let mut cc = CalibratedClassifier::new(|| Box::new(NoProba), CalibrationMethod::Platt)
-            .with_seed(1);
+        let mut cc =
+            CalibratedClassifier::new(|| Box::new(NoProba), CalibrationMethod::Platt).with_seed(1);
         assert!(cc.train_classif(&task).is_err());
     }
 
@@ -730,8 +732,10 @@ mod tests {
         let wtask = ClassificationTask::new("t", x, y)
             .unwrap()
             .with_weights(vec![1.0; 40]);
-        let mut cc =
-            CalibratedClassifier::new(|| Box::new(DecisionTree::default()), CalibrationMethod::Platt);
+        let mut cc = CalibratedClassifier::new(
+            || Box::new(DecisionTree::default()),
+            CalibrationMethod::Platt,
+        );
         let err = cc.train_classif(&wtask).map(|_| ()).unwrap_err();
         assert!(format!("{err}").contains("does not support sample weights"));
     }
@@ -756,6 +760,10 @@ mod tests {
                 _ => panic!(),
             }
         };
-        assert_eq!(run(), run(), "same seed must give identical calibrated probs");
+        assert_eq!(
+            run(),
+            run(),
+            "same seed must give identical calibrated probs"
+        );
     }
 }

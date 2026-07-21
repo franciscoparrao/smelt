@@ -84,11 +84,12 @@ impl Resample for SpatialBlockCV {
             ));
         }
         if let Some(bs) = self.block_size
-            && bs <= 0.0 {
-                return Err(SmeltError::InvalidParameter(format!(
-                    "SpatialBlockCV block_size must be positive, got {bs}"
-                )));
-            }
+            && bs <= 0.0
+        {
+            return Err(SmeltError::InvalidParameter(format!(
+                "SpatialBlockCV block_size must be positive, got {bs}"
+            )));
+        }
 
         // Compute bounding box
         let (mut min_x, mut min_y) = (f64::INFINITY, f64::INFINITY);

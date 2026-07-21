@@ -27,12 +27,14 @@ use smelt_ml::measure::Measure;
 // time) -- e.g. `Bagging(base="decision_tree")`, not `Bagging(base=DecisionTree())`.
 
 pub(crate) fn validate_learner_id(id: &str) -> PyResult<()> {
-    smelt_ml::prelude::learner_from_id(id).map(|_| ()).map_err(|_| {
-        pyo3::exceptions::PyValueError::new_err(format!(
-            "unknown base learner id \"{id}\"; valid ids: {}",
-            smelt_ml::prelude::registered_learner_ids().join(", ")
-        ))
-    })
+    smelt_ml::prelude::learner_from_id(id)
+        .map(|_| ())
+        .map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown base learner id \"{id}\"; valid ids: {}",
+                smelt_ml::prelude::registered_learner_ids().join(", ")
+            ))
+        })
 }
 
 /// Learner id strings accepted as `base`/`meta` by Bagging, Stacking, and
@@ -176,7 +178,10 @@ impl CostSensitiveClassifier {
         let base = self.base.clone();
         let cost_matrix = self.cost_matrix.clone();
         let mut learner = smelt_ml::prelude::CostSensitiveClassifier::new(
-            move || smelt_ml::prelude::learner_from_id(&base).expect("validated in CostSensitiveClassifier::new"),
+            move || {
+                smelt_ml::prelude::learner_from_id(&base)
+                    .expect("validated in CostSensitiveClassifier::new")
+            },
             cost_matrix,
         );
         let (model, is_classif) = fit_learner(py, &mut learner, to_array2(x), y, sample_weight)?;
@@ -203,7 +208,11 @@ impl CostSensitiveClassifier {
 
     #[getter]
     fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
-        Ok(self.trained.as_ref().ok_or_else(not_fitted)?.feature_importance())
+        Ok(self
+            .trained
+            .as_ref()
+            .ok_or_else(not_fitted)?
+            .feature_importance())
     }
 }
 
@@ -426,7 +435,11 @@ impl CalibratedClassifier {
 
     #[getter]
     fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
-        Ok(self.trained.as_ref().ok_or_else(not_fitted)?.feature_importance())
+        Ok(self
+            .trained
+            .as_ref()
+            .ok_or_else(not_fitted)?
+            .feature_importance())
     }
 
     fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
@@ -459,7 +472,7 @@ impl CalibratedClassifier {
                     other => {
                         return Err(PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"
-                        )))
+                        )));
                     }
                 }
             }
@@ -553,7 +566,9 @@ impl ThresholdedClassifier {
             Some(t) => wrapper.with_threshold(t),
             None => wrapper.with_metric(resolve_threshold_metric(&self.metric)?),
         };
-        wrapper = wrapper.with_calib_fraction(self.calib_fraction).with_seed(self.seed);
+        wrapper = wrapper
+            .with_calib_fraction(self.calib_fraction)
+            .with_seed(self.seed);
 
         let trained = py
             .allow_threads(|| wrapper.fit_classif(&task))
@@ -589,7 +604,11 @@ impl ThresholdedClassifier {
 
     #[getter]
     fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
-        Ok(self.trained.as_ref().ok_or_else(not_fitted)?.feature_importance())
+        Ok(self
+            .trained
+            .as_ref()
+            .ok_or_else(not_fitted)?
+            .feature_importance())
     }
 
     fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
@@ -624,7 +643,7 @@ impl ThresholdedClassifier {
                     other => {
                         return Err(PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"
-                        )))
+                        )));
                     }
                 }
             }
@@ -687,16 +706,20 @@ impl Stacking {
         y: &Bound<'_, PyAny>,
         sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
-        let base_factories: Vec<Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>> =
-            self.base_learners
-                .iter()
-                .cloned()
-                .map(|id| -> Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync> {
+        let base_factories: Vec<
+            Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>,
+        > = self
+            .base_learners
+            .iter()
+            .cloned()
+            .map(
+                |id| -> Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync> {
                     Box::new(move || {
                         smelt_ml::prelude::learner_from_id(&id).expect("validated in Stacking::new")
                     })
-                })
-                .collect();
+                },
+            )
+            .collect();
         let meta = self.meta.clone();
         let mut learner = smelt_ml::prelude::Stacking::new(base_factories, move || {
             smelt_ml::prelude::learner_from_id(&meta).expect("validated in Stacking::new")
@@ -745,7 +768,12 @@ impl DynamicEnsemble {
     /// evaluate each base model's local competence, never to train them.
     #[new]
     #[pyo3(signature = (base_learners, k_neighbors=7, dsel_fraction=0.3, seed=42))]
-    fn new(base_learners: Vec<String>, k_neighbors: usize, dsel_fraction: f64, seed: u64) -> PyResult<Self> {
+    fn new(
+        base_learners: Vec<String>,
+        k_neighbors: usize,
+        dsel_fraction: f64,
+        seed: u64,
+    ) -> PyResult<Self> {
         if base_learners.is_empty() {
             return Err(PyRuntimeError::new_err(
                 "DynamicEnsemble requires at least 1 base learner",
@@ -776,17 +804,21 @@ impl DynamicEnsemble {
         y: &Bound<'_, PyAny>,
         sample_weight: Option<Vec<f64>>,
     ) -> PyResult<()> {
-        let base_factories: Vec<Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>> =
-            self.base_learners
-                .iter()
-                .cloned()
-                .map(|id| -> Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync> {
+        let base_factories: Vec<
+            Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync>,
+        > = self
+            .base_learners
+            .iter()
+            .cloned()
+            .map(
+                |id| -> Box<dyn Fn() -> Box<dyn smelt_ml::learner::Learner> + Send + Sync> {
                     Box::new(move || {
                         smelt_ml::prelude::learner_from_id(&id)
                             .expect("validated in DynamicEnsemble::new")
                     })
-                })
-                .collect();
+                },
+            )
+            .collect();
         let mut learner = smelt_ml::prelude::DynamicEnsemble::new(base_factories)
             .with_k_neighbors(self.k_neighbors)
             .with_dsel_fraction(self.dsel_fraction)
@@ -814,7 +846,6 @@ impl DynamicEnsemble {
     }
 }
 
-
 add_explain_methods!(
     Bagging,
     Stacking,
@@ -825,13 +856,13 @@ add_explain_methods!(
     ThresholdedClassifier
 );
 
-declare_support!(Bagging,                classif = true, regress = true);
-declare_support!(Stacking,               classif = true, regress = true);
-declare_support!(DynamicEnsemble,        classif = true, regress = false);
+declare_support!(Bagging, classif = true, regress = true);
+declare_support!(Stacking, classif = true, regress = true);
+declare_support!(DynamicEnsemble, classif = true, regress = false);
 declare_support!(CostSensitiveClassifier, classif = true, regress = false);
 declare_support!(TargetTransformRegressor, classif = false, regress = true);
-declare_support!(CalibratedClassifier,   classif = true, regress = false);
-declare_support!(ThresholdedClassifier,  classif = true, regress = false);
+declare_support!(CalibratedClassifier, classif = true, regress = false);
+declare_support!(ThresholdedClassifier, classif = true, regress = false);
 
 // All 5 hold their base learner(s)' `Box<dyn TrainedModel>` internally, so
 // `SerializableModel` (`src/serialize.rs`) has no variant for any of
@@ -879,7 +910,7 @@ impl Bagging {
                     other => {
                         return Err(PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"
-                        )))
+                        )));
                     }
                 }
             }
@@ -912,7 +943,7 @@ impl CostSensitiveClassifier {
                     other => {
                         return Err(PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"
-                        )))
+                        )));
                     }
                 }
             }
@@ -949,7 +980,7 @@ impl TargetTransformRegressor {
                     other => {
                         return Err(PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"
-                        )))
+                        )));
                     }
                 }
             }
@@ -997,7 +1028,7 @@ impl Stacking {
                     other => {
                         return Err(PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"
-                        )))
+                        )));
                     }
                 }
             }
@@ -1041,7 +1072,7 @@ impl DynamicEnsemble {
                     other => {
                         return Err(PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"
-                        )))
+                        )));
                     }
                 }
             }

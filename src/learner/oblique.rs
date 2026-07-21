@@ -894,7 +894,11 @@ mod tests {
         else {
             panic!("expected classification with probabilities");
         };
-        assert_eq!(probs[0].len(), 3, "probability rows must be n_classes wide, not n_features wide");
+        assert_eq!(
+            probs[0].len(),
+            3,
+            "probability rows must be n_classes wide, not n_features wide"
+        );
 
         // 5 features, 2 classes: n_classes (2) < n_features (5) — the
         // silent-wrong-length failure mode (no panic, but wrong width).
@@ -919,7 +923,11 @@ mod tests {
         else {
             panic!("expected classification with probabilities");
         };
-        assert_eq!(probs2[0].len(), 2, "probability rows must be n_classes wide, not n_features wide");
+        assert_eq!(
+            probs2[0].len(),
+            2,
+            "probability rows must be n_classes wide, not n_features wide"
+        );
     }
 
     fn test_builder(n_features: usize) -> ObliqueTreeBuilder {
@@ -963,7 +971,10 @@ mod tests {
         );
         assert_eq!(left.len(), 3);
         assert_eq!(right.len(), 3);
-        assert!(gain > 0.49, "a perfect split should recover ~all of the parent's gini: {gain}");
+        assert!(
+            gain > 0.49,
+            "a perfect split should recover ~all of the parent's gini: {gain}"
+        );
     }
 
     /// Regression test for the M-3 regression-path sweep inheriting the

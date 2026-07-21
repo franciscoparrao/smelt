@@ -118,7 +118,10 @@ const WILCOXON_EXACT_MAX_N: usize = 100;
 /// `TestResult` with the W statistic and two-sided p-value.
 pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> Result<TestResult> {
     if a.len() != b.len() {
-        return Err(SmeltError::DimensionMismatch { expected: a.len(), got: b.len() });
+        return Err(SmeltError::DimensionMismatch {
+            expected: a.len(),
+            got: b.len(),
+        });
     }
 
     // Compute differences, exclude zeros
@@ -263,7 +266,10 @@ fn wilcoxon_exact_two_sided_p(ranks: &[f64], w_plus: f64) -> f64 {
 /// Simpler than Wilcoxon (ignores magnitude), but valid for very small n.
 pub fn sign_test(a: &[f64], b: &[f64]) -> Result<TestResult> {
     if a.len() != b.len() {
-        return Err(SmeltError::DimensionMismatch { expected: a.len(), got: b.len() });
+        return Err(SmeltError::DimensionMismatch {
+            expected: a.len(),
+            got: b.len(),
+        });
     }
 
     let mut n_plus = 0usize;
@@ -460,10 +466,16 @@ pub fn nemenyi_posthoc(friedman: &FriedmanResult, n: usize, k: usize) -> Nemenyi
 /// * `truth` - True labels
 pub fn mcnemar_test(pred_a: &[usize], pred_b: &[usize], truth: &[usize]) -> Result<TestResult> {
     if pred_a.len() != pred_b.len() {
-        return Err(SmeltError::DimensionMismatch { expected: pred_a.len(), got: pred_b.len() });
+        return Err(SmeltError::DimensionMismatch {
+            expected: pred_a.len(),
+            got: pred_b.len(),
+        });
     }
     if pred_a.len() != truth.len() {
-        return Err(SmeltError::DimensionMismatch { expected: pred_a.len(), got: truth.len() });
+        return Err(SmeltError::DimensionMismatch {
+            expected: pred_a.len(),
+            got: truth.len(),
+        });
     }
 
     // Count discordant pairs
@@ -837,7 +849,10 @@ mod tests {
             "exact minimum p-value for n=5, all same sign should be 2/32=0.0625, got {}",
             result.p_value
         );
-        assert!(!result.significant, "5 folds can never reach p<0.05 when every pair has the same sign");
+        assert!(
+            !result.significant,
+            "5 folds can never reach p<0.05 when every pair has the same sign"
+        );
     }
 
     /// Cross-check the DP-based exact p-value against direct 2^n brute-force
@@ -925,8 +940,16 @@ mod tests {
         let b = vec![0.90, 0.80, 0.85, 0.80, 0.80, 0.85];
         let c = vec![0.85, 0.80, 0.80, 0.75, 0.80, 0.85];
         let r = friedman_test(&[&a, &b, &c]).unwrap();
-        assert!((r.statistic - 9.578947368421048).abs() < 1e-9, "stat {}", r.statistic);
-        assert!((r.p_value - 0.00831683351100447).abs() < 1e-9, "p {}", r.p_value);
+        assert!(
+            (r.statistic - 9.578947368421048).abs() < 1e-9,
+            "stat {}",
+            r.statistic
+        );
+        assert!(
+            (r.p_value - 0.00831683351100447).abs() < 1e-9,
+            "p {}",
+            r.p_value
+        );
 
         // Without ties the correction is a no-op: scipy stat=12.0,
         // p=0.002478752176666357
@@ -935,7 +958,11 @@ mod tests {
         let c = vec![0.85, 0.79, 0.80, 0.75, 0.78, 0.84];
         let r = friedman_test(&[&a, &b, &c]).unwrap();
         assert!((r.statistic - 12.0).abs() < 1e-9, "stat {}", r.statistic);
-        assert!((r.p_value - 0.002478752176666357).abs() < 1e-9, "p {}", r.p_value);
+        assert!(
+            (r.p_value - 0.002478752176666357).abs() < 1e-9,
+            "p {}",
+            r.p_value
+        );
 
         // Fully tied everywhere: c = 0; report no evidence instead of 0/0.
         let flat = vec![0.5, 0.5, 0.5];

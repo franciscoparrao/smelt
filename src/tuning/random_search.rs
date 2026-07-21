@@ -97,13 +97,16 @@ impl RandomSearch {
         // given seed -- is unaffected); only the expensive train+evaluate
         // step per candidate runs in parallel.
         let mut rng = StdRng::seed_from_u64(self.seed);
-        let param_sets: Vec<ParamSet> = (0..self.n_iter).map(|_| self.sample_params(&mut rng)).collect();
+        let param_sets: Vec<ParamSet> = (0..self.n_iter)
+            .map(|_| self.sample_params(&mut rng))
+            .collect();
 
         let results: Result<Vec<(ParamSet, f64)>> = param_sets
             .into_par_iter()
             .map(|params| {
                 let mut learner = (self.factory)(&params);
-                let bench = benchmark::resample_classif(&mut *learner, task, resampling, &[measure])?;
+                let bench =
+                    benchmark::resample_classif(&mut *learner, task, resampling, &[measure])?;
                 let mean_score = bench.mean_scores()[0];
                 Ok((params, mean_score))
             })
@@ -121,13 +124,16 @@ impl RandomSearch {
     ) -> Result<TuneResult> {
         super::validate_param_space(&self.param_space)?;
         let mut rng = StdRng::seed_from_u64(self.seed);
-        let param_sets: Vec<ParamSet> = (0..self.n_iter).map(|_| self.sample_params(&mut rng)).collect();
+        let param_sets: Vec<ParamSet> = (0..self.n_iter)
+            .map(|_| self.sample_params(&mut rng))
+            .collect();
 
         let results: Result<Vec<(ParamSet, f64)>> = param_sets
             .into_par_iter()
             .map(|params| {
                 let mut learner = (self.factory)(&params);
-                let bench = benchmark::resample_regress(&mut *learner, task, resampling, &[measure])?;
+                let bench =
+                    benchmark::resample_regress(&mut *learner, task, resampling, &[measure])?;
                 let mean_score = bench.mean_scores()[0];
                 Ok((params, mean_score))
             })

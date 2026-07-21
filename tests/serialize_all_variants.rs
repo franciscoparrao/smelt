@@ -40,7 +40,9 @@ fn regress_task() -> RegressionTask {
     // normal equation singular for LinearRegression.
     let features =
         Array2::from_shape_fn((n, 3), |(i, j)| (i as f64 * (0.31 + 0.17 * j as f64)).cos());
-    let target: Vec<f64> = (0..n).map(|i| (i as f64 * 0.17).sin() * 3.0 + 1.0).collect();
+    let target: Vec<f64> = (0..n)
+        .map(|i| (i as f64 * 0.17).sin() * 3.0 + 1.0)
+        .collect();
     RegressionTask::new("roundtrip-regress", features, target).unwrap()
 }
 
@@ -63,8 +65,8 @@ fn assert_roundtrip(
         std::process::id()
     ));
     save_json(&serial, &path).unwrap_or_else(|e| panic!("{name}: save_json failed: {e}"));
-    let loaded: SerializableModel =
-        load_json(&path).unwrap_or_else(|e| panic!("{name}: load_json failed on its own save_json output: {e}"));
+    let loaded: SerializableModel = load_json(&path)
+        .unwrap_or_else(|e| panic!("{name}: load_json failed on its own save_json output: {e}"));
     std::fs::remove_file(&path).ok();
 
     let before = trained
@@ -110,7 +112,10 @@ fn every_serializable_model_variant_survives_a_save_load_roundtrip() {
         ("mondrian_tree", Box::new(MondrianTree::new())),
         ("mondrian_forest", Box::new(MondrianForest::new())),
         ("elm", Box::new(ExtremeLearningMachine::new())),
-        ("adaptive_random_forest", Box::new(AdaptiveRandomForest::new())),
+        (
+            "adaptive_random_forest",
+            Box::new(AdaptiveRandomForest::new()),
+        ),
         ("hoeffding_tree", Box::new(HoeffdingTree::new())),
         ("oblique_tree", Box::new(ObliqueTree::new())),
         ("oblique_forest", Box::new(ObliqueForest::new())),
@@ -196,7 +201,10 @@ fn catboost_legacy_object_form_cat_encodings_still_loads() {
     // (a) populated cat_features → legacy string-keyed nested maps.
     // (b) no cat_features → legacy `[{}]` / `[{}, {}, ...]` empty objects.
     let configs: Vec<(&str, Box<dyn Learner>)> = vec![
-        ("legacy_cat", Box::new(CatBoost::new().with_cat_features(vec![2]))),
+        (
+            "legacy_cat",
+            Box::new(CatBoost::new().with_cat_features(vec![2])),
+        ),
         ("legacy_nocat", Box::new(CatBoost::new())),
     ];
 
@@ -225,7 +233,10 @@ fn catboost_legacy_object_form_cat_encodings_still_loads() {
         let loaded = load_json(&path)
             .unwrap_or_else(|e| panic!("{name}: legacy 2.0.x–3.0.0 wire form must load: {e}"));
         let after = serde_json::to_string(&loaded.predict(task.features()).unwrap()).unwrap();
-        assert_eq!(before, after, "{name}: legacy-form load changed predictions");
+        assert_eq!(
+            before, after,
+            "{name}: legacy-form load changed predictions"
+        );
 
         // The current pairs form still roundtrips bit-identically (the dual
         // deserializer must not have disturbed the new path).
@@ -233,7 +244,10 @@ fn catboost_legacy_object_form_cat_encodings_still_loads() {
         let reloaded = load_json(&path).unwrap();
         let after_current =
             serde_json::to_string(&reloaded.predict(task.features()).unwrap()).unwrap();
-        assert_eq!(before, after_current, "{name}: pairs-form load changed predictions");
+        assert_eq!(
+            before, after_current,
+            "{name}: pairs-form load changed predictions"
+        );
 
         std::fs::remove_file(&path).ok();
     }

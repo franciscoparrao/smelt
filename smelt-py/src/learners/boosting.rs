@@ -2,11 +2,13 @@
 //! KrigingHybrid.
 
 use crate::common::{
-    fit_learner_cat, not_fitted, parse_coords, parse_eval_set, perm_importance_impl,
-    predict_proba_values, predict_values, shap_impl, smelt_err, to_array2, conformal_predict_impl,
-    EvalKind,
+    EvalKind, conformal_predict_impl, fit_learner_cat, not_fitted, parse_coords, parse_eval_set,
+    perm_importance_impl, predict_proba_values, predict_values, shap_impl, smelt_err, to_array2,
 };
-use crate::common::{add_explain_methods, add_persistence_methods, declare_support, declare_params, declare_weight_support};
+use crate::common::{
+    add_explain_methods, add_persistence_methods, declare_params, declare_support,
+    declare_weight_support,
+};
 use crate::learners::ensemble::validate_learner_id;
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::PyRuntimeError;
@@ -36,7 +38,10 @@ fn resolve_variogram_model(name: &str) -> PyResult<smelt_ml::prelude::VariogramM
 /// every gradient/hessian evaluation, the same cost/complexity trade-off
 /// that keeps `Bagging`/`Stacking` on learner-id strings instead of Python
 /// learner objects (see `ensemble.rs`).
-pub(crate) fn resolve_objective(objective: &str, huber_delta: f64) -> PyResult<smelt_ml::prelude::Objective> {
+pub(crate) fn resolve_objective(
+    objective: &str,
+    huber_delta: f64,
+) -> PyResult<smelt_ml::prelude::Objective> {
     use smelt_ml::prelude::Objective;
     match objective {
         "squared_error" => Ok(Objective::SquaredError),
@@ -153,8 +158,14 @@ impl XGBoost {
                 EvalKind::Regression(t) => learner.with_eval_set_regress(features, t),
             };
         }
-        let (model, is_classif) =
-            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features, sample_weight)?;
+        let (model, is_classif) = fit_learner_cat(
+            py,
+            &mut learner,
+            to_array2(x),
+            y,
+            cat_features,
+            sample_weight,
+        )?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -246,8 +257,14 @@ impl CatBoost {
                 EvalKind::Regression(t) => learner.with_eval_set_regress(features, t),
             };
         }
-        let (model, is_classif) =
-            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features, sample_weight)?;
+        let (model, is_classif) = fit_learner_cat(
+            py,
+            &mut learner,
+            to_array2(x),
+            y,
+            cat_features,
+            sample_weight,
+        )?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
@@ -364,27 +381,44 @@ impl LightGBM {
                 EvalKind::Regression(t) => learner.with_eval_set_regress(features, t),
             };
         }
-        let (model, is_classif) =
-            fit_learner_cat(py, &mut learner, to_array2(x), y, cat_features, sample_weight)?;
+        let (model, is_classif) = fit_learner_cat(
+            py,
+            &mut learner,
+            to_array2(x),
+            y,
+            cat_features,
+            sample_weight,
+        )?;
         self.trained = Some(model);
         self.is_classif = is_classif;
         Ok(())
     }
 
-    fn predict<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         predict_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 
-    fn predict_proba<'py>(&self, py: Python<'py>, x: PyReadonlyArray2<'_, f64>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+    fn predict_proba<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
         predict_proba_values(self.trained.as_deref().ok_or_else(not_fitted)?, py, x)
     }
 
     #[getter]
     fn feature_importances_(&self) -> PyResult<Option<Vec<(String, f64)>>> {
-        Ok(self.trained.as_ref().ok_or_else(not_fitted)?.feature_importance())
+        Ok(self
+            .trained
+            .as_ref()
+            .ok_or_else(not_fitted)?
+            .feature_importance())
     }
 }
-
 
 // ── GeoXGBoost ─────────────────────────────────────────────────────────
 
@@ -557,13 +591,14 @@ impl GeoXGBoost {
         let features = to_array2(x);
         let new_coords = coords.map(parse_coords).transpose()?;
         if let Some(c) = &new_coords
-            && c.len() != features.nrows() {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "coords length ({}) must match number of samples ({})",
-                    c.len(),
-                    features.nrows()
-                )));
-            }
+            && c.len() != features.nrows()
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "coords length ({}) must match number of samples ({})",
+                c.len(),
+                features.nrows()
+            )));
+        }
         let pred = py
             .allow_threads(|| match &new_coords {
                 Some(c) => model.predict_spatial(&features, c),
@@ -627,10 +662,14 @@ impl GeoXGBoost {
     }
 
     #[getter]
-    fn supports_classification(&self) -> bool { false }
+    fn supports_classification(&self) -> bool {
+        false
+    }
 
     #[getter]
-    fn supports_regression(&self) -> bool { true }
+    fn supports_regression(&self) -> bool {
+        true
+    }
 
     /// SHAP values (interventional). Uses the global model internally.
     #[pyo3(signature = (x, y, n_background=50, feature_names=None))]
@@ -659,7 +698,17 @@ impl GeoXGBoost {
         feature_names: Option<Vec<String>>,
     ) -> PyResult<PyObject> {
         let model = self.trained.as_ref().ok_or_else(not_fitted)?;
-        perm_importance_impl(py, model, false, x, y, metric, n_repeats, seed, feature_names)
+        perm_importance_impl(
+            py,
+            model,
+            false,
+            x,
+            y,
+            metric,
+            n_repeats,
+            seed,
+            feature_names,
+        )
     }
 
     /// Split conformal prediction intervals over the GLOBAL model only:
@@ -683,7 +732,6 @@ impl GeoXGBoost {
         conformal_predict_impl(py, model, x_cal, y_cal, x_test, alpha)
     }
 }
-
 
 // ── KrigingHybrid ──────────────────────────────────────────────────────
 //
@@ -715,7 +763,12 @@ impl KrigingHybrid {
     ///     n_neighbors: local kriging neighborhood size at predict time.
     #[new]
     #[pyo3(signature = (base, variogram_model="spherical".to_string(), n_lags=15, n_neighbors=20))]
-    fn new(base: String, variogram_model: String, n_lags: usize, n_neighbors: usize) -> PyResult<Self> {
+    fn new(
+        base: String,
+        variogram_model: String,
+        n_lags: usize,
+        n_neighbors: usize,
+    ) -> PyResult<Self> {
         validate_learner_id(&base)?;
         // Same eager validation as `base`: a typo'd variogram_model used to
         // surface only at fit() time.
@@ -748,11 +801,13 @@ impl KrigingHybrid {
         }
         let model_kind = resolve_variogram_model(&self.variogram_model)?;
         crate::common::check_finite_target(&y)?;
-        let task =
-            smelt_ml::task::RegressionTask::new("kriging_hybrid", features, y).map_err(smelt_err)?;
+        let task = smelt_ml::task::RegressionTask::new("kriging_hybrid", features, y)
+            .map_err(smelt_err)?;
         let base = self.base.clone();
         let mut learner = smelt_ml::prelude::KrigingHybrid::new(
-            move || smelt_ml::prelude::learner_from_id(&base).expect("validated in KrigingHybrid::new"),
+            move || {
+                smelt_ml::prelude::learner_from_id(&base).expect("validated in KrigingHybrid::new")
+            },
             parsed,
         )
         .with_variogram_model(model_kind)
@@ -780,13 +835,14 @@ impl KrigingHybrid {
         let features = to_array2(x);
         let new_coords = coords.map(parse_coords).transpose()?;
         if let Some(c) = &new_coords
-            && c.len() != features.nrows() {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "coords length ({}) must match number of samples ({})",
-                    c.len(),
-                    features.nrows()
-                )));
-            }
+            && c.len() != features.nrows()
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "coords length ({}) must match number of samples ({})",
+                c.len(),
+                features.nrows()
+            )));
+        }
         let pred = py
             .allow_threads(|| match &new_coords {
                 Some(c) => model.predict_spatial(&features, c),
@@ -825,10 +881,14 @@ impl KrigingHybrid {
     }
 
     #[getter]
-    fn supports_classification(&self) -> bool { false }
+    fn supports_classification(&self) -> bool {
+        false
+    }
 
     #[getter]
-    fn supports_regression(&self) -> bool { true }
+    fn supports_regression(&self) -> bool {
+        true
+    }
 }
 
 add_explain_methods!(XGBoost, CatBoost, LightGBM);
@@ -839,7 +899,7 @@ declare_weight_support!(
     LightGBM => smelt_ml::prelude::LightGBM::new(),
 );
 
-declare_support!(XGBoost,  classif = true, regress = true);
+declare_support!(XGBoost, classif = true, regress = true);
 declare_support!(CatBoost, classif = true, regress = true);
 declare_support!(LightGBM, classif = true, regress = true);
 
@@ -896,7 +956,7 @@ impl XGBoost {
                     other => {
                         return Err(pyo3::exceptions::PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"
-                        )))
+                        )));
                     }
                 }
             }
@@ -982,7 +1042,7 @@ impl KrigingHybrid {
                     other => {
                         return Err(pyo3::exceptions::PyValueError::new_err(format!(
                             "invalid parameter '{other}' for this estimator"
-                        )))
+                        )));
                     }
                 }
             }
