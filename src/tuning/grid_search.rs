@@ -1,6 +1,6 @@
 //! Exhaustive grid search over hyperparameter combinations.
 
-use super::{ParamGrid, ParamSet, TuneResult, cartesian_product};
+use super::{Dependency, ParamGrid, ParamSet, TuneResult, cartesian_product_with_deps};
 use crate::Result;
 use crate::benchmark;
 use crate::learner::Learner;
@@ -8,6 +8,7 @@ use crate::measure::Measure;
 use crate::resample::Resample;
 use crate::task::{ClassificationTask, RegressionTask};
 use rayon::prelude::*;
+use std::collections::HashSet;
 
 /// Exhaustive search over a grid of hyperparameter values.
 ///
@@ -42,6 +43,7 @@ use rayon::prelude::*;
 pub struct GridSearch {
     factory: Box<dyn Fn(&ParamSet) -> Box<dyn Learner> + Send + Sync>,
     param_grid: ParamGrid,
+    dependencies: Vec<Dependency>,
 }
 
 impl GridSearch {
@@ -54,7 +56,25 @@ impl GridSearch {
         Self {
             factory: Box::new(factory),
             param_grid,
+            dependencies: Vec::new(),
         }
+    }
+
+    /// Register a conditional [`Dependency`]: a child parameter that is only
+    /// active (reaches the factory) when its parent's value satisfies the
+    /// condition. Combinations that differ only in an inactive child collapse
+    /// to a single trial, so a gated parameter never wastes evaluations on
+    /// bit-identical models. Chainable to declare several.
+    pub fn with_dependency(mut self, dep: Dependency) -> Self {
+        self.dependencies.push(dep);
+        self
+    }
+
+    /// Validate the registered dependencies against the grid's parameter
+    /// names (shared by `tune_classif`/`tune_regress`).
+    fn validate_deps(&self) -> Result<()> {
+        let names: HashSet<&str> = self.param_grid.keys().map(String::as_str).collect();
+        super::validate_dependencies(&names, &self.dependencies)
     }
 
     /// Tune for classification. Returns the best hyperparameter configuration.
@@ -64,7 +84,8 @@ impl GridSearch {
         resampling: &dyn Resample,
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
-        let combinations = cartesian_product(&self.param_grid);
+        self.validate_deps()?;
+        let combinations = cartesian_product_with_deps(&self.param_grid, &self.dependencies);
 
         // Each combination builds and evaluates its own learner independently
         // (the factory is Send + Sync precisely to allow this) -- embarrassingly
@@ -90,7 +111,8 @@ impl GridSearch {
         resampling: &dyn Resample,
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
-        let combinations = cartesian_product(&self.param_grid);
+        self.validate_deps()?;
+        let combinations = cartesian_product_with_deps(&self.param_grid, &self.dependencies);
 
         let results: Result<Vec<(ParamSet, f64)>> = combinations
             .into_par_iter()

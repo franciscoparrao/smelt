@@ -7,7 +7,7 @@ A machine learning framework for Rust, inspired by [mlr3](https://mlr3.mlr-org.c
 
 The name refers to smelting — refining raw data into useful models.
 
-**33 supervised learners** | **Clustering** | **Causal Inference (5 meta-learners + Causal Forest)** | **XGBoost/LightGBM/CatBoost from scratch** | **Spatial ML** | **Conformal Prediction** | **4 tuning methods** | **600+ tests**
+**35 supervised learners** | **Clustering** | **Causal Inference (5 meta-learners + Causal Forest)** | **XGBoost/LightGBM/CatBoost from scratch** | **Spatial ML** | **Conformal Prediction** | **4 tuning methods** | **600+ tests**
 
 ## Quick Start
 
@@ -250,11 +250,13 @@ let task = CsvLoader::from_path("data.csv")
 | Elastic Net | | x | L1+L2, coordinate descent |
 | AdaBoost | x | | SAMME with weighted stumps |
 | Linear SVM | x | | SGD + hinge loss, OVR multiclass |
+| **Kernel SVM (C-SVC)** | x | | SMO solver, RBF/poly/linear kernels, golden-tested vs scikit-learn |
 | Hoeffding Tree | x | | Incremental / streaming induction |
 | **Adaptive Random Forest** | x | | Streaming ensemble, ADWIN concept-drift detection |
 | **Mondrian Tree** | x | x | Online Mondrian process, batch=online consistency |
 | **Mondrian Forest** | x | x | Ensemble of Mondrian trees, streaming-native |
 | **Extreme Learning Machine** | x | x | Fixed random hidden layer, closed-form ridge solve |
+| **Gaussian Process** | | x | RBF kernel, predictive `se`, golden-tested vs scikit-learn |
 | **Stacking (Super Learner)** | x | x | Meta-ensemble, out-of-fold |
 | **Dynamic Ensemble (KNORA-E)** | x | | Per-instance competence selection, train/DSEL split |
 | **Deep Forest (gcForest)** | x | | Cascade forest, out-of-fold layer stacking |
@@ -343,7 +345,7 @@ let task = CsvLoader::from_path("data.csv")
 - **CSV loading** — with auto label encoding
 - **Input validation** — dimension checks, NaN detection
 - **Model registry** — `learner_from_id("xgboost")` constructs any of the
-  27 self-contained learners by name, for data-driven experiment loops
+  29 self-contained learners by name, for data-driven experiment loops
   (excludes learners needing a base-learner factory or external
   coordinates: Bagging, Stacking, DynamicEnsemble, CostSensitiveClassifier,
   KrigingHybrid, GeoXGBoost)

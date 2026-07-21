@@ -153,6 +153,95 @@ pub enum ParamDistribution {
 /// A space of hyperparameter distributions for random search.
 pub type ParamSpace = HashMap<String, ParamDistribution>;
 
+/// A condition on a parent parameter's value, used by [`Dependency`].
+///
+/// Equality uses `ParamValue`'s own `PartialEq`, so conditions are meant for
+/// the discrete parents that actually gate other parameters (a string
+/// `objective`/`kernel`, an integer `degree`, a boolean flag) — not for
+/// exact-matching a continuous `Float` draw, which would essentially never
+/// hold.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Condition {
+    /// The parent parameter must equal this value.
+    Equals(ParamValue),
+    /// The parent parameter must be one of these values.
+    In(Vec<ParamValue>),
+}
+
+impl Condition {
+    /// Whether `value` (a parent's sampled/gridded value) satisfies this.
+    fn is_satisfied_by(&self, value: &ParamValue) -> bool {
+        match self {
+            Condition::Equals(target) => value == target,
+            Condition::In(targets) => targets.contains(value),
+        }
+    }
+}
+
+/// A conditional dependency between tuning parameters: `child` is an *active*
+/// hyperparameter only when `parent`'s value satisfies `cond`.
+///
+/// Inactive children are pruned before the learner factory ever sees them, so
+/// a parameter that only matters under one setting of another — `huber_delta`
+/// only when `objective == "huber"`, `degree` only when `kernel == "poly"` —
+/// can't silently waste tuning trials on bit-identical scores. This is the
+/// general form of the one-off guard that closed 5th-audit M-5 (tuning
+/// `huber_delta` with no `"huber"` objective was a no-op where every trial
+/// trained the identical model).
+///
+/// Registered on a tuner via `with_dependency`; grid search additionally
+/// deduplicates the combinations that collapse once inactive children are
+/// dropped, and both tuners reject a dependency whose `parent` isn't in the
+/// space (the exact M-5 misconfiguration).
+///
+/// # Examples
+///
+/// ```
+/// use smelt_ml::tuning::{Dependency, Condition, ParamValue};
+///
+/// // `huber_delta` is a hyperparameter only when `objective == "huber"`.
+/// let dep = Dependency::equals("huber_delta", "objective", "huber");
+/// assert_eq!(dep.parent, "objective");
+/// assert_eq!(dep.cond, Condition::Equals(ParamValue::Str("huber".into())));
+/// ```
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dependency {
+    /// The dependent parameter, active only when the condition holds.
+    pub child: String,
+    /// The parameter whose value gates `child`.
+    pub parent: String,
+    /// The condition on `parent` that activates `child`.
+    pub cond: Condition,
+}
+
+impl Dependency {
+    /// `child` is active only when `parent` equals `value`.
+    pub fn equals(
+        child: impl Into<String>,
+        parent: impl Into<String>,
+        value: impl Into<ParamValue>,
+    ) -> Self {
+        Self {
+            child: child.into(),
+            parent: parent.into(),
+            cond: Condition::Equals(value.into()),
+        }
+    }
+
+    /// `child` is active only when `parent` is one of `values`.
+    pub fn in_values(
+        child: impl Into<String>,
+        parent: impl Into<String>,
+        values: Vec<ParamValue>,
+    ) -> Self {
+        Self {
+            child: child.into(),
+            parent: parent.into(),
+            cond: Condition::In(values),
+        }
+    }
+}
+
 /// Sample one `ParamSet` from `space` — shared by `RandomSearch`,
 /// `BayesianOptimizer` (initial/random rounds), and `Hyperband`, which
 /// previously each duplicated this same match-on-`ParamDistribution` logic.
@@ -316,6 +405,105 @@ pub(crate) fn cartesian_product(grid: &ParamGrid) -> Vec<ParamSet> {
     result
 }
 
+/// Remove every parameter in `params` whose dependency is unsatisfied — its
+/// parent is absent, or present with a value the condition rejects.
+///
+/// Applied to a fixpoint: dropping a child that is *itself* a parent of
+/// another dependency leaves that grandchild's parent absent on the next
+/// pass, so a whole dependency chain collapses in one call. Sampling happens
+/// before pruning in the tuners, so the RNG stream (and thus seeded
+/// reproducibility) is unaffected — pruning only decides which sampled keys
+/// reach the factory.
+pub(crate) fn prune_inactive(params: &mut ParamSet, deps: &[Dependency]) {
+    loop {
+        let inactive = deps.iter().find_map(|d| {
+            if !params.contains_key(&d.child) {
+                return None;
+            }
+            let active = params
+                .get(&d.parent)
+                .is_some_and(|pv| d.cond.is_satisfied_by(pv));
+            (!active).then(|| d.child.clone())
+        });
+        match inactive {
+            Some(child) => {
+                params.remove(&child);
+            }
+            None => break,
+        }
+    }
+}
+
+/// Validate dependencies against the set of tunable parameter `names`.
+///
+/// Rejects a dependency whose `child` or `parent` isn't among `names` — the
+/// M-5 misconfiguration is exactly "tune `huber_delta` while `objective`
+/// isn't in the space" — and a cyclic dependency (a parameter reachable from
+/// itself by following parent links), which [`prune_inactive`] would
+/// otherwise resolve by arbitrary iteration order.
+pub(crate) fn validate_dependencies(
+    names: &std::collections::HashSet<&str>,
+    deps: &[Dependency],
+) -> Result<()> {
+    for d in deps {
+        if !names.contains(d.child.as_str()) {
+            return Err(SmeltError::InvalidParameter(format!(
+                "dependency references child parameter '{}', which is not in the tuning space",
+                d.child
+            )));
+        }
+        if !names.contains(d.parent.as_str()) {
+            return Err(SmeltError::InvalidParameter(format!(
+                "parameter '{}' depends on '{}', which is not in the tuning space; add it or \
+                 remove the dependent parameter (otherwise it can never activate)",
+                d.child, d.parent
+            )));
+        }
+    }
+
+    // Cycle check: follow parent links from every child; revisiting a node
+    // means a cycle (a -> b -> a would make activation ill-defined).
+    for start in deps.iter().map(|d| d.child.as_str()) {
+        let mut seen = std::collections::HashSet::new();
+        let mut node = start;
+        loop {
+            if !seen.insert(node) {
+                return Err(SmeltError::InvalidParameter(format!(
+                    "cyclic parameter dependency detected involving '{node}'"
+                )));
+            }
+            // A node can appear as `child` in at most the first matching dep
+            // for traversal purposes; multiple deps on one child are ANDed but
+            // still form the same parent edges for cycle detection.
+            match deps.iter().find(|d| d.child == node) {
+                Some(d) => node = d.parent.as_str(),
+                None => break,
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The Cartesian product of `grid`, with `deps` applied: inactive children are
+/// pruned from each combination, then the duplicates that collapse together
+/// are dropped (every `huber_delta` value under `objective != "huber"` becomes
+/// the same trial — the M-5 waste, removed structurally). First-seen order is
+/// preserved for determinism. The `O(n^2)` dedup is fine: grids are small and
+/// far outnumbered by the CV work each surviving combination triggers.
+pub(crate) fn cartesian_product_with_deps(grid: &ParamGrid, deps: &[Dependency]) -> Vec<ParamSet> {
+    if deps.is_empty() {
+        return cartesian_product(grid);
+    }
+    let mut out: Vec<ParamSet> = Vec::new();
+    for mut combo in cartesian_product(grid) {
+        prune_inactive(&mut combo, deps);
+        if !out.contains(&combo) {
+            out.push(combo);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +585,179 @@ mod tests {
             ParamDistribution::Choice(vec![ParamValue::Int(1), ParamValue::Str("a".into())]),
         );
         assert!(validate_param_space(&space).is_ok());
+    }
+
+    fn pset(pairs: &[(&str, ParamValue)]) -> ParamSet {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn prune_keeps_active_child_and_drops_inactive_one() {
+        let dep = Dependency::equals("huber_delta", "objective", "huber");
+
+        // objective == "huber" -> huber_delta stays.
+        let mut active = pset(&[
+            ("objective", ParamValue::Str("huber".into())),
+            ("huber_delta", ParamValue::Float(2.0)),
+        ]);
+        prune_inactive(&mut active, std::slice::from_ref(&dep));
+        assert!(active.contains_key("huber_delta"));
+
+        // objective == "squared_error" -> huber_delta pruned (the M-5 no-op).
+        let mut inactive = pset(&[
+            ("objective", ParamValue::Str("squared_error".into())),
+            ("huber_delta", ParamValue::Float(2.0)),
+        ]);
+        prune_inactive(&mut inactive, std::slice::from_ref(&dep));
+        assert!(!inactive.contains_key("huber_delta"));
+        assert!(inactive.contains_key("objective"));
+    }
+
+    #[test]
+    fn prune_drops_child_when_parent_absent() {
+        let dep = Dependency::equals("degree", "kernel", "poly");
+        let mut p = pset(&[("degree", ParamValue::Int(3))]);
+        prune_inactive(&mut p, &[dep]);
+        assert!(!p.contains_key("degree"), "no parent present -> inactive");
+    }
+
+    #[test]
+    fn prune_collapses_a_dependency_chain_to_fixpoint() {
+        // c depends on b == true; b depends on a == "on". a == "off" makes b
+        // inactive, which in turn must make c inactive in the same call.
+        let deps = vec![
+            Dependency::equals("b", "a", "on"),
+            Dependency::equals("c", "b", true),
+        ];
+        let mut p = pset(&[
+            ("a", ParamValue::Str("off".into())),
+            ("b", ParamValue::Bool(true)),
+            ("c", ParamValue::Float(1.0)),
+        ]);
+        prune_inactive(&mut p, &deps);
+        assert_eq!(p.keys().collect::<Vec<_>>(), vec![&"a".to_string()]);
+    }
+
+    #[test]
+    fn prune_supports_in_condition() {
+        let dep = Dependency::in_values(
+            "child",
+            "mode",
+            vec![ParamValue::Str("a".into()), ParamValue::Str("b".into())],
+        );
+        let mut keep = pset(&[
+            ("mode", ParamValue::Str("b".into())),
+            ("child", ParamValue::Int(1)),
+        ]);
+        prune_inactive(&mut keep, std::slice::from_ref(&dep));
+        assert!(keep.contains_key("child"));
+
+        let mut drop = pset(&[
+            ("mode", ParamValue::Str("c".into())),
+            ("child", ParamValue::Int(1)),
+        ]);
+        prune_inactive(&mut drop, &[dep]);
+        assert!(!drop.contains_key("child"));
+    }
+
+    #[test]
+    fn validate_dependencies_rejects_missing_parent_and_child() {
+        let names: std::collections::HashSet<&str> = ["huber_delta"].into_iter().collect();
+        // parent 'objective' not in space -> the exact M-5 misconfiguration.
+        let err = validate_dependencies(
+            &names,
+            &[Dependency::equals("huber_delta", "objective", "huber")],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("objective"));
+
+        // child not in space either.
+        let names2: std::collections::HashSet<&str> = ["objective"].into_iter().collect();
+        assert!(
+            validate_dependencies(
+                &names2,
+                &[Dependency::equals("huber_delta", "objective", "huber")]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn validate_dependencies_detects_cycles() {
+        let names: std::collections::HashSet<&str> = ["a", "b"].into_iter().collect();
+        let deps = vec![
+            Dependency::equals("a", "b", true),
+            Dependency::equals("b", "a", true),
+        ];
+        let err = validate_dependencies(&names, &deps).unwrap_err();
+        assert!(err.to_string().contains("cyclic"));
+    }
+
+    #[test]
+    fn validate_dependencies_accepts_well_formed() {
+        let names: std::collections::HashSet<&str> =
+            ["objective", "huber_delta"].into_iter().collect();
+        assert!(
+            validate_dependencies(
+                &names,
+                &[Dependency::equals("huber_delta", "objective", "huber")]
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn cartesian_product_with_deps_dedups_collapsed_combinations() {
+        // objective in {squared_error, huber} x huber_delta in {1, 2, 3}.
+        // Full product = 6; but the 3 huber_delta values under squared_error
+        // all collapse to one, so 3 (huber) + 1 (squared_error) = 4.
+        let mut grid = ParamGrid::new();
+        grid.insert(
+            "objective".into(),
+            vec![
+                ParamValue::Str("squared_error".into()),
+                ParamValue::Str("huber".into()),
+            ],
+        );
+        grid.insert(
+            "huber_delta".into(),
+            vec![
+                ParamValue::Float(1.0),
+                ParamValue::Float(2.0),
+                ParamValue::Float(3.0),
+            ],
+        );
+        let deps = vec![Dependency::equals("huber_delta", "objective", "huber")];
+        let combos = cartesian_product_with_deps(&grid, &deps);
+        assert_eq!(combos.len(), 4, "6 raw combos collapse to 4");
+
+        // Exactly one squared_error combo, and it carries no huber_delta.
+        let se: Vec<_> = combos
+            .iter()
+            .filter(|c| c.get("objective") == Some(&ParamValue::Str("squared_error".into())))
+            .collect();
+        assert_eq!(se.len(), 1);
+        assert!(!se[0].contains_key("huber_delta"));
+
+        // The three huber combos keep their distinct huber_delta values.
+        let huber: Vec<_> = combos
+            .iter()
+            .filter(|c| c.get("objective") == Some(&ParamValue::Str("huber".into())))
+            .collect();
+        assert_eq!(huber.len(), 3);
+        assert!(huber.iter().all(|c| c.contains_key("huber_delta")));
+    }
+
+    #[test]
+    fn cartesian_product_with_deps_is_identity_without_deps() {
+        let mut grid = ParamGrid::new();
+        grid.insert("x".into(), vec![ParamValue::Int(1), ParamValue::Int(2)]);
+        assert_eq!(
+            cartesian_product_with_deps(&grid, &[]),
+            cartesian_product(&grid)
+        );
     }
 }

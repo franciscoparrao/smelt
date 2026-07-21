@@ -1,6 +1,6 @@
 //! Random search over hyperparameter distributions.
 
-use super::{ParamSet, ParamSpace, TuneResult};
+use super::{Dependency, ParamSet, ParamSpace, TuneResult};
 use crate::Result;
 use crate::benchmark;
 use crate::learner::Learner;
@@ -11,6 +11,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rayon::prelude::*;
+use std::collections::HashSet;
 
 /// Random search over hyperparameter distributions.
 ///
@@ -51,6 +52,7 @@ pub struct RandomSearch {
     param_space: ParamSpace,
     n_iter: usize,
     seed: u64,
+    dependencies: Vec<Dependency>,
 }
 
 impl RandomSearch {
@@ -65,6 +67,7 @@ impl RandomSearch {
             param_space,
             n_iter: 10,
             seed: 42,
+            dependencies: Vec::new(),
         }
     }
 
@@ -80,8 +83,27 @@ impl RandomSearch {
         self
     }
 
+    /// Register a conditional [`Dependency`]: a child parameter that only
+    /// reaches the factory when its parent's sampled value satisfies the
+    /// condition. Sampling still draws the full space (so seeded runs stay
+    /// reproducible), but an inactive child is pruned before the factory sees
+    /// it — never a silent no-op. Chainable to declare several.
+    pub fn with_dependency(mut self, dep: Dependency) -> Self {
+        self.dependencies.push(dep);
+        self
+    }
+
     fn sample_params(&self, rng: &mut impl Rng) -> ParamSet {
-        super::sample_param_space(&self.param_space, rng)
+        let mut params = super::sample_param_space(&self.param_space, rng);
+        super::prune_inactive(&mut params, &self.dependencies);
+        params
+    }
+
+    /// Validate the registered dependencies against the space's parameter
+    /// names (shared by `tune_classif`/`tune_regress`).
+    fn validate_deps(&self) -> Result<()> {
+        let names: HashSet<&str> = self.param_space.keys().map(String::as_str).collect();
+        super::validate_dependencies(&names, &self.dependencies)
     }
 
     /// Tune for classification.
@@ -92,6 +114,7 @@ impl RandomSearch {
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
         super::validate_param_space(&self.param_space)?;
+        self.validate_deps()?;
         // Sampling stays sequential (it's cheap and depends on shared &mut
         // rng state, so the sequence -- and hence reproducibility for a
         // given seed -- is unaffected); only the expensive train+evaluate
@@ -123,6 +146,7 @@ impl RandomSearch {
         measure: &dyn Measure,
     ) -> Result<TuneResult> {
         super::validate_param_space(&self.param_space)?;
+        self.validate_deps()?;
         let mut rng = StdRng::seed_from_u64(self.seed);
         let param_sets: Vec<ParamSet> = (0..self.n_iter)
             .map(|_| self.sample_params(&mut rng))

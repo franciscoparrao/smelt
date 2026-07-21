@@ -43,8 +43,8 @@ use learners::ensemble::{
 };
 use learners::linear::{ElasticNet, Lasso, LinearRegression, LinearSVM, LogisticRegression, Ridge};
 use learners::misc::{
-    AdaBoost, EBM, ExtremeLearningMachine, GaussianNB, KNearestNeighbors, QuantileForest,
-    QuantileGB,
+    AdaBoost, EBM, ExtremeLearningMachine, GaussianNB, GaussianProcess, KNearestNeighbors,
+    KernelSVM, QuantileForest, QuantileGB,
 };
 use learners::trees::{
     AdaptiveRandomForest, DecisionTree, DeepForest, ExtraTrees, GradientBoosting, HoeffdingTree,
@@ -58,7 +58,8 @@ use measures::{
 use preprocess::{Smote, SpatialSmote, StandardScaler};
 use py_stats::{bootstrap_ci, sign_test, wilcoxon_signed_rank};
 use resample::{
-    CrossValidation, GroupCV, SpatialBlockCV, SpatialBufferCV, StratifiedCV, TimeSeriesCV,
+    Bootstrap, CrossValidation, GroupCV, LeaveOneOut, RepeatedCV, SpatialBlockCV, SpatialBufferCV,
+    StratifiedCV, TimeSeriesCV,
 };
 use tuning::PyBayesianOptimizer;
 
@@ -93,6 +94,8 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ObliqueForest>()?;
     m.add_class::<QuantileForest>()?;
     m.add_class::<QuantileGB>()?;
+    m.add_class::<GaussianProcess>()?;
+    m.add_class::<KernelSVM>()?;
     m.add_class::<Bagging>()?;
     m.add_class::<Stacking>()?;
     m.add_class::<DynamicEnsemble>()?;
@@ -131,6 +134,9 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Resampling
     m.add_class::<CrossValidation>()?;
+    m.add_class::<RepeatedCV>()?;
+    m.add_class::<LeaveOneOut>()?;
+    m.add_class::<Bootstrap>()?;
     m.add_class::<SpatialBlockCV>()?;
     m.add_class::<SpatialBufferCV>()?;
     m.add_class::<StratifiedCV>()?;

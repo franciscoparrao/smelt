@@ -403,6 +403,283 @@ declare_params!(QuantileForest, {
     seed => "seed",
 });
 
+// ── GaussianProcess ────────────────────────────────────────────────────
+//
+// Regression-only GP with an RBF kernel. Beyond the generic `predict`
+// (posterior mean), it exposes `predict_std`/`predict_with_std` — the
+// predictive standard error that is the whole point of a GP — the same
+// "inherent method past the trait" shape as QuantileForest's
+// predict_quantile/predict_interval above. Not serializable, so no
+// save/load (matching its Rust side, which declares no SerializableModel
+// variant).
+
+#[pyclass]
+pub(crate) struct GaussianProcess {
+    trained: Option<smelt_ml::prelude::TrainedGaussianProcess>,
+    length_scale: f64,
+    signal_variance: f64,
+    alpha: f64,
+}
+
+#[pymethods]
+impl GaussianProcess {
+    /// Gaussian Process regressor (RBF kernel). `alpha` is the observation
+    /// noise variance added to the kernel diagonal; kernel hyperparameters are
+    /// fixed (not optimized). Regression-only.
+    #[new]
+    #[pyo3(signature = (length_scale=1.0, signal_variance=1.0, alpha=1e-10))]
+    fn new(length_scale: f64, signal_variance: f64, alpha: f64) -> Self {
+        Self {
+            trained: None,
+            length_scale,
+            signal_variance,
+            alpha,
+        }
+    }
+
+    /// Train on regression data. Raises ValueError for non-positive kernel
+    /// hyperparameters or a kernel matrix that isn't positive definite.
+    fn fit(&mut self, py: Python<'_>, x: PyReadonlyArray2<'_, f64>, y: Vec<f64>) -> PyResult<()> {
+        crate::common::check_finite_target(&y)?;
+        let features = to_array2(x);
+        let task = smelt_ml::task::RegressionTask::new("gp", features, y)
+            .map_err(crate::common::smelt_err)?;
+        let learner = smelt_ml::prelude::GaussianProcess::new()
+            .with_length_scale(self.length_scale)
+            .with_signal_variance(self.signal_variance)
+            .with_alpha(self.alpha);
+        let trained = py
+            .allow_threads(|| learner.fit(&task))
+            .map_err(crate::common::smelt_err)?;
+        self.trained = Some(trained);
+        Ok(())
+    }
+
+    /// Posterior mean prediction for each sample.
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let features = to_array2(x);
+        let (means, _) = py
+            .allow_threads(|| model.predict_with_std(&features))
+            .map_err(crate::common::smelt_err)?;
+        Ok(PyArray1::from_vec(py, means))
+    }
+
+    /// Posterior predictive standard deviation (`se`) for each sample.
+    fn predict_std<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let features = to_array2(x);
+        let stds = py
+            .allow_threads(|| model.predict_std(&features))
+            .map_err(crate::common::smelt_err)?;
+        Ok(PyArray1::from_vec(py, stds))
+    }
+
+    /// Posterior mean AND standard deviation together. Returns a dict with
+    /// "mean" and "std" numpy arrays.
+    fn predict_with_std<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<PyObject> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let features = to_array2(x);
+        let (means, stds) = py
+            .allow_threads(|| model.predict_with_std(&features))
+            .map_err(crate::common::smelt_err)?;
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("mean", PyArray1::from_vec(py, means))?;
+        dict.set_item("std", PyArray1::from_vec(py, stds))?;
+        Ok(dict.into())
+    }
+}
+
+declare_params!(GaussianProcess, {
+    length_scale => "length_scale",
+    signal_variance => "signal_variance",
+    alpha => "alpha",
+});
+
+// ── KernelSVM ──────────────────────────────────────────────────────────
+//
+// Kernel C-SVC (SMO). Classification-only. Beyond `predict`, exposes
+// `decision_function` (the raw signed margin / one-vs-rest scores) — the
+// inherent method past the trait, like GeoXGBoost's predict_spatial.
+// get_params/set_params are hand-written (not `declare_params!`) so the
+// `kernel` string is re-validated eagerly on set_params, same rationale as
+// KrigingHybrid/XGBoost.
+
+/// Maps the Python-facing `kernel` string to `smelt_ml::prelude::Kernel`.
+fn resolve_kernel(kernel: &str, degree: u32, coef0: f64) -> PyResult<smelt_ml::prelude::Kernel> {
+    use smelt_ml::prelude::Kernel;
+    match kernel {
+        "linear" => Ok(Kernel::Linear),
+        "rbf" => Ok(Kernel::Rbf),
+        "poly" => Ok(Kernel::Poly { degree, coef0 }),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "unknown kernel '{other}'; use 'linear', 'rbf', or 'poly'"
+        ))),
+    }
+}
+
+#[pyclass]
+pub(crate) struct KernelSVM {
+    trained: Option<smelt_ml::prelude::TrainedKernelSVM>,
+    c: f64,
+    kernel: String,
+    gamma: Option<f64>,
+    degree: u32,
+    coef0: f64,
+    tol: f64,
+}
+
+#[pymethods]
+impl KernelSVM {
+    /// Kernel Support Vector Classifier (C-SVC, SMO solver). `kernel` is
+    /// "rbf" (default), "linear", or "poly"; `gamma=None` defaults to
+    /// 1/n_features at fit time. Classification-only.
+    #[new]
+    #[pyo3(signature = (C=1.0, kernel="rbf".to_string(), gamma=None, degree=3, coef0=0.0, tol=1e-4))]
+    #[allow(non_snake_case)]
+    fn new(
+        C: f64,
+        kernel: String,
+        gamma: Option<f64>,
+        degree: u32,
+        coef0: f64,
+        tol: f64,
+    ) -> PyResult<Self> {
+        resolve_kernel(&kernel, degree, coef0)?; // eager validation
+        Ok(Self {
+            trained: None,
+            c: C,
+            kernel,
+            gamma,
+            degree,
+            coef0,
+            tol,
+        })
+    }
+
+    /// Train on classification data.
+    fn fit(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let features = to_array2(x);
+        let target = crate::common::extract_class_labels(y)?;
+        let task = smelt_ml::task::ClassificationTask::new("kernel_svm", features, target)
+            .map_err(crate::common::smelt_err)?;
+        let kernel = resolve_kernel(&self.kernel, self.degree, self.coef0)?;
+        let mut svm = smelt_ml::prelude::KernelSVM::new()
+            .with_c(self.c)
+            .with_kernel(kernel)
+            .with_tol(self.tol);
+        if let Some(g) = self.gamma {
+            svm = svm.with_gamma(g);
+        }
+        let trained = py
+            .allow_threads(|| svm.fit(&task))
+            .map_err(crate::common::smelt_err)?;
+        self.trained = Some(trained);
+        Ok(())
+    }
+
+    /// Predict class labels for each sample.
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let features = to_array2(x);
+        let pred = py
+            .allow_threads(|| model.predict(&features))
+            .map_err(crate::common::smelt_err)?;
+        match pred {
+            smelt_ml::prelude::Prediction::Classification { predicted, .. } => Ok(
+                PyArray1::from_vec(py, predicted.iter().map(|&p| p as f64).collect()),
+            ),
+            _ => unreachable!("KernelSVM always predicts classification"),
+        }
+    }
+
+    /// Raw decision values: shape (n_samples,) for binary (signed margin,
+    /// >0 → class 1), or (n_samples, n_classes) one-vs-rest scores otherwise.
+    fn decision_function(
+        &self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<PyObject> {
+        let model = self.trained.as_ref().ok_or_else(not_fitted)?;
+        let features = to_array2(x);
+        let rows: Vec<Vec<f64>> = features
+            .rows()
+            .into_iter()
+            .map(|r| model.decision_function(r))
+            .collect();
+        let n_out = rows.first().map(|r| r.len()).unwrap_or(0);
+        if n_out == 1 {
+            let flat: Vec<f64> = rows.iter().map(|r| r[0]).collect();
+            Ok(PyArray1::from_vec(py, flat).into_any().unbind())
+        } else {
+            let arr = PyArray2::from_vec2(py, &rows).map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("decision_function shape: {e}"))
+            })?;
+            Ok(arr.into_any().unbind())
+        }
+    }
+
+    fn get_params(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("C", self.c)?;
+        dict.set_item("kernel", self.kernel.clone())?;
+        dict.set_item("gamma", self.gamma)?;
+        dict.set_item("degree", self.degree)?;
+        dict.set_item("coef0", self.coef0)?;
+        dict.set_item("tol", self.tol)?;
+        Ok(dict.into_pyobject(py)?.into_any().unbind())
+    }
+
+    #[pyo3(signature = (**kwargs))]
+    fn set_params(&mut self, kwargs: Option<&Bound<'_, pyo3::types::PyDict>>) -> PyResult<()> {
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                let key: String = k.extract()?;
+                match key.as_str() {
+                    "C" => self.c = v.extract()?,
+                    "kernel" => {
+                        let kernel: String = v.extract()?;
+                        // Re-validate against current degree/coef0.
+                        resolve_kernel(&kernel, self.degree, self.coef0)?;
+                        self.kernel = kernel;
+                    }
+                    "gamma" => self.gamma = v.extract()?,
+                    "degree" => self.degree = v.extract()?,
+                    "coef0" => self.coef0 = v.extract()?,
+                    "tol" => self.tol = v.extract()?,
+                    other => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "invalid parameter '{other}' for this estimator"
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 define_learner! {
     name = QuantileGB,
     params = { quantile: f64 = 0.5, n_estimators: usize = 100, learning_rate: f64 = 0.1, max_depth: usize = 3, seed: u64 = 42 },

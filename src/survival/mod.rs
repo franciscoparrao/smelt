@@ -7,6 +7,9 @@
 //! - Ishwaran et al. (2008). Random survival forests. Annals of Applied Statistics.
 //! - Hothorn et al. (2006). Survival ensembles. Biostatistics.
 
+mod cox;
+pub use cox::{CoxPH, TrainedCoxPH};
+
 use crate::Result;
 use crate::SmeltError;
 use ndarray::{Array2, ArrayView1};

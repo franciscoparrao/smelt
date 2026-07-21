@@ -6,10 +6,10 @@
 
 use super::{
     AdaBoost, AdaptiveRandomForest, CatBoost, DecisionTree, DeepForest, EBM, ElasticNet,
-    ExtraTrees, ExtremeLearningMachine, GaussianNB, GradientBoosting, HoeffdingTree,
-    KNearestNeighbors, Lasso, Learner, LearnerProperties, LightGBM, LinearRegression, LinearSVM,
-    LogisticRegression, MondrianForest, MondrianTree, ObliqueForest, ObliqueTree, QuantileForest,
-    QuantileGB, RandomForest, Ridge, XGBoost,
+    ExtraTrees, ExtremeLearningMachine, GaussianNB, GaussianProcess, GradientBoosting,
+    HoeffdingTree, KNearestNeighbors, KernelSVM, Lasso, Learner, LearnerProperties, LightGBM,
+    LinearRegression, LinearSVM, LogisticRegression, MondrianForest, MondrianTree, ObliqueForest,
+    ObliqueTree, QuantileForest, QuantileGB, RandomForest, Ridge, XGBoost,
 };
 use crate::{Result, SmeltError};
 
@@ -39,8 +39,10 @@ pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
         "elm" => Box::new(ExtremeLearningMachine::default()),
         "extra_trees" => Box::new(ExtraTrees::default()),
         "gaussian_nb" => Box::new(GaussianNB),
+        "gaussian_process" => Box::new(GaussianProcess::default()),
         "gradient_boosting" => Box::new(GradientBoosting::default()),
         "hoeffding_tree" => Box::new(HoeffdingTree::default()),
+        "kernel_svm" => Box::new(KernelSVM::default()),
         "knn" => Box::new(KNearestNeighbors::default()),
         "lasso" => Box::new(Lasso::default()),
         "lightgbm" => Box::new(LightGBM::default()),
@@ -105,8 +107,10 @@ pub fn registered_learner_ids() -> &'static [&'static str] {
         "elm",
         "extra_trees",
         "gaussian_nb",
+        "gaussian_process",
         "gradient_boosting",
         "hoeffding_tree",
+        "kernel_svm",
         "knn",
         "lasso",
         "lightgbm",
@@ -177,7 +181,7 @@ mod tests {
     fn registered_learner_count_matches_readme_claim() {
         assert_eq!(
             registered_learner_ids().len(),
-            27,
+            29,
             "registry count changed -- update the \"Model registry\" bullet \
              and \"All Supervised Learners\" table in README.md to match"
         );

@@ -697,6 +697,48 @@ fn benchmark_classif_cv() {
     assert!(means[0] >= 0.5, "mean accuracy should be reasonable");
 }
 
+/// The three classic resamplers added for mlr3-parity (RepeatedCV, LOO,
+/// Bootstrap) must drive a real learner through `benchmark::resample_*`
+/// exactly like CrossValidation/Holdout — proving they compose with the
+/// evaluation loop, not just satisfy the `Resample` trait in isolation.
+/// Bootstrap in particular exercises the `features.select` path with a
+/// *duplicated* train index vector, which the loop must handle.
+#[test]
+fn benchmark_classif_repeated_loo_and_bootstrap() {
+    let features = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.0, 0.1],
+        [0.1, 0.0],
+        [0.2, 0.1],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9],
+        [1.1, 1.0]
+    ];
+    let target = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    let task = ClassificationTask::new("bench", features, target).unwrap();
+
+    // RepeatedCV: 2 folds × 3 repeats = 6 evaluations.
+    let mut tree = DecisionTree::new().with_max_depth(3);
+    let rcv = RepeatedCV::new(2, 3).with_seed(7);
+    let r = benchmark::resample_classif(&mut tree, &task, &rcv, &[&Accuracy]).unwrap();
+    assert_eq!(r.scores.len(), 6);
+    assert!(r.mean_scores()[0] >= 0.5);
+
+    // Leave-one-out: one evaluation per sample.
+    let loo = LeaveOneOut;
+    let r = benchmark::resample_classif(&mut tree, &task, &loo, &[&Accuracy]).unwrap();
+    assert_eq!(r.scores.len(), task.n_samples());
+
+    // Bootstrap: OOB test per resample; train has duplicate indices.
+    let boot = Bootstrap::new(8).with_seed(3);
+    let r = benchmark::resample_classif(&mut tree, &task, &boot, &[&Accuracy]).unwrap();
+    assert_eq!(r.scores.len(), 8);
+    assert!(r.mean_scores()[0] >= 0.5);
+}
+
 #[test]
 fn benchmark_regress_holdout() {
     let features = array![
@@ -1800,6 +1842,83 @@ fn grid_search_multi_param() {
     let result = gs.tune_classif(&task, &cv, &Accuracy).unwrap();
 
     assert_eq!(result.all_results.len(), 4);
+}
+
+/// End-to-end proof of the parameter-dependency feature against the exact
+/// 5th-audit M-5 shape: a factory that reads a "child" parameter only under
+/// one setting of a "parent" flag, so the child is dead otherwise. Without a
+/// declared dependency, grid search wastes trials on bit-identical dead-param
+/// models; with one, those combinations collapse to a single trial and the
+/// surviving dead-branch config carries no child parameter at all.
+#[test]
+fn grid_search_dependency_collapses_dead_param_combinations() {
+    use smelt_ml::tuning::{Dependency, ParamGrid, ParamSet, ParamValue};
+
+    // Factory reads `min_samples_split` ONLY when `use_split_control` is true.
+    fn build(params: &ParamSet) -> Box<dyn smelt_ml::learner::Learner> {
+        let mut dt = DecisionTree::new().with_max_depth(3);
+        if params
+            .get("use_split_control")
+            .and_then(|v| v.as_bool().ok())
+            == Some(true)
+        {
+            dt = dt.with_min_samples_split(params["min_samples_split"].as_usize().unwrap());
+        }
+        Box::new(dt)
+    }
+
+    let features = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("gs_dep", features, target).unwrap();
+
+    let mut grid = ParamGrid::new();
+    grid.insert(
+        "use_split_control".into(),
+        vec![ParamValue::Bool(false), ParamValue::Bool(true)],
+    );
+    grid.insert(
+        "min_samples_split".into(),
+        vec![ParamValue::Int(2), ParamValue::Int(5), ParamValue::Int(8)],
+    );
+    let cv = CrossValidation::new(2).with_seed(42);
+
+    // Without the dependency: full 2×3 = 6 trials; the 3 control=false combos
+    // are bit-identical dead-param waste (the M-5 no-op).
+    let r_no_dep = GridSearch::new(build, grid.clone())
+        .tune_classif(&task, &cv, &Accuracy)
+        .unwrap();
+    assert_eq!(r_no_dep.all_results.len(), 6);
+
+    // With the dependency: control=false collapses to 1 → 4 distinct trials.
+    let r_dep = GridSearch::new(build, grid)
+        .with_dependency(Dependency::equals(
+            "min_samples_split",
+            "use_split_control",
+            true,
+        ))
+        .tune_classif(&task, &cv, &Accuracy)
+        .unwrap();
+    assert_eq!(r_dep.all_results.len(), 4);
+
+    let dead: Vec<_> = r_dep
+        .all_results
+        .iter()
+        .filter(|(p, _)| p.get("use_split_control") == Some(&ParamValue::Bool(false)))
+        .collect();
+    assert_eq!(dead.len(), 1, "the dead branch collapses to a single trial");
+    assert!(
+        !dead[0].0.contains_key("min_samples_split"),
+        "the pruned child never reaches the factory or the reported params"
+    );
 }
 
 /// Regression/determinism test for the rayon-parallelized combination loop:

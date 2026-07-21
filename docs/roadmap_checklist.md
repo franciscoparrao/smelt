@@ -129,12 +129,98 @@ y learners espaciales — esto cubre lo inverso).
       metadata es verdad verificada, no declarada. Falla ruidoso si alguien
       agrega un learner con properties mentirosas. ✅ (2026-07-18)
 - [ ] **Menores / futuro**: terminators componibles (tiempo/estancamiento/
-      objetivo), dependencias entre parámetros en `ParamSet` (habría
-      prevenido el M-5 de la 5ª auditoría), tuning multi-objetivo (Pareto),
-      repeated CV / bootstrap / LOO explícito, kernel SVM, GP standalone con
-      `se`, CoxPH, plotting (ROC/critical-difference sobre el benchmark ya
-      existente), Pipeline como DAG. Deep learning (mlr3torch) sigue
-      **descartado deliberadamente** (sin autodiff en el workspace).
+      objetivo), tuning multi-objetivo (Pareto), plotting (ROC/critical-
+      difference sobre el benchmark ya existente), Pipeline como DAG. Deep
+      learning (mlr3torch) sigue **descartado deliberadamente** (sin autodiff
+      en el workspace).
+    - [x] **Kernel SVM (C-SVC)** (2026-07-21) — `KernelSVM`/`TrainedKernelSVM`
+      + enum `Kernel` (Linear/Poly/Rbf) en `src/learner/kernel_svm.rs`. SVM
+      dual soft-margin resuelto con **SMO** (Platt 1998): sin dependencia de
+      QP externo; kernel trick para fronteras no lineales genuinas (a
+      diferencia del `LinearSVM` SGD+hinge preexistente). Multiclase
+      one-vs-rest. `decision_function` inherente más allá del trait (shape de
+      GeoXGBoost/GP; `fit`-devuelve-concreto, `train_classif` envuelve).
+      `Learner` classifier-only, registrado como `"kernel_svm"` (29 en
+      registry) → contract autotest (7×29). **Golden vs scikit-learn 1.8.0
+      `SVC(rbf, gamma, tol)`**: decision values en test points match a 1e-2
+      (ambos resuelven el mismo QP convexo → función de decisión única;
+      diferencia solo por tolerancias de parada) y predicciones exactas. 5
+      unit tests (golden, XOR no-lineal, OvR multiclase, kernel lineal,
+      rechazo params/weights) + doctest. Binding Python en
+      `smelt-py/src/learners/misc.rs` (`decision_function` 1D binario/2D
+      multiclase, kernel string con validación eager en `__new__`/`set_params`
+      como XGBoost/KrigingHybrid); verificado con `maturin develop` + script
+      (golden sklearn vía API, poly/linear, get/set_params). README
+      actualizado (35 supervised, fila, 29 registry). SVR (regresión) queda
+      como extensión futura documentada.
+    - [x] **GP standalone con `se`** (2026-07-21) — `GaussianProcess`/
+      `TrainedGaussianProcess` en `src/learner/gaussian_process.rs`. GP
+      regression con kernel RBF: posterior exacto vía Cholesky de
+      `K = k(X,X)+αI`, `α_vec = K⁻¹y`, media `k*ᵀα_vec` y varianza
+      `k(x*,x*) − k*ᵀK⁻¹k*`. La desviación estándar predictiva (`se`) — el
+      punto de usar un GP — se expone más allá del trait vía `predict_std`/
+      `predict_with_std` (mismo shape "tipo concreto lleva más que el trait"
+      que `TrainedGeoXGBoost::predict_spatial`; `fit` devuelve el concreto,
+      `train_regress` lo envuelve). Hiperparámetros de kernel fijos (opt por
+      marginal-likelihood = extensión futura documentada). Solver Cholesky +
+      forward/back-substitution hand-rolled (convención per-módulo). `Learner`
+      regressor-only, registrado como `"gaussian_process"` (28 en registry).
+      **Golden vs scikit-learn 1.8.0** `GaussianProcessRegressor(RBF, alpha,
+      optimizer=None)`: media Y std en test points match a 1e-6. 3 unit tests
+      + contract autotest (7×28) + doctest. Binding Python en
+      `smelt-py/src/learners/misc.rs` (mirror de QuantileForest: `predict_std`/
+      `predict_with_std` inherentes, `declare_params!`, sin save/load porque
+      GP no es serializable); verificado con `maturin develop` + script Python
+      (golden sklearn a 1e-6 vía API). README actualizado (34 supervised, fila
+      en tabla, 28 registry).
+    - [x] **CoxPH** (2026-07-21) — `CoxPH`/`TrainedCoxPH` en
+      `src/survival/cox.rs`. Regresión de Cox semi-paramétrica: partial
+      likelihood (Cox 1972) maximizada por Newton-Raphson (log-PL globalmente
+      cóncava → converge desde β=0; con step-halving de resguardo), empates
+      por aproximación de Breslow, baseline cumulative hazard de Breslow →
+      curvas de supervivencia por individuo en el mismo `SurvivalPrediction`
+      que produce RSF. Features centradas (β invariante; baseline = individuo
+      medio, = R `basehaz(centered=TRUE)`), penalización L2 opcional (Cox
+      ridge, default 0). Solver Gauss con pivoteo hand-rolled (convención
+      per-módulo). API standalone `fit(features, events)` como RSF (survival
+      no encaja en `Learner`'s `(X,y)`), no registrado. **Golden vs R
+      `survival::coxph(ties="breslow")` 3.5.8**: coeficientes, log-PL y
+      baseline hazard match a 1e-6 sobre dataset fijo de 20×2. 6 unit tests
+      (golden R, score≈0 en el óptimo, ranking C-index=1 con l2, orden de
+      curvas por riesgo, rechazo all-censored/shape, shrinkage por l2).
+      Rust-only por consistencia: RSF tampoco está bindeado en Python
+      (bindear solo Cox sería inconsistente).
+    - [x] **Dependencias entre parámetros en `ParamSet`** (2026-07-21) —
+      `Condition` (`Equals`/`In`) + `Dependency{child,parent,cond}` en
+      `src/tuning/mod.rs` (constructores `Dependency::equals`/`in_values`).
+      Un hijo solo llega a la factory cuando su padre satisface la condición;
+      `prune_inactive` los poda a fixpoint (cadenas hijo-de-hijo colapsan de
+      una), `validate_dependencies` rechaza padre/hijo ausente del espacio
+      (la misconfig exacta del M-5) y ciclos. Cableado en `GridSearch`
+      (`cartesian_product_with_deps`: poda + dedup de combos que colapsan —
+      la 6→4 del M-5 estructural) y `RandomSearch` (poda tras muestrear, sin
+      tocar el stream RNG → reproducibilidad intacta), ambos con
+      `with_dependency`. Bayesian/Hyperband fuera de scope (usan surrogate/
+      successive-halving; el guard puntual del M-5 en `smelt-py/src/tuning.rs`
+      ya cubre el único caso que exponen). Es la forma general del guard
+      one-off que cerró el M-5. 8 unit tests + 1 integración end-to-end
+      (con-vs-sin dependencia: 6 trials con waste bit-idéntico → 4 distintos).
+    - [x] **Repeated CV / bootstrap / LOO explícito** (2026-07-21) —
+      `RepeatedCV`/`LeaveOneOut`/`Bootstrap` en `src/resample/mod.rs`, sobre
+      el trait `Resample` existente (mismo lugar que `CrossValidation`/
+      `Holdout`, los otros clásicos). `RepeatedCV` reusa `CrossValidation`
+      con seed por-repeat derivada vía `wrapping_add` (partición realmente
+      distinta cada vez, reproducible); `LeaveOneOut` determinista sin seed;
+      `Bootstrap` muestrea train con reemplazo (tamaño original, con
+      duplicados) y usa el out-of-bag como test, saltando draws con OOB
+      vacío (prob. no despreciable a `n` chico — ~25% en `n=2`) con un solo
+      stream RNG continuo para reproducibilidad. Componen con `benchmark::
+      resample_*` sin tocar el loop (el `features.select` ya maneja índices
+      duplicados del bootstrap). 12 tests unitarios + 1 integración
+      end-to-end con learner real. Bindings Python (`smelt-py/src/resample.rs`
+      + registro en `lib.rs`/`__init__.py`): `RepeatedCV`/`LeaveOneOut`/
+      `Bootstrap` con el mismo método `splits(n_samples)` que los otros
+      resamplers; verificado con `maturin develop --release` + script Python.
 
 ## Infraestructura pendiente
 

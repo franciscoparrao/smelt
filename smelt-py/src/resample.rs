@@ -1,5 +1,6 @@
-//! Resampling strategy wrappers: CrossValidation, SpatialBlockCV,
-//! SpatialBufferCV, StratifiedCV, GroupCV.
+//! Resampling strategy wrappers: CrossValidation, RepeatedCV, LeaveOneOut,
+//! Bootstrap, SpatialBlockCV, SpatialBufferCV, StratifiedCV, GroupCV,
+//! TimeSeriesCV.
 
 use crate::common::{parse_coords, smelt_err};
 use pyo3::prelude::*;
@@ -18,6 +19,83 @@ impl CrossValidation {
     fn new(n_folds: usize, seed: u64) -> Self {
         Self {
             inner: smelt_ml::prelude::CrossValidation::new(n_folds).with_seed(seed),
+        }
+    }
+
+    fn splits(&self, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {
+        use smelt_ml::prelude::Resample;
+        self.inner.splits(n_samples).map_err(smelt_err)
+    }
+}
+
+// ── RepeatedCV ─────────────────────────────────────────────────────────
+
+#[pyclass]
+pub(crate) struct RepeatedCV {
+    inner: smelt_ml::prelude::RepeatedCV,
+}
+
+#[pymethods]
+impl RepeatedCV {
+    /// Repeated k-fold CV: runs plain k-fold `n_repeats` times with a
+    /// different shuffle each time, yielding `n_folds * n_repeats` splits.
+    /// Averaging over them reduces the variance from a single fold assignment.
+    #[new]
+    #[pyo3(signature = (n_folds=5, n_repeats=10, seed=42))]
+    fn new(n_folds: usize, n_repeats: usize, seed: u64) -> Self {
+        Self {
+            inner: smelt_ml::prelude::RepeatedCV::new(n_folds, n_repeats).with_seed(seed),
+        }
+    }
+
+    fn splits(&self, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {
+        use smelt_ml::prelude::Resample;
+        self.inner.splits(n_samples).map_err(smelt_err)
+    }
+}
+
+// ── LeaveOneOut ────────────────────────────────────────────────────────
+
+#[pyclass]
+pub(crate) struct LeaveOneOut {
+    inner: smelt_ml::prelude::LeaveOneOut,
+}
+
+#[pymethods]
+impl LeaveOneOut {
+    /// Leave-one-out CV: one split per sample, each holding out a single
+    /// point and training on the rest. Deterministic (no seed).
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: smelt_ml::prelude::LeaveOneOut,
+        }
+    }
+
+    fn splits(&self, n_samples: usize) -> PyResult<Vec<(Vec<usize>, Vec<usize>)>> {
+        use smelt_ml::prelude::Resample;
+        self.inner.splits(n_samples).map_err(smelt_err)
+    }
+}
+
+// ── Bootstrap ──────────────────────────────────────────────────────────
+
+#[pyclass]
+pub(crate) struct Bootstrap {
+    inner: smelt_ml::prelude::Bootstrap,
+}
+
+#[pymethods]
+impl Bootstrap {
+    /// Bootstrap resampling: each resample draws `n_samples` train indices
+    /// with replacement; the never-drawn out-of-bag (~36.8%) become the test
+    /// set. Draws with an empty OOB set are skipped, so exactly `n_resamples`
+    /// usable splits are returned (requires `n_samples >= 2`).
+    #[new]
+    #[pyo3(signature = (n_resamples=30, seed=42))]
+    fn new(n_resamples: usize, seed: u64) -> Self {
+        Self {
+            inner: smelt_ml::prelude::Bootstrap::new(n_resamples).with_seed(seed),
         }
     }
 

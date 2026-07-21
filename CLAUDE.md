@@ -35,10 +35,12 @@ src/
 ├── error.rs        # SmeltError enum (thiserror)
 ├── task/mod.rs     # Task, ClassificationTask, RegressionTask
 ├── learner/        # Learner trait, TrainedModel trait, learner_from_id registry,
-│                   # 33 learners (tree/, xgboost, lightgbm, catboost, geo_xgboost,
+│                   # 35 learners (tree/, xgboost, lightgbm, catboost, geo_xgboost,
 │                   # kriging_hybrid, hoeffding + adaptive_rf + mondrian (streaming/
 │                   # online), oblique, stacking, bagging, des, ebm, quantile*,
-│                   # regularized, elm, deep_forest, cost_sensitive (wrapper), ...)
+│                   # regularized, elm, gaussian_process (GP + predictive se),
+│                   # kernel_svm (C-SVC via SMO), deep_forest,
+│                   # cost_sensitive (wrapper), ...)
 ├── prediction/     # Prediction enum (Classification/Regression)
 ├── measure/        # Accuracy, F1, AUC-ROC, BalancedAccuracy, Kappa, MCC, Brier,
 │                   # RMSE, MAE, R², MAPE (+ trait Measure)
@@ -53,7 +55,7 @@ src/
 │                   # 2019, Nie & Wager 2021, Kennedy 2020), composing ordinary
 │                   # Learners via Bagging/Stacking-style factory closures
 ├── conformal/      # ConformalRegressor/Classifier, CQR
-├── survival/       # RandomSurvivalForest
+├── survival/       # RandomSurvivalForest, CoxPH (Cox proportional hazards)
 ├── importance/     # permutation importance, permutation-SHAP
 ├── multilabel/, multioutput/  # ClassifierChain, RegressorChain
 ├── stats.rs        # Wilcoxon, sign test, Friedman, Nemenyi, McNemar, bootstrap CI

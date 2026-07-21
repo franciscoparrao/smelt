@@ -90,15 +90,15 @@ pub mod prelude {
         Activation, AdaBoost, AdaptiveRandomForest, Adwin, AutoTuner, Bagging, BandwidthSelection,
         CalibratedClassifier, CalibrationMethod, CatBoost, CostSensitiveClassifier, DecisionTree,
         DeepForest, DynamicEnsemble, EBM, ElasticNet, ExtraTrees, ExtremeLearningMachine,
-        GaussianNB, GeoXGBoost, GradientBoosting, HoeffdingTree, KNearestNeighbors, KrigingHybrid,
-        Lasso, Learner, LearnerProperties, LightGBM, LinearRegression, LinearSVM,
-        LogisticRegression, MondrianForest, MondrianTree, Objective, ObliqueForest, ObliqueTree,
-        QuantileForest, QuantileGB, RandomForest, Ridge, Stacking, TargetTransform,
-        TargetTransformRegressor, ThresholdedClassifier, TrainedAutoTuner,
-        TrainedCalibratedClassifier, TrainedDeepForest, TrainedGeoXGBoost, TrainedKrigingHybrid,
-        TrainedQuantileForest, TrainedTargetTransformRegressor, TrainedThresholdedClassifier,
-        TunerSpec, VariogramFit, VariogramModel, XGBoost, learner_from_id, learner_properties,
-        registered_learner_ids,
+        GaussianNB, GaussianProcess, GeoXGBoost, GradientBoosting, HoeffdingTree,
+        KNearestNeighbors, Kernel, KernelSVM, KrigingHybrid, Lasso, Learner, LearnerProperties,
+        LightGBM, LinearRegression, LinearSVM, LogisticRegression, MondrianForest, MondrianTree,
+        Objective, ObliqueForest, ObliqueTree, QuantileForest, QuantileGB, RandomForest, Ridge,
+        Stacking, TargetTransform, TargetTransformRegressor, ThresholdedClassifier,
+        TrainedAutoTuner, TrainedCalibratedClassifier, TrainedDeepForest, TrainedGaussianProcess,
+        TrainedGeoXGBoost, TrainedKernelSVM, TrainedKrigingHybrid, TrainedQuantileForest,
+        TrainedTargetTransformRegressor, TrainedThresholdedClassifier, TunerSpec, VariogramFit,
+        VariogramModel, XGBoost, learner_from_id, learner_properties, registered_learner_ids,
     };
     pub use crate::measure::{
         Accuracy, AteBias, AucRoc, BalancedAccuracy, Brier, CohensKappa, F1Score, LogLoss, Mae,
@@ -112,18 +112,18 @@ pub mod prelude {
         PCA, Pipeline, RFE, Resampler, Smote, SpatialSmote, StandardScaler, Transformer,
     };
     pub use crate::resample::{
-        CrossValidation, GroupCV, Holdout, Resample, SpatialBlockCV, SpatialBufferCV, StratifiedCV,
-        TimeSeriesCV,
+        Bootstrap, CrossValidation, GroupCV, Holdout, LeaveOneOut, RepeatedCV, Resample,
+        SpatialBlockCV, SpatialBufferCV, StratifiedCV, TimeSeriesCV,
     };
     pub use crate::serialize::{SerializableModel, load_json, save_json};
     pub use crate::sparse::CsrMatrix;
     pub use crate::survival::{
-        RandomSurvivalForest, SurvivalEvent, SurvivalPrediction, TrainedRandomSurvivalForest,
-        concordance_index,
+        CoxPH, RandomSurvivalForest, SurvivalEvent, SurvivalPrediction, TrainedCoxPH,
+        TrainedRandomSurvivalForest, concordance_index,
     };
     pub use crate::task::{ClassificationTask, FeatureType, RegressionTask, Task};
     pub use crate::tuning::{
-        BayesianOptimizer, GridSearch, Hyperband, ParamDistribution, ParamGrid, ParamSet,
-        ParamSpace, ParamValue, RandomSearch, TuneResult,
+        BayesianOptimizer, Condition, Dependency, GridSearch, Hyperband, ParamDistribution,
+        ParamGrid, ParamSet, ParamSpace, ParamValue, RandomSearch, TuneResult,
     };
 }
