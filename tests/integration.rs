@@ -5035,6 +5035,79 @@ fn bayesian_optimizer_classif() {
     assert!(result.maximize);
 }
 
+/// A composable `Terminator` stops the sequential BayesianOptimizer before it
+/// exhausts `n_iter`. `MaxEvals(4)` with `n_iter=20` must yield exactly 4
+/// evaluations; a `TargetScore` immediately satisfied on a separable task
+/// must stop after a single evaluation. Without a terminator the loop still
+/// runs the full `n_iter` (baseline above).
+#[test]
+fn bayesian_optimizer_terminators_stop_early() {
+    use smelt_ml::tuning::{AnyTerminator, MaxEvals, ParamSpace, TargetScore};
+
+    let features = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.0, 0.9]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1];
+    let task = ClassificationTask::new("bo_term", features, target).unwrap();
+    let cv = CrossValidation::new(2).with_seed(42);
+
+    let make_bo = || {
+        let mut space = ParamSpace::new();
+        space.insert("max_depth".into(), ParamDistribution::Uniform(1.0, 10.0));
+        BayesianOptimizer::new(
+            |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"].as_usize().unwrap())),
+            space,
+        )
+        .with_n_iter(20)
+        .with_n_initial(3)
+        .with_seed(42)
+    };
+
+    // MaxEvals: stop after exactly 4 evaluations (< n_iter=20).
+    let r = make_bo()
+        .with_terminator(Box::new(MaxEvals::new(4)))
+        .tune_classif(&task, &cv, &Accuracy)
+        .unwrap();
+    assert_eq!(r.all_results.len(), 4, "MaxEvals(4) must stop at 4 evals");
+
+    // TargetScore(0.0) with a maximized measure is met after the first eval
+    // (accuracy >= 0.0 always) -> stops immediately.
+    let r = make_bo()
+        .with_terminator(Box::new(TargetScore::new(0.0)))
+        .tune_classif(&task, &cv, &Accuracy)
+        .unwrap();
+    assert_eq!(
+        r.all_results.len(),
+        1,
+        "an already-met target stops at 1 eval"
+    );
+
+    // Composed: whichever of MaxEvals(6) / unreachable target fires first.
+    let r = make_bo()
+        .with_terminator(Box::new(AnyTerminator::new(vec![
+            Box::new(MaxEvals::new(6)),
+            Box::new(TargetScore::new(2.0)), // unreachable (accuracy <= 1)
+        ])))
+        .tune_classif(&task, &cv, &Accuracy)
+        .unwrap();
+    assert_eq!(
+        r.all_results.len(),
+        6,
+        "AnyTerminator stops at the first firing (MaxEvals)"
+    );
+
+    // No terminator: full n_iter, confirming the default is unchanged.
+    let r = make_bo().tune_classif(&task, &cv, &Accuracy).unwrap();
+    assert_eq!(r.all_results.len(), 20);
+}
+
 #[test]
 fn bayesian_optimizer_regress() {
     use smelt_ml::tuning::ParamSpace;

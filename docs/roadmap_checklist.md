@@ -128,10 +128,25 @@ y learners espaciales — esto cubre lo inverso).
       cero-panic universal). Pasó entero a la primera → 0 mismatches: la
       metadata es verdad verificada, no declarada. Falla ruidoso si alguien
       agrega un learner con properties mentirosas. ✅ (2026-07-18)
-- [ ] **Menores / futuro**: terminators componibles (tiempo/estancamiento/
-      objetivo), plotting (ROC/critical-difference sobre el benchmark ya
-      existente), Pipeline como DAG. Deep learning (mlr3torch) sigue
-      **descartado deliberadamente** (sin autodiff en el workspace).
+- [ ] **Menores / futuro**: plotting (ROC/critical-difference sobre el
+      benchmark ya existente), Pipeline como DAG. Deep learning (mlr3torch)
+      sigue **descartado deliberadamente** (sin autodiff en el workspace).
+    - [x] **Terminators componibles** (2026-07-21) — trait `Terminator` +
+      `TuningProgress` (n_evals/elapsed/best_score/maximize/
+      evals_since_improvement) en `src/tuning/terminator.rs`. Criterios
+      concretos `MaxEvals`/`RunTime`/`Stagnation`/`TargetScore` que componen
+      vía `AnyTerminator` (OR) / `AllTerminator` (AND), p.ej. "20 evals OR 30s
+      OR 5 rondas sin mejora". Cableados en `BayesianOptimizer` (el tuner
+      secuencial; GridSearch/RandomSearch evalúan todo up-front, no hay corrida
+      parcial que cortar) como early-stop opcional vía `with_terminator`,
+      chequeado tras cada eval; sin terminator corre exactamente `n_iter` como
+      antes (default sin cambios). `std::time::Instant` para wall-clock (el
+      crate sí puede usarlo). 6 unit tests + 1 integración end-to-end
+      (MaxEvals(4)→4 evals, TargetScore(0)→1 eval, AnyTerminator→primero que
+      dispara, sin terminator→n_iter completo). Binding Python: kwargs
+      opcionales `max_seconds`/`patience`/`target_score` en `optimize` que
+      arman un `AnyTerminator` internamente (sin exponer los trait objects);
+      verificado con `maturin develop` + script.
     - [x] **Tuning multi-objetivo (Pareto)** (2026-07-21) — `ParetoResult`
       (`front`/`all_results`/`measure_ids`/`maximize`) + `pareto_front_indices`
       (non-dominated sorting con dominancia Pareto respetando el flag

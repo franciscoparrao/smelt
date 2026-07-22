@@ -4,11 +4,16 @@ pub mod bayesian;
 pub mod grid_search;
 pub mod hyperband;
 pub mod random_search;
+pub mod terminator;
 
 pub use bayesian::BayesianOptimizer;
 pub use grid_search::GridSearch;
 pub use hyperband::Hyperband;
 pub use random_search::RandomSearch;
+pub use terminator::{
+    AllTerminator, AnyTerminator, MaxEvals, RunTime, Stagnation, TargetScore, Terminator,
+    TuningProgress,
+};
 
 use crate::{Result, SmeltError};
 use rand::Rng;

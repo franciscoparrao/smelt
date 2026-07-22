@@ -4,6 +4,7 @@
 //! Models the distribution of good vs bad hyperparameter configurations
 //! and samples promising candidates via density ratio l(x)/g(x).
 
+use super::terminator::{Terminator, TuningProgress};
 use super::{ParamDistribution, ParamSet, ParamSpace, ParamValue, TuneResult};
 use crate::Result;
 use crate::benchmark;
@@ -14,6 +15,7 @@ use crate::task::{ClassificationTask, RegressionTask};
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use std::time::Instant;
 
 /// Bayesian Optimization using Tree-structured Parzen Estimator (TPE).
 ///
@@ -57,6 +59,7 @@ pub struct BayesianOptimizer {
     gamma: f64,
     n_candidates: usize,
     seed: u64,
+    terminator: Option<Box<dyn Terminator>>,
 }
 
 impl BayesianOptimizer {
@@ -74,6 +77,7 @@ impl BayesianOptimizer {
             gamma: 0.25,
             n_candidates: 24,
             seed: 42,
+            terminator: None,
         }
     }
 
@@ -106,6 +110,56 @@ impl BayesianOptimizer {
         self
     }
 
+    /// Attach a composable early-stopping [`Terminator`] (time / stagnation /
+    /// target score / any combination). It is checked after each evaluation
+    /// and, if it fires, stops the run before `n_iter` is reached. With no
+    /// terminator (the default) the loop runs exactly `n_iter` iterations as
+    /// before.
+    pub fn with_terminator(mut self, terminator: Box<dyn Terminator>) -> Self {
+        self.terminator = Some(terminator);
+        self
+    }
+
+    /// After pushing an eval to `history`, update the running best and
+    /// stall counter, then ask the terminator (if any) whether to stop.
+    /// Returns `true` when the run should break early.
+    fn check_terminator(
+        &self,
+        score: f64,
+        maximize: bool,
+        start: Instant,
+        n_evals: usize,
+        best: &mut Option<f64>,
+        stall: &mut usize,
+    ) -> bool {
+        let improved = match *best {
+            None => true,
+            Some(b) => {
+                if maximize {
+                    score > b
+                } else {
+                    score < b
+                }
+            }
+        };
+        if improved {
+            *best = Some(score);
+            *stall = 0;
+        } else {
+            *stall += 1;
+        }
+        match &self.terminator {
+            None => false,
+            Some(t) => t.should_terminate(&TuningProgress {
+                n_evals,
+                elapsed: start.elapsed(),
+                best_score: best.expect("best is Some after at least one eval"),
+                maximize,
+                evals_since_improvement: *stall,
+            }),
+        }
+    }
+
     /// Tune for classification.
     ///
     /// Unlike `GridSearch`/`RandomSearch`/`Hyperband`, this loop is NOT
@@ -127,6 +181,9 @@ impl BayesianOptimizer {
         let maximize = measure.maximize();
         let mut rng = StdRng::seed_from_u64(self.seed);
         let mut history: Vec<(ParamSet, f64)> = Vec::with_capacity(self.n_iter);
+        let start = Instant::now();
+        let mut best: Option<f64> = None;
+        let mut stall = 0usize;
 
         for i in 0..self.n_iter {
             let params = if i < self.n_initial || history.len() < 4 {
@@ -139,6 +196,10 @@ impl BayesianOptimizer {
             let bench = benchmark::resample_classif(&mut *learner, task, resampling, &[measure])?;
             let score = bench.mean_scores()[0];
             history.push((params, score));
+
+            if self.check_terminator(score, maximize, start, history.len(), &mut best, &mut stall) {
+                break;
+            }
         }
 
         TuneResult::select_best(history, measure.id().to_string(), maximize)
@@ -155,6 +216,9 @@ impl BayesianOptimizer {
         let maximize = measure.maximize();
         let mut rng = StdRng::seed_from_u64(self.seed);
         let mut history: Vec<(ParamSet, f64)> = Vec::with_capacity(self.n_iter);
+        let start = Instant::now();
+        let mut best: Option<f64> = None;
+        let mut stall = 0usize;
 
         for i in 0..self.n_iter {
             let params = if i < self.n_initial || history.len() < 4 {
@@ -167,6 +231,10 @@ impl BayesianOptimizer {
             let bench = benchmark::resample_regress(&mut *learner, task, resampling, &[measure])?;
             let score = bench.mean_scores()[0];
             history.push((params, score));
+
+            if self.check_terminator(score, maximize, start, history.len(), &mut best, &mut stall) {
+                break;
+            }
         }
 
         TuneResult::select_best(history, measure.id().to_string(), maximize)

@@ -331,7 +331,13 @@ impl PyBayesianOptimizer {
     ///     metric: "rmse", "r2", "accuracy", etc.
     ///     n_folds: cross-validation folds
     ///     cv_seed: seed for CV splits
-    #[pyo3(signature = (learner_type, param_space, x, y, metric="rmse", n_folds=5, cv_seed=42))]
+    ///     max_seconds: optional wall-clock budget (early stop)
+    ///     patience: optional stop after N evals without improvement
+    ///     target_score: optional stop once the best score reaches this
+    ///         (direction follows the metric). Any set criterion that fires
+    ///         first stops the run early (combined with OR).
+    #[pyo3(signature = (learner_type, param_space, x, y, metric="rmse", n_folds=5, cv_seed=42, max_seconds=None, patience=None, target_score=None))]
+    #[allow(clippy::too_many_arguments)]
     fn optimize<'py>(
         &self,
         py: Python<'py>,
@@ -342,6 +348,9 @@ impl PyBayesianOptimizer {
         metric: &str,
         n_folds: usize,
         cv_seed: u64,
+        max_seconds: Option<f64>,
+        patience: Option<usize>,
+        target_score: Option<f64>,
     ) -> PyResult<PyObject> {
         let factory = make_learner_factory(learner_type)?;
         let space = build_param_space(param_space)?;
@@ -349,10 +358,26 @@ impl PyBayesianOptimizer {
         let measure = resolve_measure(metric)?;
         let cv = smelt_ml::resample::CrossValidation::new(n_folds).with_seed(cv_seed);
 
-        let bo = smelt_ml::tuning::BayesianOptimizer::new(move |params| factory(params), space)
+        let mut bo = smelt_ml::tuning::BayesianOptimizer::new(move |params| factory(params), space)
             .with_n_iter(self.n_iter)
             .with_n_initial(self.n_initial)
             .with_seed(self.seed);
+
+        // Build an early-stopping terminator from whichever budgets are set;
+        // several are OR-combined (stop at the first to fire).
+        let mut terminators: Vec<Box<dyn smelt_ml::tuning::Terminator>> = Vec::new();
+        if let Some(secs) = max_seconds {
+            terminators.push(Box::new(smelt_ml::tuning::RunTime::seconds(secs)));
+        }
+        if let Some(p) = patience {
+            terminators.push(Box::new(smelt_ml::tuning::Stagnation::new(p)));
+        }
+        if let Some(t) = target_score {
+            terminators.push(Box::new(smelt_ml::tuning::TargetScore::new(t)));
+        }
+        if !terminators.is_empty() {
+            bo = bo.with_terminator(Box::new(smelt_ml::tuning::AnyTerminator::new(terminators)));
+        }
 
         let features = to_array2(x);
 
