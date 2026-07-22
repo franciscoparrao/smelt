@@ -366,6 +366,96 @@ impl TuneResult {
     }
 }
 
+/// Whether objective vector `a` Pareto-dominates `b`: `a` is no worse on every
+/// objective and strictly better on at least one. "Better" respects each
+/// objective's `maximize` flag. A `NaN` on either side makes that objective
+/// count as `a` being worse (so a candidate with a `NaN` score can never
+/// dominate, and is easily dominated) — measures normally return finite
+/// scores, but a degenerate fold shouldn't silently win.
+fn dominates(a: &[f64], b: &[f64], maximize: &[bool]) -> bool {
+    let mut strictly_better = false;
+    for k in 0..a.len() {
+        let (av, bv) = (a[k], b[k]);
+        if av.is_nan() {
+            return false; // a is worse (or incomparable) here → cannot dominate
+        }
+        if bv.is_nan() {
+            strictly_better = true; // finite beats NaN on this objective
+            continue;
+        }
+        let (a_better, a_worse) = if maximize[k] {
+            (av > bv, av < bv)
+        } else {
+            (av < bv, av > bv)
+        };
+        if a_worse {
+            return false;
+        }
+        if a_better {
+            strictly_better = true;
+        }
+    }
+    strictly_better
+}
+
+/// Indices of the Pareto-optimal (non-dominated) points among `objectives`,
+/// each an objective vector aligned with the `maximize` flags. A point is on
+/// the front iff no other point dominates it; equally-good duplicates are all
+/// kept (none dominates another). `O(n²·m)` — fine for tuning result sets.
+pub(crate) fn pareto_front_indices(objectives: &[Vec<f64>], maximize: &[bool]) -> Vec<usize> {
+    (0..objectives.len())
+        .filter(|&i| {
+            !(0..objectives.len())
+                .any(|j| j != i && dominates(&objectives[j], &objectives[i], maximize))
+        })
+        .collect()
+}
+
+/// Result of a **multi-objective** tuning run: the Pareto front of
+/// configurations (those not dominated on the given measures) plus every
+/// evaluated configuration. Unlike [`TuneResult`], there is no single "best" —
+/// the front is the set of non-dominated trade-offs, and picking among them is
+/// the user's call (e.g. accuracy vs. a cost/complexity measure).
+///
+/// Produced by `GridSearch::tune_classif_multi` / `RandomSearch::tune_regress_multi`
+/// and friends, which evaluate each configuration on every supplied measure.
+#[derive(Debug)]
+pub struct ParetoResult {
+    /// Ids of the objectives, aligned with each score vector.
+    pub measure_ids: Vec<String>,
+    /// Per-objective "higher is better" flags, aligned with `measure_ids`.
+    pub maximize: Vec<bool>,
+    /// The Pareto-optimal configurations: `(params, score-per-objective)`.
+    pub front: Vec<(ParamSet, Vec<f64>)>,
+    /// Every evaluated configuration with its per-objective scores.
+    pub all_results: Vec<(ParamSet, Vec<f64>)>,
+}
+
+impl ParetoResult {
+    pub(crate) fn from_results(
+        results: Vec<(ParamSet, Vec<f64>)>,
+        measure_ids: Vec<String>,
+        maximize: Vec<bool>,
+    ) -> Result<Self> {
+        if results.is_empty() {
+            return Err(SmeltError::InvalidParameter(
+                "multi-objective tuning produced no candidates (n_iter=0 or an empty grid?)".into(),
+            ));
+        }
+        let objectives: Vec<Vec<f64>> = results.iter().map(|(_, s)| s.clone()).collect();
+        let front = pareto_front_indices(&objectives, &maximize)
+            .into_iter()
+            .map(|i| results[i].clone())
+            .collect();
+        Ok(Self {
+            measure_ids,
+            maximize,
+            front,
+            all_results: results,
+        })
+    }
+}
+
 /// Generate the Cartesian product of all parameter values.
 pub(crate) fn cartesian_product(grid: &ParamGrid) -> Vec<ParamSet> {
     let mut keys: Vec<&String> = grid.keys().collect();
@@ -759,5 +849,84 @@ mod tests {
             cartesian_product_with_deps(&grid, &[]),
             cartesian_product(&grid)
         );
+    }
+
+    #[test]
+    fn pareto_front_all_maximize() {
+        // Two objectives, both maximized. Points:
+        //   0:(1,1) 1:(2,2) 2:(2,1) 3:(0,3) 4:(3,0)
+        // Point 1 dominates 0 and 2. 1, 3, 4 are mutually non-dominated.
+        let obj = vec![
+            vec![1.0, 1.0],
+            vec![2.0, 2.0],
+            vec![2.0, 1.0],
+            vec![0.0, 3.0],
+            vec![3.0, 0.0],
+        ];
+        let mut front = pareto_front_indices(&obj, &[true, true]);
+        front.sort_unstable();
+        assert_eq!(front, vec![1, 3, 4]);
+    }
+
+    #[test]
+    fn pareto_front_mixed_objectives() {
+        // Maximize obj0, minimize obj1 (e.g. accuracy up, cost down).
+        //   0:(0.9, 5) 1:(0.8, 2) 2:(0.9, 3) 3:(0.7, 2)
+        // 2 dominates 0 (same acc, lower cost). 1 dominates 3 (higher acc,
+        // same cost). 1 and 2 are a genuine trade-off → both on the front.
+        let obj = vec![
+            vec![0.9, 5.0],
+            vec![0.8, 2.0],
+            vec![0.9, 3.0],
+            vec![0.7, 2.0],
+        ];
+        let mut front = pareto_front_indices(&obj, &[true, false]);
+        front.sort_unstable();
+        assert_eq!(front, vec![1, 2]);
+    }
+
+    #[test]
+    fn pareto_front_keeps_equal_duplicates() {
+        // Identical points don't dominate each other → both kept.
+        let obj = vec![vec![1.0, 2.0], vec![1.0, 2.0]];
+        let mut front = pareto_front_indices(&obj, &[true, true]);
+        front.sort_unstable();
+        assert_eq!(front, vec![0, 1]);
+    }
+
+    #[test]
+    fn pareto_front_single_point_is_its_own_front() {
+        assert_eq!(
+            pareto_front_indices(&[vec![0.5, 0.5]], &[true, true]),
+            vec![0]
+        );
+    }
+
+    #[test]
+    fn dominates_respects_nan() {
+        // A finite point beats a NaN one; a NaN point never dominates.
+        assert!(dominates(&[1.0, 2.0], &[1.0, f64::NAN], &[true, true]));
+        assert!(!dominates(&[1.0, f64::NAN], &[1.0, 2.0], &[true, true]));
+    }
+
+    #[test]
+    fn pareto_result_from_results_extracts_front() {
+        let p = |x: i64| -> ParamSet {
+            let mut m = ParamSet::new();
+            m.insert("x".into(), ParamValue::Int(x));
+            m
+        };
+        let results = vec![
+            (p(0), vec![1.0, 1.0]),
+            (p(1), vec![2.0, 2.0]), // dominates all others
+            (p(2), vec![2.0, 1.0]),
+        ];
+        let res =
+            ParetoResult::from_results(results, vec!["a".into(), "b".into()], vec![true, true])
+                .unwrap();
+        assert_eq!(res.all_results.len(), 3);
+        assert_eq!(res.front.len(), 1);
+        assert_eq!(res.front[0].1, vec![2.0, 2.0]);
+        assert!(ParetoResult::from_results(vec![], vec![], vec![]).is_err());
     }
 }

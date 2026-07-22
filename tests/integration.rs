@@ -1921,6 +1921,83 @@ fn grid_search_dependency_collapses_dead_param_combinations() {
     );
 }
 
+/// End-to-end multi-objective tuning: a real GridSearch evaluated on two
+/// measures returns a valid Pareto front. Rather than asserting a specific
+/// front size (which depends on the data), this checks the defining
+/// structural property — every front point is non-dominated, and every
+/// off-front point is dominated by some front point — so the plumbing from
+/// `tune_classif_multi` through `benchmark::resample_classif`'s multi-measure
+/// scores to `ParetoResult` is exercised correctly.
+#[test]
+fn grid_search_multi_objective_returns_valid_pareto_front() {
+    use smelt_ml::tuning::{ParamGrid, ParamValue};
+
+    let features = array![
+        [0.0, 0.0],
+        [0.1, 0.2],
+        [0.2, 0.1],
+        [0.15, 0.05],
+        [1.0, 1.0],
+        [1.1, 0.9],
+        [0.9, 1.1],
+        [1.05, 0.95],
+        [0.5, 0.5],
+        [1.5, 1.4]
+    ];
+    let target = vec![0, 0, 0, 0, 1, 1, 1, 1, 0, 1];
+    let task = ClassificationTask::new("multi_obj", features, target).unwrap();
+
+    let mut grid = ParamGrid::new();
+    grid.insert(
+        "max_depth".into(),
+        vec![
+            ParamValue::Int(1),
+            ParamValue::Int(2),
+            ParamValue::Int(3),
+            ParamValue::Int(5),
+        ],
+    );
+    let gs = GridSearch::new(
+        |p| Box::new(DecisionTree::new().with_max_depth(p["max_depth"].as_usize().unwrap())),
+        grid,
+    );
+    let cv = CrossValidation::new(2).with_seed(42);
+
+    // Two objectives, both maximized (accuracy and macro-F1).
+    let measures: [&dyn Measure; 2] = [&Accuracy, &F1Score];
+    let res = gs.tune_classif_multi(&task, &cv, &measures).unwrap();
+
+    assert_eq!(res.all_results.len(), 4, "one entry per grid point");
+    assert_eq!(res.measure_ids.len(), 2);
+    assert_eq!(res.maximize, vec![true, true]);
+    assert!(!res.front.is_empty());
+
+    // Both maximized: `a` dominates `b` if a >= b elementwise and a > b once.
+    let dominates = |a: &[f64], b: &[f64]| -> bool {
+        a.iter().zip(b).all(|(x, y)| x >= y) && a.iter().zip(b).any(|(x, y)| x > y)
+    };
+    let all: Vec<&Vec<f64>> = res.all_results.iter().map(|(_, s)| s).collect();
+
+    // No front point is dominated by any evaluated point.
+    for (_, fs) in &res.front {
+        assert!(
+            !all.iter().any(|other| dominates(other, fs)),
+            "front point {fs:?} is dominated"
+        );
+    }
+    // Every off-front point is dominated by some front point.
+    let front_scores: Vec<&Vec<f64>> = res.front.iter().map(|(_, s)| s).collect();
+    for (_, s) in &res.all_results {
+        let on_front = front_scores.contains(&s);
+        if !on_front {
+            assert!(
+                front_scores.iter().any(|f| dominates(f, s)),
+                "off-front point {s:?} not dominated by any front point"
+            );
+        }
+    }
+}
+
 /// Regression/determinism test for the rayon-parallelized combination loop:
 /// running the same grid twice must produce byte-identical best results, and
 /// `all_results` must contain every combination exactly once regardless of

@@ -129,10 +129,26 @@ y learners espaciales — esto cubre lo inverso).
       metadata es verdad verificada, no declarada. Falla ruidoso si alguien
       agrega un learner con properties mentirosas. ✅ (2026-07-18)
 - [ ] **Menores / futuro**: terminators componibles (tiempo/estancamiento/
-      objetivo), tuning multi-objetivo (Pareto), plotting (ROC/critical-
-      difference sobre el benchmark ya existente), Pipeline como DAG. Deep
-      learning (mlr3torch) sigue **descartado deliberadamente** (sin autodiff
-      en el workspace).
+      objetivo), plotting (ROC/critical-difference sobre el benchmark ya
+      existente), Pipeline como DAG. Deep learning (mlr3torch) sigue
+      **descartado deliberadamente** (sin autodiff en el workspace).
+    - [x] **Tuning multi-objetivo (Pareto)** (2026-07-21) — `ParetoResult`
+      (`front`/`all_results`/`measure_ids`/`maximize`) + `pareto_front_indices`
+      (non-dominated sorting con dominancia Pareto respetando el flag
+      `maximize` por objetivo; NaN tratado como el peor valor) en
+      `src/tuning/mod.rs`. Métodos `tune_classif_multi`/`tune_regress_multi`
+      en `GridSearch` y `RandomSearch` (mismos tuners que las dependencias;
+      Bayesian/Hyperband guían por escalar → fuera de scope): evalúan cada
+      config en TODAS las measures reusando `benchmark::resample_*` (que ya
+      acepta `&[&dyn Measure]` y devuelve un score por measure vía
+      `mean_scores()`) y devuelven el frente en vez de un único best. Reusan
+      las dependencias (RandomSearch poda, GridSearch dedup). 7 unit tests
+      (frente all-maximize, mixto maximize/minimize, duplicados, punto único,
+      NaN, ParetoResult) + 1 integración end-to-end verificando la propiedad
+      estructural del frente (ningún punto del frente dominado; todo punto
+      fuera dominado por alguno del frente) con GridSearch real. Rust-only:
+      RandomSearch/GridSearch no están bindeados en Python (solo Bayesian lo
+      está).
     - [x] **Kernel SVM (C-SVC)** (2026-07-21) — `KernelSVM`/`TrainedKernelSVM`
       + enum `Kernel` (Linear/Poly/Rbf) en `src/learner/kernel_svm.rs`. SVM
       dual soft-margin resuelto con **SMO** (Platt 1998): sin dependencia de

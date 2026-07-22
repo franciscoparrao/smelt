@@ -1,6 +1,6 @@
 //! Random search over hyperparameter distributions.
 
-use super::{Dependency, ParamSet, ParamSpace, TuneResult};
+use super::{Dependency, ParamSet, ParamSpace, ParetoResult, TuneResult};
 use crate::Result;
 use crate::benchmark;
 use crate::learner::Learner;
@@ -164,5 +164,74 @@ impl RandomSearch {
             .collect();
 
         TuneResult::select_best(results?, measure.id().to_string(), measure.maximize())
+    }
+
+    /// Multi-objective classification tuning: evaluate every sampled
+    /// configuration on **all** `measures` and return the Pareto front (the
+    /// non-dominated trade-offs) instead of a single best. See [`ParetoResult`].
+    pub fn tune_classif_multi(
+        &self,
+        task: &ClassificationTask,
+        resampling: &dyn Resample,
+        measures: &[&dyn Measure],
+    ) -> Result<ParetoResult> {
+        if measures.is_empty() {
+            return Err(crate::SmeltError::InvalidParameter(
+                "multi-objective tuning requires at least one measure".into(),
+            ));
+        }
+        super::validate_param_space(&self.param_space)?;
+        self.validate_deps()?;
+        let mut rng = StdRng::seed_from_u64(self.seed);
+        let param_sets: Vec<ParamSet> = (0..self.n_iter)
+            .map(|_| self.sample_params(&mut rng))
+            .collect();
+
+        let results: Result<Vec<(ParamSet, Vec<f64>)>> = param_sets
+            .into_par_iter()
+            .map(|params| {
+                let mut learner = (self.factory)(&params);
+                let bench = benchmark::resample_classif(&mut *learner, task, resampling, measures)?;
+                Ok((params, bench.mean_scores()))
+            })
+            .collect();
+
+        let ids = measures.iter().map(|m| m.id().to_string()).collect();
+        let maximize = measures.iter().map(|m| m.maximize()).collect();
+        ParetoResult::from_results(results?, ids, maximize)
+    }
+
+    /// Multi-objective regression tuning — the regression counterpart of
+    /// [`tune_classif_multi`](Self::tune_classif_multi).
+    pub fn tune_regress_multi(
+        &self,
+        task: &RegressionTask,
+        resampling: &dyn Resample,
+        measures: &[&dyn Measure],
+    ) -> Result<ParetoResult> {
+        if measures.is_empty() {
+            return Err(crate::SmeltError::InvalidParameter(
+                "multi-objective tuning requires at least one measure".into(),
+            ));
+        }
+        super::validate_param_space(&self.param_space)?;
+        self.validate_deps()?;
+        let mut rng = StdRng::seed_from_u64(self.seed);
+        let param_sets: Vec<ParamSet> = (0..self.n_iter)
+            .map(|_| self.sample_params(&mut rng))
+            .collect();
+
+        let results: Result<Vec<(ParamSet, Vec<f64>)>> = param_sets
+            .into_par_iter()
+            .map(|params| {
+                let mut learner = (self.factory)(&params);
+                let bench = benchmark::resample_regress(&mut *learner, task, resampling, measures)?;
+                Ok((params, bench.mean_scores()))
+            })
+            .collect();
+
+        let ids = measures.iter().map(|m| m.id().to_string()).collect();
+        let maximize = measures.iter().map(|m| m.maximize()).collect();
+        ParetoResult::from_results(results?, ids, maximize)
     }
 }

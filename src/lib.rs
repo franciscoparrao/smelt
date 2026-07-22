@@ -124,6 +124,6 @@ pub mod prelude {
     pub use crate::task::{ClassificationTask, FeatureType, RegressionTask, Task};
     pub use crate::tuning::{
         BayesianOptimizer, Condition, Dependency, GridSearch, Hyperband, ParamDistribution,
-        ParamGrid, ParamSet, ParamSpace, ParamValue, RandomSearch, TuneResult,
+        ParamGrid, ParamSet, ParamSpace, ParamValue, ParetoResult, RandomSearch, TuneResult,
     };
 }
