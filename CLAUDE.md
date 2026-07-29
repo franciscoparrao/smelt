@@ -54,7 +54,8 @@ src/
 │                   # causal/meta_learners/: T/S/X/R/DR-learner (Künzel et al.
 │                   # 2019, Nie & Wager 2021, Kennedy 2020), composing ordinary
 │                   # Learners via Bagging/Stacking-style factory closures
-├── conformal/      # ConformalRegressor/Classifier, CQR
+├── conformal/      # ConformalRegressor/Classifier, CQR, LocalizedConformal
+│                   # (spatially-weighted split conformal — Barber 2023)
 ├── survival/       # RandomSurvivalForest, CoxPH (Cox proportional hazards)
 ├── importance/     # permutation importance, permutation-SHAP
 ├── multilabel/, multioutput/  # ClassifierChain, RegressorChain

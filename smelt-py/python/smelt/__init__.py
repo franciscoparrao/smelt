@@ -72,6 +72,7 @@ from smelt._smelt import (
     SpatialSmote,
     # Conformal prediction
     SplitConformal,
+    LocalizedConformal,
     # Resampling
     CrossValidation,
     RepeatedCV,
@@ -152,7 +153,7 @@ __all__ = [
     "KMeans", "DBSCAN", "IsolationForest",
     "CsvLoader",
     "StandardScaler", "Smote", "SpatialSmote",
-    "SplitConformal",
+    "SplitConformal", "LocalizedConformal",
     "CrossValidation", "RepeatedCV", "LeaveOneOut", "Bootstrap", "SpatialBlockCV", "SpatialBufferCV", "StratifiedCV", "GroupCV", "TimeSeriesCV",
     "accuracy_score", "rmse_score", "r2_score", "mae_score",
     "f1_score", "precision_score", "recall_score", "auc_roc_score",

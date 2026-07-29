@@ -28,7 +28,7 @@ use pyo3::prelude::*;
 use auto_tuner::AutoTuner;
 use causal::{DrLearner, RLearner, SLearner, TLearner, XLearner};
 use cluster::{DBSCAN, IsolationForest, KMeans};
-use conformal::SplitConformal;
+use conformal::{LocalizedConformal, SplitConformal};
 use data::CsvLoader;
 #[cfg(feature = "parquet")]
 use data::ParquetLoader;
@@ -126,6 +126,7 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Conformal prediction
     m.add_class::<SplitConformal>()?;
+    m.add_class::<LocalizedConformal>()?;
 
     // Preprocessing
     m.add_class::<StandardScaler>()?;

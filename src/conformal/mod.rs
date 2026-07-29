@@ -4,6 +4,9 @@
 //! Works with any trained model without retraining.
 
 pub mod cqr;
+mod localized;
+
+pub use localized::{LocalizedConformal, SpatialKernel};
 
 use crate::Result;
 use crate::learner::TrainedModel;

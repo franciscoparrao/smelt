@@ -76,7 +76,8 @@ pub mod prelude {
     };
     pub use crate::cluster::{ClusterResult, DBSCAN, IsolationForest, KMeans};
     pub use crate::conformal::{
-        ConformalClassifier, ConformalInterval, ConformalRegressor, ConformalSet, SplitConformal,
+        ConformalClassifier, ConformalInterval, ConformalRegressor, ConformalSet,
+        LocalizedConformal, SpatialKernel, SplitConformal,
         cqr::{CQR, CQRInterval},
     };
     pub use crate::data::CsvLoader;

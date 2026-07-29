@@ -10,7 +10,7 @@ use numpy::PyArray1;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
-use crate::common::smelt_err;
+use crate::common::{parse_coords, smelt_err};
 
 /// Model-free split conformal prediction for regression.
 ///
@@ -129,5 +129,140 @@ impl SplitConformal {
     #[getter]
     fn alpha(&self) -> f64 {
         self.alpha
+    }
+}
+
+/// Resolve the Python-facing kernel string to `smelt_ml::conformal::SpatialKernel`.
+fn resolve_kernel(kernel: &str) -> PyResult<smelt_ml::conformal::SpatialKernel> {
+    use smelt_ml::conformal::SpatialKernel;
+    match kernel {
+        "gaussian" => Ok(SpatialKernel::Gaussian),
+        "exponential" => Ok(SpatialKernel::Exponential),
+        other => Err(PyValueError::new_err(format!(
+            "unknown kernel '{other}'; use 'gaussian' or 'exponential'"
+        ))),
+    }
+}
+
+/// Spatially-localized (weighted) split conformal prediction for regression.
+///
+/// Unlike `SplitConformal`'s single global interval width, this weights each
+/// calibration residual by spatial proximity to the test location, so the
+/// interval width ADAPTS to the local residual scale — the fix for spatial
+/// heteroscedasticity, where a global quantile over-covers calm regions and
+/// under-covers noisy ones (Barber, Candès, Ramdas & Tibshirani 2023, weighted
+/// conformal, with a spatial kernel supplying the weights).
+///
+/// Example:
+///     lc = smelt.LocalizedConformal(alpha=0.1, bandwidth=0.2, kernel="gaussian")
+///     cal_pred = model.predict(x_cal, coords=coords_cal)
+///     lc.calibrate_from_predictions(cal_pred, y_cal, coords_cal)
+///     test_pred = model.predict(x_test, coords=coords_test)
+///     lower, upper = lc.predict_interval(test_pred, coords_test)  # adaptive width
+///
+/// Far from all calibration data the interval is `inf` (honest abstention).
+#[pyclass]
+pub(crate) struct LocalizedConformal {
+    alpha: f64,
+    bandwidth: f64,
+    kernel: String,
+    calibrated: Option<smelt_ml::conformal::LocalizedConformal>,
+}
+
+#[pymethods]
+impl LocalizedConformal {
+    /// `alpha`: miscoverage (0.1 → 90%). `bandwidth`: spatial kernel scale in
+    /// coordinate units. `kernel`: "gaussian" (default) or "exponential".
+    #[new]
+    #[pyo3(signature = (alpha=0.1, bandwidth=0.2, kernel="gaussian".to_string()))]
+    fn new(alpha: f64, bandwidth: f64, kernel: String) -> PyResult<Self> {
+        if !(alpha > 0.0 && alpha < 1.0) {
+            return Err(PyValueError::new_err(format!(
+                "alpha must be in (0, 1), got {alpha}"
+            )));
+        }
+        if !(bandwidth > 0.0 && bandwidth.is_finite()) {
+            return Err(PyValueError::new_err(format!(
+                "bandwidth must be positive and finite, got {bandwidth}"
+            )));
+        }
+        resolve_kernel(&kernel)?; // eager validation
+        Ok(Self {
+            alpha,
+            bandwidth,
+            kernel,
+            calibrated: None,
+        })
+    }
+
+    /// Calibrate from held-out calibration predictions, their true targets, and
+    /// their coordinates (an (N, 2) array-like of (x, y)).
+    fn calibrate_from_predictions(
+        &mut self,
+        cal_pred: Vec<f64>,
+        cal_truth: Vec<f64>,
+        coords: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let xy = parse_coords(coords)?;
+        let kernel = resolve_kernel(&self.kernel)?;
+        let lc = smelt_ml::conformal::LocalizedConformal::calibrate_from_predictions(
+            &cal_pred,
+            &cal_truth,
+            &xy,
+            self.alpha,
+            self.bandwidth,
+            kernel,
+        )
+        .map_err(smelt_err)?;
+        self.calibrated = Some(lc);
+        Ok(())
+    }
+
+    /// Wrap point predictions in the spatially-adaptive interval at each test
+    /// coordinate. Returns `(lower, upper)` numpy arrays aligned with `test_pred`.
+    fn predict_interval<'py>(
+        &self,
+        py: Python<'py>,
+        test_pred: Vec<f64>,
+        coords: &Bound<'_, PyAny>,
+    ) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<f64>>)> {
+        let lc = self.not_calibrated()?;
+        let xy = parse_coords(coords)?;
+        let intervals = lc.intervals_for(&test_pred, &xy).map_err(smelt_err)?;
+        let lower: Vec<f64> = intervals.iter().map(|iv| iv.lower).collect();
+        let upper: Vec<f64> = intervals.iter().map(|iv| iv.upper).collect();
+        Ok((PyArray1::from_vec(py, lower), PyArray1::from_vec(py, upper)))
+    }
+
+    /// The per-location interval half-widths at `coords` (diagnostic): shows
+    /// how the width adapts across space. `inf` where the method abstains.
+    fn halfwidths<'py>(
+        &self,
+        py: Python<'py>,
+        coords: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let lc = self.not_calibrated()?;
+        let xy = parse_coords(coords)?;
+        let hw: Vec<f64> = xy.iter().map(|&c| lc.halfwidth_at(c)).collect();
+        Ok(PyArray1::from_vec(py, hw))
+    }
+
+    #[getter]
+    fn alpha(&self) -> f64 {
+        self.alpha
+    }
+    #[getter]
+    fn bandwidth(&self) -> f64 {
+        self.bandwidth
+    }
+}
+
+impl LocalizedConformal {
+    fn not_calibrated(&self) -> PyResult<&smelt_ml::conformal::LocalizedConformal> {
+        self.calibrated.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err(
+                "not calibrated. Call calibrate_from_predictions(cal_pred, cal_truth, coords) first.",
+            )
+        })
     }
 }
