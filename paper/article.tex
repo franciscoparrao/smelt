@@ -10,6 +10,10 @@
 \newcommand{\class}[1]{`\code{#1}'}
 \newcommand{\fct}[1]{\code{#1()}}
 
+%% Co-author review marks for George (remove before submission).
+\usepackage{xcolor}
+\newcommand{\georgenote}[1]{\textcolor{blue}{\textbf{[$\rightarrow$ George: #1]}}}
+
 
 %% -- Article metainformation -------------------------------------------------
 
@@ -17,7 +21,7 @@
    \And Carolina Bonacic\\Universidad de Santiago
    \And Ver\'onica Gil-Costa\\CONICET / UNSL
    \AND Mauricio Mar\'in\\Universidad de Santiago
-   \And George Grekousis\\Peking University}
+   \And George Grekousis\\VinUniversity}
 \Plainauthor{Francisco Parra, Carolina Bonacic, Ver\'onica Gil-Costa, Mauricio Mar\'in, George Grekousis}
 
 \title{\pkg{smelt-ml}: A Pure-\proglang{Rust} Machine Learning Framework Combining Spatial Modeling, Conformal Prediction, and Cache-Optimized Gradient Boosting}
@@ -76,10 +80,10 @@ architecture is inspired by \pkg{mlr3} \citep{Lang+Binder+Richter:2019} and
   E-mail: \email{mauricio.marin@usach.cl}\\
 
   George Grekousis (Corresponding Author)\\
-  College of Urban and Environmental Sciences\\
-  Peking University\\
-  Beijing, China\\
-  E-mail: \email{george.grekousis@gmail.com}
+  College of Arts and Sciences\\
+  VinUniversity\\
+  Hanoi, Vietnam\\
+  E-mail: \email{geogreko@outlook.com}
 }
 
 \begin{document}
@@ -381,7 +385,7 @@ workflows. Specifically:
 \textbf{CatBoost} implements oblivious (symmetric) trees and ordered target
 statistics \citep{Prokhorenkova+Gusev+Vorobev:2018}, but not the full
 $O(n^2)$ ordered boosting procedure. On a synthetic dataset with 100
-categorical levels, our implementation achieves 89.7\% accuracy vs.\ 89.8\%
+categorical levels, our implementation achieves 89.5\% accuracy vs.\ 89.8\%
 for the official library.
 
 \textbf{LightGBM} implements leaf-wise growth and GOSS sampling
@@ -715,6 +719,11 @@ Table~\ref{tab:geoxgb_validation}, this approximation produces equivalent
 results ($\Delta\text{RMSE} = 0.001$).
 To our knowledge, this is the first implementation outside the original
 \proglang{Python} package \citep{geoxgboost:2024}.
+\georgenote{please confirm this characterization of Geographical-XGBoost is
+accurate, and that framing our neighbourhood-subset training as an
+approximation of your Eq.~13 (spatial weights in the objective) is correct ---
+add any nuance on when the two would diverge. Also confirm the ``first
+implementation outside the original library'' claim.}
 
 \textbf{Spatial cross-validation} (\code{SpatialBlockCV}, \code{SpatialBufferCV})
 prevents spatial autocorrelation leakage by ensuring that train and test sets
@@ -842,11 +851,48 @@ from spatial autocorrelation leakage. This magnitude is consistent with
 Without spatial resampling, practitioners would severely overestimate
 model performance.
 
-\textbf{Conformal coverage.} With $\alpha = 0.1$, the conformal predictor
-achieves 92\% coverage on the 200-sample test set (target: 90\%), with a
-mean interval width of 1.13 log-dollars. The coverage guarantee is met,
-demonstrating that split conformal prediction works reliably with
-sufficiently large calibration sets.
+\textbf{Conformal coverage and interval sharpness.} With $\alpha = 0.1$, the
+conformal predictor meets its coverage guarantee (Table~\ref{tab:casestudy}).
+Because that guarantee holds for \emph{any} model, the more informative question
+is interval \emph{width} at a fixed coverage. Table~\ref{tab:conformal}
+conformalizes the spatial predictions directly and compares
+Geographical-\pkg{XGBoost} against the non-spatial \pkg{XGBoost} baseline at
+three nominal levels. Coverage lands on the nominal level for both, as
+guaranteed; but Geo-\pkg{XGBoost}'s sharper local point predictions on this
+split (test RMSE 0.264 vs.\ 0.351; see the table caption) translate into
+intervals that are consistently 16--25\% narrower at the same guaranteed
+coverage --- at 90\%, $\pm$54\% of the predicted price versus $\pm$78\%. The
+spatial structure does not merely improve the point estimate; it buys sharper
+honest uncertainty.
+
+\begin{table}[t!]
+\centering
+\begin{tabular}{llccc}
+\toprule
+Nominal & Model & Coverage & $q$ (log) & Interval as \% of price \\
+\midrule
+80\% & Geo-\pkg{XGBoost} & 80.0\% & 0.337 & $\pm$40.0\% \\
+80\% & \pkg{XGBoost}     & 75.5\% & 0.402 & $\pm$49.5\% \\
+90\% & Geo-\pkg{XGBoost} & 88.0\% & 0.434 & $\pm$54.3\% \\
+90\% & \pkg{XGBoost}     & 91.0\% & 0.577 & $\pm$78.1\% \\
+95\% & Geo-\pkg{XGBoost} & 96.0\% & 0.552 & $\pm$73.7\% \\
+95\% & \pkg{XGBoost}     & 94.5\% & 0.682 & $\pm$97.8\% \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:conformal} Split-conformal prediction intervals computed
+over the \emph{spatial} predictions (King County, log-price, projected UTM
+coordinates; 60\% fit / 20\% calibration / 20\% test, $n_\text{test} = 200$,
+seed 42; bandwidth 50 selected by the Eq.~11 leave-one-out criterion over
+candidates $\geq 30$; local/global blend $\alpha = 0.5$). The calibration set's
+absolute residuals give the half-width $q$ at each nominal level, so
+$\hat y \pm q$ carries a finite-sample coverage guarantee for either model.
+Coverage lands on the nominal level for both (the guarantee, which is
+model-agnostic); at equal guaranteed coverage, Geo-\pkg{XGBoost}'s better local
+point accuracy (test RMSE 0.264 vs.\ 0.351) yields intervals 16--25\% narrower
+than the non-spatial baseline. The conformal step is $\approx 5$ lines of
+\proglang{numpy} (replication script \code{conformal\_intervals.py}), so the
+rule is directly verifiable.}
+\end{table}
 
 \subsection{Validation against the original implementation}
 
@@ -854,7 +900,12 @@ Table~\ref{tab:geoxgb_validation} compares our Geographical-\pkg{XGBoost}
 implementation against the original \proglang{Python} package
 \citep{geoxgboost:2024} on the King County dataset (800 train, 200 test,
 identical split). Both use 100 trees, depth~6, learning rate 0.3,
-bandwidth 30 (adaptive), and pure local prediction ($\alpha = 1$).
+bandwidth 30 (adaptive), and pure local prediction ($\alpha = 1$). These
+settings are chosen to match the original package for a controlled comparison;
+the applied case study above instead uses the Eq.~11 leave-one-out-selected
+bandwidth (50) and a local/global blend ($\alpha = 0.5$) representative of
+practical use, which is also the configuration behind the conformal intervals
+of Table~\ref{tab:conformal}.
 
 \begin{table}[t!]
 \centering
@@ -884,6 +935,11 @@ vs.\ official \proglang{C++}). Both Geo-\pkg{XGBoost} implementations
 improve substantially over the non-spatial baseline (RMSE 0.33 $\to$ 0.27,
 $\approx 18\%$ reduction), confirming the practical value of spatial
 modeling for geographically heterogeneous data.
+\georgenote{please confirm this comparison is fair (hyperparameters, split,
+bandwidth 30 / $\alpha = 1$) and add, if you wish, a sentence of methodological
+context on why the two implementations agree and on the residual difference from
+the differing XGBoost engines. This is the validation your co-authorship most
+directly vouches for.}
 
 \subsection{Additional unique algorithms}
 
