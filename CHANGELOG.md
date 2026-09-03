@@ -12,6 +12,12 @@ patch; defensible as a bug fix, not a precedent to repeat).
 
 ## [Unreleased]
 
+## [smelt-ml 3.2.1] / [smelt-py 0.8.1] - 2026-09-03
+
+Patch release: one numerical bug fix in `EBM` (predictions change for any
+model with more than one feature — they were wrong before, see below) and
+one additive `benchmark()` improvement in smelt-py. No API removals.
+
 ### Fixed — EBM shape functions all read feature 0 at predict time (2026-09-03)
 
 - **`EBM::predict` evaluated every shape tree on the full feature row.**
