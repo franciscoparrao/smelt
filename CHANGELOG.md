@@ -12,6 +12,37 @@ patch; defensible as a bug fix, not a precedent to repeat).
 
 ## [Unreleased]
 
+### Fixed — EBM shape functions all read feature 0 at predict time (2026-09-03)
+
+- **`EBM::predict` evaluated every shape tree on the full feature row.**
+  Each shape tree is built on a single-column view of its own feature, so
+  its splits reference column 0 *of that view*; passing the full row made
+  every f_j(x_j) actually compute f_j(x_0). Training was correct (residuals
+  came from the accumulated sum), so the bug was invisible with one
+  feature and in the existing 2-feature test (both columns correlated with
+  the label), but with k informative features AUC decayed like 1/sqrt(k):
+  0.79 / 0.70 / 0.66 / 0.61 / 0.58 / 0.56 for k = 1/2/3/5/9/20 on additive
+  gaussian data where logistic regression sits at ~0.77 throughout. Now
+  each tree is evaluated on a 1-element view of its own column, which also
+  repairs previously serialized models (their trees still carry feature
+  index 0). After the fix: 0.79 / 0.77 / 0.76 / 0.76 / 0.76 / 0.73. Found by
+  the user via the Chagas benchmark (EBM at AUC 0.52 vs LR at 0.72 on 16-36
+  variables). Two regression tests: feature 0 pure noise + feature 1
+  carrying the label must reach ≥99% accuracy, and the k = 9 additive case
+  must land within 0.02 AUC of `LogisticRegression`.
+
+### Added — `benchmark()` feeds `predict_proba` to probabilistic metrics (smelt-py, 2026-09-03)
+
+- `smelt.benchmark.benchmark` evaluated every metric on hard `predict()`
+  labels, so AUC, Brier and log-loss could not be requested at all. It now
+  calls `predict_proba()` for smelt's own `auc_roc_score` / `brier_score` /
+  `logloss_score` (detected by identity) and for any function wrapped in
+  the new `smelt.benchmark.proba_metric(fn, column=None)` — `column=1`
+  hands sklearn's binary `roc_auc_score` the positive-class column. A
+  learner without `predict_proba` gets NaN for those metrics plus an
+  `_error` note while its label metrics still run. Label metrics are
+  unchanged.
+
 ## [smelt-ml 3.2.0] / [smelt-py 0.8.0] - 2026-07-19
 
 Two large threads land together, both MINOR-worthy (numerical-result and

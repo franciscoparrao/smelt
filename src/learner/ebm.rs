@@ -10,7 +10,7 @@ use crate::learner::tree::{LeafValue, Node};
 use crate::learner::{Learner, LearnerProperties, TrainedModel};
 use crate::prediction::Prediction;
 use crate::task::{ClassificationTask, RegressionTask, Task};
-use ndarray::Array2;
+use ndarray::{Array2, aview1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
@@ -99,12 +99,20 @@ impl TrainedModel for TrainedEBM {
         let n_samples = features.nrows();
         let n_features = self.shape_trees.len();
 
-        // Compute additive scores: intercept + Σ f_j(x_j)
+        // Compute additive scores: intercept + Σ f_j(x_j).
+        //
+        // Every shape tree for feature j was built on a single-column view of
+        // that feature, so its splits reference column 0 *of that view*. It
+        // must therefore be evaluated on a 1-element view of x_j, never on the
+        // full feature row -- doing the latter made every shape function read
+        // feature 0, which silently collapsed the model to f(x_0) for k > 1.
         let mut scores = vec![self.intercept; n_samples];
         for j in 0..n_features {
+            let col = features.column(j);
             for tree in &self.shape_trees[j] {
                 for i in 0..n_samples {
-                    if let LeafValue::Value(v) = tree.predict_one(features.row(i)) {
+                    let x_j = [col[i]];
+                    if let LeafValue::Value(v) = tree.predict_one(aview1(&x_j)) {
                         scores[i] += self.learning_rate * v;
                     }
                 }

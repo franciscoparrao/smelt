@@ -4702,6 +4702,115 @@ fn ebm_regress() {
     assert!(rmse < 3.0, "EBM should learn linear trend, got RMSE={rmse}");
 }
 
+/// Regression test: every shape tree is built on a single-column view of its
+/// own feature, so `predict` must evaluate it on that column -- not on the
+/// full row (which made every shape function read feature 0). Here feature 0
+/// is pure noise and only feature 1 carries the label, so a model that reads
+/// x_0 everywhere is stuck at chance.
+#[test]
+fn ebm_shape_functions_read_their_own_feature() {
+    use rand::prelude::*;
+    let mut rng = StdRng::seed_from_u64(3);
+    let n = 400;
+    let mut feats = Vec::with_capacity(2 * n);
+    let mut target = Vec::with_capacity(n);
+    for i in 0..n {
+        let noise: f64 = rng.random::<f64>();
+        let x1 = if i % 2 == 0 {
+            rng.random::<f64>()
+        } else {
+            2.0 + rng.random::<f64>()
+        };
+        feats.push(noise);
+        feats.push(x1);
+        target.push(if i % 2 == 0 { 0 } else { 1 });
+    }
+    let features = Array2::from_shape_vec((n, 2), feats).unwrap();
+    let task = ClassificationTask::new("ebm_own_col", features, target).unwrap();
+
+    let mut ebm = EBM::new().with_n_rounds(30).with_learning_rate(0.1);
+    let model = ebm.train_classif(&task).unwrap();
+    let pred = model
+        .predict(task.features())
+        .unwrap()
+        .with_truth_classif(task.target().to_vec());
+    let acc = Accuracy.score(&pred).unwrap();
+    assert!(
+        acc >= 0.99,
+        "EBM must use feature 1 (feature 0 is noise), got acc={acc}"
+    );
+}
+
+/// Additive, linear ground truth spread across 9 gaussian features: a GAM
+/// should match logistic regression's AUC within ~0.02. Before the
+/// own-column fix above, AUC decayed like 1/sqrt(k) with the number of
+/// features (0.79 for k=1, 0.58 for k=9) because every shape function was
+/// evaluated on x_0.
+#[test]
+fn ebm_additive_signal_matches_logistic_regression() {
+    use rand::prelude::*;
+    let mut rng = StdRng::seed_from_u64(0);
+    let (n_train, n_test, k) = (6000usize, 2000usize, 9usize);
+    let n = n_train + n_test;
+    // Box-Muller standard normals (no rand_distr in this workspace).
+    let normal = |rng: &mut StdRng| -> f64 {
+        let u1: f64 = rng.random::<f64>().max(1e-12);
+        let u2: f64 = rng.random::<f64>();
+        (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
+    };
+    let mut feats = Vec::with_capacity(n * k);
+    let mut target = Vec::with_capacity(n);
+    for _ in 0..n {
+        let mut lin = 0.0;
+        for _ in 0..k {
+            let x = normal(&mut rng);
+            lin += x;
+            feats.push(x);
+        }
+        lin = lin / (k as f64).sqrt() * 1.2;
+        let p = 1.0 / (1.0 + (-lin).exp());
+        target.push(if rng.random::<f64>() < p { 1 } else { 0 });
+    }
+    let features = Array2::from_shape_vec((n, k), feats).unwrap();
+    let x_tr = features.slice(ndarray::s![..n_train, ..]).to_owned();
+    let x_te = features.slice(ndarray::s![n_train.., ..]).to_owned();
+    let y_tr = target[..n_train].to_vec();
+    let y_te = target[n_train..].to_vec();
+    let task = ClassificationTask::new("ebm_additive", x_tr, y_tr).unwrap();
+
+    let mut ebm = EBM::new()
+        .with_n_rounds(200)
+        .with_learning_rate(0.05)
+        .with_max_depth(3);
+    let ebm_pred = ebm
+        .train_classif(&task)
+        .unwrap()
+        .predict(&x_te)
+        .unwrap()
+        .with_truth_classif(y_te.clone());
+    let auc_ebm = AucRoc.score(&ebm_pred).unwrap();
+
+    let mut lr = LogisticRegression::new()
+        .with_learning_rate(0.5)
+        .with_max_iter(1000);
+    let lr_pred = lr
+        .train_classif(&task)
+        .unwrap()
+        .predict(&x_te)
+        .unwrap()
+        .with_truth_classif(y_te);
+    let auc_lr = AucRoc.score(&lr_pred).unwrap();
+
+    assert!(
+        auc_lr > 0.7,
+        "sanity: LR should recover the linear signal, got {auc_lr}"
+    );
+    assert!(
+        auc_ebm >= auc_lr - 0.02,
+        "EBM AUC {auc_ebm:.3} should be within 0.02 of LR AUC {auc_lr:.3} on additive data"
+    );
+}
+
 #[test]
 fn ebm_feature_importance() {
     let features = array![

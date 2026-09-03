@@ -1,10 +1,55 @@
 """Benchmark utilities for comparing multiple learners with cross-validation."""
 
 import numpy as np
-from smelt._smelt import accuracy_score, rmse_score, CrossValidation, SpatialBlockCV
+from smelt._smelt import (
+    accuracy_score,
+    auc_roc_score,
+    brier_score,
+    logloss_score,
+    rmse_score,
+    CrossValidation,
+    SpatialBlockCV,
+)
 
 
 _NEEDS_COORDS = {"GeoXGBoost", "KrigingHybrid"}
+
+# smelt's own probabilistic measures: benchmark() feeds these predict_proba()
+# output instead of hard class labels. External functions (sklearn's
+# roc_auc_score, log_loss, ...) opt in via `proba_metric`.
+_PROBA_METRICS = {auc_roc_score, brier_score, logloss_score}
+
+
+def proba_metric(fn, column=None):
+    """Mark a metric function as needing ``predict_proba`` output.
+
+    ``benchmark()`` calls ``fn(y_true, proba)`` where ``proba`` is the
+    ``(n_samples, n_classes)`` probability matrix as a list of lists. With
+    ``column=c`` it receives the 1-D column ``proba[:, c]`` instead, which is
+    what sklearn's binary ``roc_auc_score`` expects for the positive class.
+
+    Example
+    -------
+    >>> from sklearn.metrics import roc_auc_score, log_loss
+    >>> metrics = {
+    ...     "auc": proba_metric(roc_auc_score, column=1),
+    ...     "logloss": proba_metric(log_loss),
+    ...     "auc_smelt": smelt.auc_roc_score,   # detected automatically
+    ... }
+    """
+
+    def wrapped(y_true, proba):
+        if column is not None:
+            proba = [row[column] for row in proba]
+        return fn(y_true, proba)
+
+    wrapped.needs_proba = True
+    wrapped.__name__ = getattr(fn, "__name__", "proba_metric")
+    return wrapped
+
+
+def _needs_proba(fn):
+    return fn in _PROBA_METRICS or getattr(fn, "needs_proba", False)
 
 
 def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
@@ -28,7 +73,12 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
     metrics : dict, optional
         Mapping of name → metric function. Default: {"accuracy":
         accuracy_score} for classification targets (integer/bool dtype),
-        {"rmse": rmse_score} for regression targets.
+        {"rmse": rmse_score} for regression targets. Metrics are called
+        with hard ``predict()`` labels, except smelt's ``auc_roc_score``,
+        ``brier_score`` and ``logloss_score`` (and anything wrapped in
+        ``proba_metric``), which receive ``predict_proba()`` output. A
+        learner without ``predict_proba`` gets NaN for those metrics and
+        an ``_error`` note, while its label-based metrics still run.
 
     Returns
     -------
@@ -130,10 +180,26 @@ def benchmark(learners, X, y, cv=None, coords=None, metrics=None):
                 fold_scores.setdefault("_error", str(exc))
                 continue
 
+            proba = None
+            if any(_needs_proba(fn) for fn in metrics.values()):
+                if hasattr(learner, "predict_proba"):
+                    proba = np.asarray(learner.predict_proba(X_te)).tolist()
+                else:
+                    fold_scores.setdefault(
+                        "_error",
+                        f"{name} has no predict_proba(); probabilistic metrics are NaN",
+                    )
+
             for metric_name, metric_fn in metrics.items():
-                fold_scores[metric_name].append(
-                    metric_fn(y_te.tolist(), preds.tolist())
-                )
+                if _needs_proba(metric_fn):
+                    score = (
+                        metric_fn(y_te.tolist(), proba)
+                        if proba is not None
+                        else float("nan")
+                    )
+                else:
+                    score = metric_fn(y_te.tolist(), preds.tolist())
+                fold_scores[metric_name].append(score)
 
         # Aggregate per-metric stats
         results[name] = {}

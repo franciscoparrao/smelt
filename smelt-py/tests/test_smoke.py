@@ -314,3 +314,55 @@ def test_thresholded_classifier_tunes_threshold_on_imbalanced_data():
         smelt.ThresholdedClassifier(base="logistic_regression", metric="rmse")
     with pytest.raises(NotImplementedError):
         tc.save("/tmp/should_not_write.json")
+
+
+def test_benchmark_probabilistic_metrics_use_predict_proba():
+    """benchmark() feeds predict_proba() output to smelt's AUC/Brier/logloss
+    and to anything wrapped in proba_metric (sklearn-style), while label
+    metrics keep using predict(); a learner without predict_proba gets NaN
+    for the probabilistic ones only."""
+    from smelt.benchmark import benchmark, proba_metric
+
+    x, y = _classif_data(seed=5)
+    seen = {}
+
+    def sklearn_like_auc(y_true, p_pos):
+        seen["shape"] = np.asarray(p_pos).shape
+        return smelt.auc_roc_score(y_true, p_pos)
+
+    metrics = {
+        "accuracy": smelt.accuracy_score,
+        "auc": smelt.auc_roc_score,
+        "brier": smelt.brier_score,
+        "auc_ext": proba_metric(sklearn_like_auc, column=1),
+    }
+    res = benchmark({"lr": smelt.LogisticRegression()}, x, y, cv=3, metrics=metrics)
+    r = res["lr"]
+    assert r["accuracy"]["mean"] > 0.8
+    assert 0.8 < r["auc"]["mean"] <= 1.0
+    assert 0.0 <= r["brier"]["mean"] < 0.2
+    assert abs(r["auc_ext"]["mean"] - r["auc"]["mean"]) < 1e-9
+    assert seen["shape"] == (len(y) // 3,) or len(seen["shape"]) == 1
+    assert "_error" not in r
+
+    # A learner with no predict_proba: label metric fine, proba metric NaN.
+    class HardOnly:
+        def __init__(self):
+            self.inner = smelt.LogisticRegression()
+
+        def get_params(self):
+            return {}
+
+        def fit(self, x, y):
+            self.inner.fit(x, y)
+
+        def predict(self, x):
+            return self.inner.predict(x)
+
+    res = benchmark(
+        {"hard": HardOnly()}, x, y, cv=3,
+        metrics={"accuracy": smelt.accuracy_score, "auc": smelt.auc_roc_score},
+    )
+    assert res["hard"]["accuracy"]["mean"] > 0.8
+    assert np.isnan(res["hard"]["auc"]["mean"])
+    assert "predict_proba" in res["hard"]["_error"]
