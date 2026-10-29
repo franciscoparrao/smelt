@@ -377,6 +377,17 @@ All components are **trait-based and composable**:
 RUSTFLAGS="-C target-cpu=native" cargo build --release  # 18-30% speedup
 ```
 
+## Reproducibility
+
+```bash
+cargo build --release
+cargo test            # 600+ tests
+```
+
+Stochastic learners (bagging, boosting, resampling, conformal calibration) take an
+explicit RNG seed, so a fixed seed reproduces results across runs and platforms.
+Pin the toolchain via `Cargo.lock` for bit-level reproducibility.
+
 ## License
 
 MIT
