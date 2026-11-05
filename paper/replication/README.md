@@ -50,42 +50,38 @@ RUSTFLAGS="-C target-cpu=native -Cprofile-use=/tmp/pgo-data/merged.profdata" \
 
 PGO typically provides 1.3-2.1x additional speedup over LTO alone.
 
-## Reproducing Tables
+## Reproducing tables and figures
 
-Run the master script:
-
-```bash
-cd paper/replication
-bash replicate.sh
-```
-
-This will:
-1. Run C++ library benchmarks via Python (`benchmark_cpp.py`)
-2. Compile and run Rust benchmarks (`benchmark_large` example)
-3. Generate comparison tables (`compare_results.py`)
-
-Expected total runtime: ~30 minutes on similar hardware.
-
-### Individual steps
+Run the master script from this directory:
 
 ```bash
-# Step 1: C++ benchmarks (~15 min)
-python3 benchmark_cpp.py
-
-# Step 2: Rust benchmarks (~15 min)
-cd ../..
-RUSTFLAGS="-C target-cpu=native" cargo run --release --example benchmark_large
-cd paper/replication
-
-# Step 3: Generate comparison tables
-python3 compare_results.py
+bash replicate.sh          # all parts, about one hour
+bash replicate.sh A B      # selected parts
 ```
 
-## Output Files
+| Part | What it reproduces | Scripts | Time |
+|---|---|---|---|
+| A | Training-time benchmarks (Tables 9-10), scaling figure (Figure 1), Wilcoxon and bootstrap significance (Table 11) | `benchmark_cpp.py`, `cargo run --example benchmark_large`, `compare_results.py`, `plot_scaling.py`, `statistical_analysis.py` | ~30 min |
+| B | Prediction time (Table 12), accuracy validation against scikit-learn (Table 13) | `cargo run --example benchmark_prediction`, `prediction_sklearn.py`, `cargo run --example accuracy_validation`, `accuracy_sklearn.py` | ~5 min |
+| C | Histogram-kernel ablation (Table 7) | `cargo run --example ablation_study` | ~2 min |
+| D | King County case study (Table 2), Geo-XGBoost validation against geoxgboost 1.1.1 (Table 4), split-conformal intervals (Table 3) | `cargo run --example case_study_king_county`, `cargo run --example validate_geoxgboost_blend` (with `GXGB_ALPHA=0.5`), `validate_geoxgboost_blend.py`, `conformal_intervals.py` | ~15 min |
 
-- `benchmark_cpp_results.json` — Raw C++ timing data (10 runs per config)
-- `benchmark_rust_results.json` — Raw Rust timing data (10 runs per config)
-- `comparison_tables.txt` — Formatted tables matching paper Tables 2-3
+Part D needs `pip install geoxgboost==1.1.1`. Table numbers refer to the
+submitted manuscript. The remaining scripts (`demo_geoxgboost.py`,
+`local_importance_map.py`, `validate_geoxgboost.py`, `huasco_validation.py`)
+are exploratory and not needed for any table.
+
+## Output files
+
+- `benchmark_cpp_results.json`, `benchmark_rust_results.json`: raw timings (10 runs per configuration)
+- `comparison_tables.txt`: Tables 9-10
+- `statistical_analysis.txt`: Table 11
+- `../scaling.pdf`: Figure 1
+- `geoxgb_validation_blend.json`, `smelt_geoxgb_test_preds_a05.csv`, `geoxgb_test_preds_a05.csv`: Table 4
+- Console output of the Rust examples and Python scripts for Tables 2, 3, 7, 12 and 13
+
+The versions of these files shipped with the submission were produced on the
+hardware listed above.
 
 ## Docker (exact reproducibility)
 

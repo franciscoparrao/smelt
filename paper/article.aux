@@ -3,87 +3,121 @@
 \providecommand\hyper@newdestlabel[2]{}
 \providecommand\HyField@AuxAddToFields[1]{}
 \providecommand\HyField@AuxAddToCoFields[2]{}
-\citation{Lang+Binder+Richter:2019}
-\citation{Pedregosa+Varoquaux+Gramfort:2011}
-\citation{Grinsztajn+Oyallon+Varoquaux:2022}
-\citation{Chen+Guestrin:2016}
-\citation{Ke+Meng+Finley:2017}
-\citation{Prokhorenkova+Gusev+Vorobev:2018}
+\citation{Li+Zhao+Liu:2026}
+\citation{Grekousis:2025}
+\citation{Romano+Patterson+Candes:2019}
+\citation{Roberts2017}
+\citation{Luo+Chen+Gao:2025}
+\citation{Lou+Luo+Meng:2025}
 \newlabel{sec:intro}{{1}{1}{}{section.1}{}}
 \citation{Rust:2024}
 \citation{Matsakis+Klock:2014}
 \citation{linfa:2024}
+\newlabel{sec:spatial}{{2}{3}{}{section.2}{}}
+\newlabel{sec:geo_quickstart}{{2.1}{3}{}{subsection.2.1}{}}
 \citation{Grekousis:2025}
-\citation{Romano+Patterson+Candes:2019}
-\citation{Wager+Athey:2018}
-\citation{Tomita+Browne+Shen:2020}
-\newlabel{sec:architecture}{{2}{2}{}{section.2}{}}
-\citation{Grekousis:2025}
-\citation{Tomita+Browne+Shen:2020}
-\citation{Ishwaran+Kogalur+Blackstone:2008}
-\citation{Athey+Imbens:2016,Wager+Athey:2018}
-\citation{Romano+Patterson+Candes:2019}
-\citation{linfa:2024}
-\citation{Pedregosa+Varoquaux+Gramfort:2011}
-\citation{Lang+Binder+Richter:2019}
-\citation{Chen+Guestrin:2016}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces  Supervised learners in {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml}. $^\dagger $CatBoost-inspired symmetric GBM with ordered target statistics; see Section~\ref {sec:catboost_scope} for scope.}}{4}{table.1}\protected@file@percent }
-\newlabel{tab:learners}{{1}{4}{Supervised learners in \pkg {smelt-ml}. $^\dagger $CatBoost-inspired symmetric GBM with ordered target statistics; see Section~\ref {sec:catboost_scope} for scope}{table.1}{}}
-\newlabel{sec:optimization}{{3}{4}{}{section.3}{}}
-\newlabel{eq:histogram}{{1}{4}{}{equation.3.1}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces  Feature comparison across ML frameworks. $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM). $^c$Via extension packages. $^d$Available in \textsf  {R} via {\fontseries  {m}\fontseries  {b}\selectfont  grf}. $^e$Via {\fontseries  {m}\fontseries  {b}\selectfont  imbalanced-learn}. $^f$Via {\fontseries  {m}\fontseries  {b}\selectfont  scikit-optimize} or {\fontseries  {m}\fontseries  {b}\selectfont  Optuna}. $^g$Via {\fontseries  {m}\fontseries  {b}\selectfont  scipy.stats}.}}{5}{table.2}\protected@file@percent }
-\newlabel{tab:frameworks}{{2}{5}{Feature comparison across ML frameworks. $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM). $^c$Via extension packages. $^d$Available in \proglang {R} via \pkg {grf}. $^e$Via \pkg {imbalanced-learn}. $^f$Via \pkg {scikit-optimize} or \pkg {Optuna}. $^g$Via \pkg {scipy.stats}}{table.2}{}}
-\citation{Prokhorenkova+Gusev+Vorobev:2018}
-\citation{Ke+Meng+Finley:2017}
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces  Ablation study: histogram scanning kernel time per iteration (20 features, 256 bins). Column-major layout provides 1.1--2.1$\times $ speedup; u8 packing adds a further 1.3--1.4$\times $ at $n = 10{,}000$. The histogram subtraction trick (not shown) reduces total tree-building work by $\sim $40\% on top of these kernel improvements.}}{6}{table.3}\protected@file@percent }
-\newlabel{tab:ablation}{{3}{6}{Ablation study: histogram scanning kernel time per iteration (20 features, 256 bins). Column-major layout provides 1.1--2.1$\times $ speedup; u8 packing adds a further 1.3--1.4$\times $ at $n = 10{,}000$. The histogram subtraction trick (not shown) reduces total tree-building work by $\sim $40\% on top of these kernel improvements}{table.3}{}}
-\newlabel{sec:catboost_scope}{{3.5}{6}{}{subsection.3.5}{}}
-\newlabel{sec:lightgbm_scope}{{3.5}{6}{}{subsection.3.5}{}}
-\newlabel{sec:feature_compare}{{3.6}{6}{}{subsection.3.6}{}}
-\newlabel{sec:performance}{{4}{6}{}{section.4}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces  Implemented features in {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml}'s gradient boosting engines. \text  {$\mathsurround \z@ \mathchar "458$}\ = implemented, --- = not implemented. $^*$CatBoost's $O(n^2)$ per-sample model approximation.}}{7}{table.4}\protected@file@percent }
-\newlabel{tab:features}{{4}{7}{Implemented features in \pkg {smelt-ml}'s gradient boosting engines. \checkmark \ = implemented, --- = not implemented. $^*$CatBoost's $O(n^2)$ per-sample model approximation}{table.4}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces  Classification training time (ms, mean $\pm $ std, 10 runs). Speedup $>1$ means {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} is faster. All values single-threaded.}}{8}{table.5}\protected@file@percent }
-\newlabel{tab:classif_perf}{{5}{8}{Classification training time (ms, mean $\pm $ std, 10 runs). Speedup $>1$ means \pkg {smelt-ml} is faster. All values single-threaded}{table.5}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces  Regression training time (ms, mean $\pm $ std, 10 runs).}}{8}{table.6}\protected@file@percent }
-\newlabel{tab:regress_perf}{{6}{8}{Regression training time (ms, mean $\pm $ std, 10 runs)}{table.6}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces  Training time scaling comparison (log-log) between {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} (blue) and official \textsf  {C++} libraries (red) across six dataset sizes. Error bars show $\pm $1 standard deviation over 10 runs. {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml}'s {\fontseries  {m}\fontseries  {b}\selectfont  CatBoost} is competitive at all scales; {\fontseries  {m}\fontseries  {b}\selectfont  XGBoost} and {\fontseries  {m}\fontseries  {b}\selectfont  LightGBM} are faster in \textsf  {C++} at $n \geq 50{,}000$.}}{9}{figure.1}\protected@file@percent }
-\newlabel{fig:scaling}{{1}{9}{Training time scaling comparison (log-log) between \pkg {smelt-ml} (blue) and official \proglang {C++} libraries (red) across six dataset sizes. Error bars show $\pm $1 standard deviation over 10 runs. \pkg {smelt-ml}'s \pkg {CatBoost} is competitive at all scales; \pkg {XGBoost} and \pkg {LightGBM} are faster in \proglang {C++} at $n \geq 50{,}000$}{figure.1}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces  Statistical significance of performance differences (Wilcoxon signed-rank, paired, two-sided). Selected rows shown. $^{*}p < 0.05$, $^{**}p < 0.01$. Bootstrap 95\% CI for the speedup ratio ($>1$ = Rust faster). {\fontseries  {m}\fontseries  {b}\selectfont  CatBoost} classification is significantly faster at 5 of 6 sizes.}}{10}{table.7}\protected@file@percent }
-\newlabel{tab:significance}{{7}{10}{Statistical significance of performance differences (Wilcoxon signed-rank, paired, two-sided). Selected rows shown. $^{*}p < 0.05$, $^{**}p < 0.01$. Bootstrap 95\% CI for the speedup ratio ($>1$ = Rust faster). \pkg {CatBoost} classification is significantly faster at 5 of 6 sizes}{table.7}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces  Prediction time for 1{,}000 samples (100 runs, classification). {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} is 3.6--3.7$\times $ faster for ensemble methods due to parallel tree traversal and absence of \textsf  {Python} interpreter overhead.}}{10}{table.8}\protected@file@percent }
-\newlabel{tab:predict}{{8}{10}{Prediction time for 1{,}000 samples (100 runs, classification). \pkg {smelt-ml} is 3.6--3.7$\times $ faster for ensemble methods due to parallel tree traversal and absence of \proglang {Python} interpreter overhead}{table.8}{}}
 \citation{Grekousis:2025}
 \citation{geoxgboost:2024}
 \citation{Romano+Patterson+Candes:2019}
 \citation{Roberts2017}
-\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces  5-fold CV accuracy/RMSE on real datasets from $n = 178$ to $n = 20{,}640$. Both frameworks use 5-fold CV with seed 42.}}{11}{table.9}\protected@file@percent }
-\newlabel{tab:accuracy}{{9}{11}{5-fold CV accuracy/RMSE on real datasets from $n = 178$ to $n = 20{,}640$. Both frameworks use 5-fold CV with seed 42}{table.9}{}}
-\newlabel{sec:spatial}{{5}{11}{}{section.5}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces  Integration comparison for a spatial ML workflow with uncertainty quantification.}}{12}{table.10}\protected@file@percent }
-\newlabel{tab:python_comparison}{{10}{12}{Integration comparison for a spatial ML workflow with uncertainty quantification}{table.10}{}}
+\citation{Lou+Luo+Meng:2025}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces  Integration comparison for a spatial ML workflow with uncertainty quantification.}}{5}{table.1}\protected@file@percent }
+\newlabel{tab:python_comparison}{{1}{5}{Integration comparison for a spatial ML workflow with uncertainty quantification}{table.1}{}}
 \citation{Roberts2017}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces  Case study results on King County housing (1{,}000 samples, 11 features, log-price target).}}{6}{table.2}\protected@file@percent }
+\newlabel{tab:casestudy}{{2}{6}{Case study results on King County housing (1{,}000 samples, 11 features, log-price target)}{table.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces  Split-conformal prediction intervals computed over the \emph  {spatial} predictions (King County, log-price, projected UTM coordinates; 60\% fit / 20\% calibration / 20\% test, $n_\text  {test} = 200$, seed 42; bandwidth 50 selected by the Eq.~11 leave-one-out criterion over candidates $\geq 30$; local/global blend $\alpha _{\mathrm  {geo}} = 0.5$). The calibration set's absolute residuals give the half-width $q$ at each nominal level, so $\hat  y \pm q$ carries a finite-sample coverage guarantee for either model. Coverage lands on the nominal level for both (the guarantee, which is model-agnostic); at equal guaranteed coverage, Geo-{\fontseries  {m}\fontseries  {b}\selectfont  XGBoost}'s better local point accuracy (test RMSE 0.264 vs.\ 0.351) yields intervals 16--25\% narrower than the non-spatial baseline. The conformal step is $\approx 5$ lines of \textsf  {numpy} (replication script \bgroup \catcode `\_12\relax \catcode `\~12\relax \catcode `\$12\relax {\normalfont  \ttfamily  \hyphenchar \font =-1 conformal\_intervals.py}\egroup ), so the rule is directly verifiable.}}{7}{table.3}\protected@file@percent }
+\newlabel{tab:conformal}{{3}{7}{Split-conformal prediction intervals computed over the \emph {spatial} predictions (King County, log-price, projected UTM coordinates; 60\% fit / 20\% calibration / 20\% test, $n_\text {test} = 200$, seed 42; bandwidth 50 selected by the Eq.~11 leave-one-out criterion over candidates $\geq 30$; local/global blend $\alpha _{\mathrm {geo}} = 0.5$). The calibration set's absolute residuals give the half-width $q$ at each nominal level, so $\hat y \pm q$ carries a finite-sample coverage guarantee for either model. Coverage lands on the nominal level for both (the guarantee, which is model-agnostic); at equal guaranteed coverage, Geo-\pkg {XGBoost}'s better local point accuracy (test RMSE 0.264 vs.\ 0.351) yields intervals 16--25\% narrower than the non-spatial baseline. The conformal step is $\approx 5$ lines of \proglang {numpy} (replication script \code {conformal\_intervals.py}), so the rule is directly verifiable}{table.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces  Validation of {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml}'s Geographical-{\fontseries  {m}\fontseries  {b}\selectfont  XGBoost} against the original \textsf  {Python} implementation ({\fontseries  {m}\fontseries  {b}\selectfont  geoxgboost}~1.1.1) on King County housing (holdout, 800 train / 200 test, 11 features, log-price, seed 42), with a local/global blend $\alpha _{\mathrm  {geo}} = 0.5$, bandwidth 30 adaptive, 100 trees, depth 6, learning rate 0.3. The two Geo-{\fontseries  {m}\fontseries  {b}\selectfont  XGBoost} implementations agree to $\Delta \text  {RMSE} = 0.008$ and $\Delta $R$^2 = 0.014$; the small residual reflects the differing underlying {\fontseries  {m}\fontseries  {b}\selectfont  XGBoost} engines (pure \textsf  {Rust} vs.\ official \textsf  {C++}), a gap already visible in the non-spatial baselines. Training time is not compared here: {\fontseries  {m}\fontseries  {b}\selectfont  geoxgboost} performs an internal 5-fold nested cross-validation per local model that {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} does not, so the two are not like-for-like; controlled timing benchmarks appear in Section~\ref {sec:performance}.}}{7}{table.4}\protected@file@percent }
+\newlabel{tab:geoxgb_validation}{{4}{7}{Validation of \pkg {smelt-ml}'s Geographical-\pkg {XGBoost} against the original \proglang {Python} implementation (\pkg {geoxgboost}~1.1.1) on King County housing (holdout, 800 train / 200 test, 11 features, log-price, seed 42), with a local/global blend $\alpha _{\mathrm {geo}} = 0.5$, bandwidth 30 adaptive, 100 trees, depth 6, learning rate 0.3. The two Geo-\pkg {XGBoost} implementations agree to $\Delta \text {RMSE} = 0.008$ and $\Delta $R$^2 = 0.014$; the small residual reflects the differing underlying \pkg {XGBoost} engines (pure \proglang {Rust} vs.\ official \proglang {C++}), a gap already visible in the non-spatial baselines. Training time is not compared here: \pkg {geoxgboost} performs an internal 5-fold nested cross-validation per local model that \pkg {smelt-ml} does not, so the two are not like-for-like; controlled timing benchmarks appear in Section~\ref {sec:performance}}{table.4}{}}
+\citation{Lang+Binder+Richter:2019}
+\citation{Pedregosa+Varoquaux+Gramfort:2011}
+\newlabel{sec:architecture}{{3}{8}{}{section.3}{}}
+\citation{Grekousis:2025}
+\citation{Tomita+Browne+Shen:2020}
+\citation{Breiman:2001}
+\citation{Freund+Schapire:1997}
+\citation{Ko+Sabourin+Britto:2008}
+\citation{Friedman:2001}
+\citation{Lou+Caruana+Gehrke:2012}
+\citation{Domingos+Hulten:2000}
+\citation{Grekousis:2025}
+\citation{Ester+Kriegel+Sander:1996}
+\citation{Liu+Ting+Zhou:2008}
+\citation{Ishwaran+Kogalur+Blackstone:2008}
+\citation{Athey+Imbens:2016,Wager+Athey:2018}
+\citation{Romano+Patterson+Candes:2019}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces  Supervised learners in {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml}. $^\dagger $CatBoost-inspired symmetric GBM with ordered target statistics; see Section~\ref {sec:catboost_scope} for scope.}}{9}{table.5}\protected@file@percent }
+\newlabel{tab:learners}{{5}{9}{Supervised learners in \pkg {smelt-ml}. $^\dagger $CatBoost-inspired symmetric GBM with ordered target statistics; see Section~\ref {sec:catboost_scope} for scope}{table.5}{}}
 \citation{Athey+Imbens:2016,Wager+Athey:2018}
 \citation{Tomita+Browne+Shen:2020}
-\@writefile{lot}{\contentsline {table}{\numberline {11}{\ignorespaces  Case study results on King County housing (1{,}000 samples, 11 features, log-price target).}}{13}{table.11}\protected@file@percent }
-\newlabel{tab:casestudy}{{11}{13}{Case study results on King County housing (1{,}000 samples, 11 features, log-price target)}{table.11}{}}
-\newlabel{sec:summary}{{6}{14}{}{section.6}{}}
+\citation{linfa:2024}
+\citation{Pedregosa+Varoquaux+Gramfort:2011}
+\citation{Lang+Binder+Richter:2019}
+\citation{Chawla+Bowyer+Hall:2002}
+\citation{He+Bai+Garcia:2008}
+\citation{Chawla+Bowyer+Hall:2002}
+\citation{He+Bai+Garcia:2008}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces  Feature comparison across ML frameworks. $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM). $^c$Via extension packages. $^d$Available in \textsf  {R} via {\fontseries  {m}\fontseries  {b}\selectfont  grf}. $^e$Via {\fontseries  {m}\fontseries  {b}\selectfont  imbalanced-learn}. $^f$Via {\fontseries  {m}\fontseries  {b}\selectfont  scikit-optimize} or {\fontseries  {m}\fontseries  {b}\selectfont  Optuna}. $^g$Via {\fontseries  {m}\fontseries  {b}\selectfont  scipy.stats}. $^h$SMOTE \citep  {Chawla+Bowyer+Hall:2002} and ADASYN \citep  {He+Bai+Garcia:2008}.}}{10}{table.6}\protected@file@percent }
+\newlabel{tab:frameworks}{{6}{10}{Feature comparison across ML frameworks. $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM). $^c$Via extension packages. $^d$Available in \proglang {R} via \pkg {grf}. $^e$Via \pkg {imbalanced-learn}. $^f$Via \pkg {scikit-optimize} or \pkg {Optuna}. $^g$Via \pkg {scipy.stats}. $^h$SMOTE \citep {Chawla+Bowyer+Hall:2002} and ADASYN \citep {He+Bai+Garcia:2008}}{table.6}{}}
+\citation{Grinsztajn+Oyallon+Varoquaux:2022}
+\citation{Chen+Guestrin:2016}
+\citation{Ke+Meng+Finley:2017}
+\citation{Prokhorenkova+Gusev+Vorobev:2018}
+\citation{Chen+Guestrin:2016}
+\newlabel{sec:optimization}{{4}{11}{}{section.4}{}}
+\newlabel{eq:histogram}{{1}{11}{}{equation.4.1}{}}
+\citation{Prokhorenkova+Gusev+Vorobev:2018}
+\citation{Ke+Meng+Finley:2017}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces  Ablation study: histogram scanning kernel time per iteration (20 features, 256 bins). Column-major layout provides 1.1--2.1$\times $ speedup over the row-major baseline. The effect of u8 packing on speed is dataset-size-dependent: it improves throughput at $n = 10{,}000$ (1.4$\times $ vs.\ 1.1$\times $ for u16) but is neutral or slightly slower at $n = 1{,}000$ and $n = 100{,}000$; its primary benefit is halving memory bandwidth for bin storage. The histogram subtraction trick (not shown) reduces total tree-building work by $\sim $40\% on top of these kernel improvements.}}{12}{table.7}\protected@file@percent }
+\newlabel{tab:ablation}{{7}{12}{Ablation study: histogram scanning kernel time per iteration (20 features, 256 bins). Column-major layout provides 1.1--2.1$\times $ speedup over the row-major baseline. The effect of u8 packing on speed is dataset-size-dependent: it improves throughput at $n = 10{,}000$ (1.4$\times $ vs.\ 1.1$\times $ for u16) but is neutral or slightly slower at $n = 1{,}000$ and $n = 100{,}000$; its primary benefit is halving memory bandwidth for bin storage. The histogram subtraction trick (not shown) reduces total tree-building work by $\sim $40\% on top of these kernel improvements}{table.7}{}}
+\newlabel{sec:catboost_scope}{{4.5}{12}{}{subsection.4.5}{}}
+\newlabel{sec:feature_compare}{{4.6}{12}{}{subsection.4.6}{}}
+\newlabel{sec:performance}{{5}{12}{}{section.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces  Implemented features in {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml}'s gradient boosting engines (release 3.2.1). \text  {$\mathsurround \z@ \mathchar "458$}\ = implemented, --- = not implemented. $^*$CatBoost's $O(n^2)$ per-sample model approximation.}}{13}{table.8}\protected@file@percent }
+\newlabel{tab:features}{{8}{13}{Implemented features in \pkg {smelt-ml}'s gradient boosting engines (release 3.2.1). \checkmark \ = implemented, --- = not implemented. $^*$CatBoost's $O(n^2)$ per-sample model approximation}{table.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces  Classification training time (ms, mean $\pm $ std, 10 runs). Speedup $>1$ means {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} is faster. All values single-threaded.}}{14}{table.9}\protected@file@percent }
+\newlabel{tab:classif_perf}{{9}{14}{Classification training time (ms, mean $\pm $ std, 10 runs). Speedup $>1$ means \pkg {smelt-ml} is faster. All values single-threaded}{table.9}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces  Regression training time (ms, mean $\pm $ std, 10 runs).}}{14}{table.10}\protected@file@percent }
+\newlabel{tab:regress_perf}{{10}{14}{Regression training time (ms, mean $\pm $ std, 10 runs)}{table.10}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces  Training time scaling comparison (log-log) between {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} (blue) and official \textsf  {C++} libraries (red) across six dataset sizes. Error bars show $\pm $1 standard deviation over 10 runs. {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml}'s {\fontseries  {m}\fontseries  {b}\selectfont  CatBoost} is competitive at all scales; {\fontseries  {m}\fontseries  {b}\selectfont  XGBoost} and {\fontseries  {m}\fontseries  {b}\selectfont  LightGBM} are faster in \textsf  {C++} at $n \geq 50{,}000$.}}{15}{figure.1}\protected@file@percent }
+\newlabel{fig:scaling}{{1}{15}{Training time scaling comparison (log-log) between \pkg {smelt-ml} (blue) and official \proglang {C++} libraries (red) across six dataset sizes. Error bars show $\pm $1 standard deviation over 10 runs. \pkg {smelt-ml}'s \pkg {CatBoost} is competitive at all scales; \pkg {XGBoost} and \pkg {LightGBM} are faster in \proglang {C++} at $n \geq 50{,}000$}{figure.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {11}{\ignorespaces  Statistical significance of performance differences (Wilcoxon signed-rank, paired, two-sided). Selected rows shown. $^{*}p < 0.05$, $^{**}p < 0.01$. Bootstrap 95\% CI for the speedup ratio ($>1$ = Rust faster). {\fontseries  {m}\fontseries  {b}\selectfont  CatBoost} classification is significantly faster at 5 of 6 sizes.}}{16}{table.11}\protected@file@percent }
+\newlabel{tab:significance}{{11}{16}{Statistical significance of performance differences (Wilcoxon signed-rank, paired, two-sided). Selected rows shown. $^{*}p < 0.05$, $^{**}p < 0.01$. Bootstrap 95\% CI for the speedup ratio ($>1$ = Rust faster). \pkg {CatBoost} classification is significantly faster at 5 of 6 sizes}{table.11}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {12}{\ignorespaces  Prediction time for 1{,}000 samples (100 runs, classification). {\fontseries  {m}\fontseries  {b}\selectfont  smelt-ml} is 3.6--3.7$\times $ faster for ensemble methods due to parallel tree traversal and absence of \textsf  {Python} interpreter overhead.}}{16}{table.12}\protected@file@percent }
+\newlabel{tab:predict}{{12}{16}{Prediction time for 1{,}000 samples (100 runs, classification). \pkg {smelt-ml} is 3.6--3.7$\times $ faster for ensemble methods due to parallel tree traversal and absence of \proglang {Python} interpreter overhead}{table.12}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {13}{\ignorespaces  5-fold CV accuracy/RMSE on real datasets from $n = 178$ to $n = 20{,}640$. Both frameworks use 5-fold CV with seed 42.}}{17}{table.13}\protected@file@percent }
+\newlabel{tab:accuracy}{{13}{17}{5-fold CV accuracy/RMSE on real datasets from $n = 178$ to $n = 20{,}640$. Both frameworks use 5-fold CV with seed 42}{table.13}{}}
+\newlabel{sec:summary}{{6}{17}{}{section.6}{}}
 \bibdata{refs}
 \bibcite{Athey+Imbens:2016}{{1}{2016}{{Athey and Imbens}}{{}}}
-\bibcite{Chen+Guestrin:2016}{{2}{2016}{{Chen and Guestrin}}{{}}}
-\bibcite{geoxgboost:2024}{{3}{2024}{{Grekousis}}{{}}}
-\bibcite{Grekousis:2025}{{4}{2025}{{Grekousis}}{{}}}
-\bibcite{Grinsztajn+Oyallon+Varoquaux:2022}{{5}{2022}{{Grinsztajn \emph  {et~al.}}}{{Grinsztajn, Oyallon, and Varoquaux}}}
-\bibcite{Ishwaran+Kogalur+Blackstone:2008}{{6}{2008}{{Ishwaran \emph  {et~al.}}}{{Ishwaran, Kogalur, Blackstone, and Lauer}}}
-\bibcite{Ke+Meng+Finley:2017}{{7}{2017}{{Ke \emph  {et~al.}}}{{Ke, Meng, Finley, Wang, Chen, Ma, Ye, and Liu}}}
-\bibcite{Lang+Binder+Richter:2019}{{8}{2019}{{Lang \emph  {et~al.}}}{{Lang, Binder, Richter, Schratz, Pfisterer, Coors, Au, Casalicchio, Kotthoff, and Bischl}}}
-\bibcite{Matsakis+Klock:2014}{{9}{2014}{{Matsakis and Klock}}{{}}}
-\bibcite{Pedregosa+Varoquaux+Gramfort:2011}{{10}{2011}{{Pedregosa \emph  {et~al.}}}{{Pedregosa, Varoquaux, Gramfort, Michel, Thirion, Grisel, Blondel, Prettenhofer, Weiss, Dubourg, Vanderplas, Passos, Cournapeau, Brucher, Perrot, and Duchesnay}}}
-\bibcite{Prokhorenkova+Gusev+Vorobev:2018}{{11}{2018}{{Prokhorenkova \emph  {et~al.}}}{{Prokhorenkova, Gusev, Vorobev, Dorogush, and Gulin}}}
-\bibcite{Roberts2017}{{12}{2017}{{Roberts \emph  {et~al.}}}{{Roberts, Bahn, Ciuti, Boyce, Elith, Guillera-Arroita, Hauenstein, Lahoz-Monfort, Schr{\"o}der, Thuiller, Warton, Wintle, Hartig, and Dormann}}}
-\bibcite{Romano+Patterson+Candes:2019}{{13}{2019}{{Romano \emph  {et~al.}}}{{Romano, Patterson, and Cand{\`e}s}}}
-\bibcite{linfa:2024}{{14}{2024}{{rust-ml}}{{}}}
-\bibcite{Rust:2024}{{15}{2024}{{\textsf  {Rust} Team}}{{}}}
-\bibcite{Tomita+Browne+Shen:2020}{{16}{2020}{{Tomita \emph  {et~al.}}}{{Tomita, Browne, Shen, Chung, Patsolic, Falk, Priebe, Yim, Burns, Maggioni, and Vogelstein}}}
-\bibcite{Wager+Athey:2018}{{17}{2018}{{Wager and Athey}}{{}}}
-\gdef \@abspage@last{17}
+\bibcite{Breiman:2001}{{2}{2001}{{Breiman}}{{}}}
+\bibcite{Chawla+Bowyer+Hall:2002}{{3}{2002}{{Chawla \emph  {et~al.}}}{{Chawla, Bowyer, Hall, and Kegelmeyer}}}
+\bibcite{Chen+Guestrin:2016}{{4}{2016}{{Chen and Guestrin}}{{}}}
+\bibcite{Domingos+Hulten:2000}{{5}{2000}{{Domingos and Hulten}}{{}}}
+\bibcite{Ester+Kriegel+Sander:1996}{{6}{1996}{{Ester \emph  {et~al.}}}{{Ester, Kriegel, Sander, and Xu}}}
+\bibcite{Freund+Schapire:1997}{{7}{1997}{{Freund and Schapire}}{{}}}
+\bibcite{Friedman:2001}{{8}{2001}{{Friedman}}{{}}}
+\bibcite{geoxgboost:2024}{{9}{2024}{{Grekousis}}{{}}}
+\bibcite{Grekousis:2025}{{10}{2025}{{Grekousis}}{{}}}
+\bibcite{Grinsztajn+Oyallon+Varoquaux:2022}{{11}{2022}{{Grinsztajn \emph  {et~al.}}}{{Grinsztajn, Oyallon, and Varoquaux}}}
+\bibcite{He+Bai+Garcia:2008}{{12}{2008}{{He \emph  {et~al.}}}{{He, Bai, Garcia, and Li}}}
+\bibcite{Ishwaran+Kogalur+Blackstone:2008}{{13}{2008}{{Ishwaran \emph  {et~al.}}}{{Ishwaran, Kogalur, Blackstone, and Lauer}}}
+\bibcite{Ke+Meng+Finley:2017}{{14}{2017}{{Ke \emph  {et~al.}}}{{Ke, Meng, Finley, Wang, Chen, Ma, Ye, and Liu}}}
+\bibcite{Ko+Sabourin+Britto:2008}{{15}{2008}{{Ko \emph  {et~al.}}}{{Ko, Sabourin, and {de Souza Britto Jr.}}}}
+\bibcite{Lang+Binder+Richter:2019}{{16}{2019}{{Lang \emph  {et~al.}}}{{Lang, Binder, Richter, Schratz, Pfisterer, Coors, Au, Casalicchio, Kotthoff, and Bischl}}}
+\bibcite{Li+Zhao+Liu:2026}{{17}{2026}{{Li \emph  {et~al.}}}{{Li, Zhao, Liu, Abbas, Feng, and Grekousis}}}
+\bibcite{Liu+Ting+Zhou:2008}{{18}{2008}{{Liu \emph  {et~al.}}}{{Liu, Ting, and Zhou}}}
+\bibcite{Lou+Luo+Meng:2025}{{19}{2025}{{Lou \emph  {et~al.}}}{{Lou, Luo, and Meng}}}
+\bibcite{Lou+Caruana+Gehrke:2012}{{20}{2012}{{Lou \emph  {et~al.}}}{{Lou, Caruana, and Gehrke}}}
+\bibcite{Luo+Chen+Gao:2025}{{21}{2025}{{Luo \emph  {et~al.}}}{{Luo, Chen, Gao, Zhang, Chol, Yang, and Meng}}}
+\bibcite{Matsakis+Klock:2014}{{22}{2014}{{Matsakis and Klock}}{{}}}
+\bibcite{Pedregosa+Varoquaux+Gramfort:2011}{{23}{2011}{{Pedregosa \emph  {et~al.}}}{{Pedregosa, Varoquaux, Gramfort, Michel, Thirion, Grisel, Blondel, Prettenhofer, Weiss, Dubourg, Vanderplas, Passos, Cournapeau, Brucher, Perrot, and Duchesnay}}}
+\bibcite{Prokhorenkova+Gusev+Vorobev:2018}{{24}{2018}{{Prokhorenkova \emph  {et~al.}}}{{Prokhorenkova, Gusev, Vorobev, Dorogush, and Gulin}}}
+\bibcite{Roberts2017}{{25}{2017}{{Roberts \emph  {et~al.}}}{{Roberts, Bahn, Ciuti, Boyce, Elith, Guillera-Arroita, Hauenstein, Lahoz-Monfort, Schr{\"o}der, Thuiller, Warton, Wintle, Hartig, and Dormann}}}
+\bibcite{Romano+Patterson+Candes:2019}{{26}{2019}{{Romano \emph  {et~al.}}}{{Romano, Patterson, and Cand{\`e}s}}}
+\bibcite{linfa:2024}{{27}{2024}{{rust-ml}}{{}}}
+\bibcite{Rust:2024}{{28}{2024}{{\textsf  {Rust} Team}}{{}}}
+\bibcite{Tomita+Browne+Shen:2020}{{29}{2020}{{Tomita \emph  {et~al.}}}{{Tomita, Browne, Shen, Chung, Patsolic, Falk, Priebe, Yim, Burns, Maggioni, and Vogelstein}}}
+\bibcite{Wager+Athey:2018}{{30}{2018}{{Wager and Athey}}{{}}}
+\gdef \@abspage@last{22}

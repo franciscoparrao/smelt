@@ -10,10 +10,6 @@
 \newcommand{\class}[1]{`\code{#1}'}
 \newcommand{\fct}[1]{\code{#1()}}
 
-%% Co-author review marks for George (remove before submission).
-\usepackage{xcolor}
-\newcommand{\georgenote}[1]{\textcolor{blue}{\textbf{[$\rightarrow$ George: #1]}}}
-
 
 %% -- Article metainformation -------------------------------------------------
 
@@ -33,22 +29,22 @@ We present \pkg{smelt-ml}, an open-source machine learning framework
 implemented entirely in \proglang{Rust} that uniquely integrates spatial
 modeling, distribution-free uncertainty quantification, and gradient boosting
 in a single, memory-safe package. The framework provides 27 supervised
-learners, clustering, causal inference, survival analysis, and the only
-\proglang{Rust} implementations of Geographical-\pkg{XGBoost}, spatial
-cross-validation, and conformal prediction --- enabling end-to-end spatially-aware
-predictive workflows with guaranteed prediction interval coverage without
-\proglang{Python} or \proglang{R} dependencies. The gradient boosting
-implementations employ cache-optimized column-major histogram accumulation
-with \code{u8} packing and a histogram subtraction trick. On single-threaded
-benchmarks ($n$ from 500 to 100{,}000, 10 runs, mean $\pm$ std), the
-\pkg{CatBoost}-inspired implementation matches or exceeds the official
-\proglang{C++} library for classification (1.0--1.4$\times$) and is
-within 0.8--1.2$\times$ for regression, while \pkg{XGBoost} is
-competitive at $n \leq 10{,}000$.
-Memory consumption is 23--41$\times$ lower than the \proglang{C++} libraries. The composable, trait-based
-architecture is inspired by \pkg{mlr3} \citep{Lang+Binder+Richter:2019} and
-\pkg{scikit-learn} \citep{Pedregosa+Varoquaux+Gramfort:2011}, with zero
-\code{unsafe} blocks across 17{,}000+ lines of code.
+learners, clustering, causal inference, survival analysis, and the first
+\proglang{Rust} implementation of Geographical-\pkg{XGBoost} using spatial
+cross-validation and conformal prediction. These components enable end-to-end
+spatially-aware predictive workflows with guaranteed prediction interval
+coverage. They are callable from \proglang{Python} via \pkg{PyO3} bindings,
+while remaining free of \proglang{Python} or \proglang{R} runtime dependencies
+in their core. The gradient boosting implementations employ cache-optimized
+column-major histogram accumulation with \code{u8} packing and a histogram
+subtraction trick. On single-threaded benchmarks ($n$ from 500 to 100{,}000,
+10 runs, mean $\pm$ std), the \pkg{CatBoost}-inspired implementation matches or
+exceeds the official \proglang{C++} library for classification
+(1.0--1.4$\times$) and is within 0.8--1.2$\times$ for regression, while
+\pkg{XGBoost} is competitive at $n \leq 10{,}000$. Memory consumption is
+23--41$\times$ lower than the \proglang{C++} libraries. The composable,
+trait-based architecture is inspired by \pkg{mlr3} and \pkg{scikit-learn},
+with zero \code{unsafe} blocks across 45{,}000+ lines of code.
 }
 
 \Keywords{machine learning, gradient boosting, \proglang{Rust}, spatial modeling, conformal prediction, uncertainty quantification, software}
@@ -83,7 +79,7 @@ architecture is inspired by \pkg{mlr3} \citep{Lang+Binder+Richter:2019} and
   College of Arts and Sciences\\
   VinUniversity\\
   Hanoi, Vietnam\\
-  E-mail: \email{geogreko@outlook.com}
+  E-mail: \email{georgios.g@vinuni.edu.vn}
 }
 
 \begin{document}
@@ -93,62 +89,411 @@ architecture is inspired by \pkg{mlr3} \citep{Lang+Binder+Richter:2019} and
 
 \section{Introduction} \label{sec:intro}
 
-Gradient boosted decision trees (GBDTs) are the dominant method for supervised
-learning on tabular data \citep{Grinsztajn+Oyallon+Varoquaux:2022}. The three
-most widely used implementations --- \pkg{XGBoost} \citep{Chen+Guestrin:2016},
-\pkg{LightGBM} \citep{Ke+Meng+Finley:2017}, and \pkg{CatBoost}
-\citep{Prokhorenkova+Gusev+Vorobev:2018} --- are implemented in \proglang{C++}
-and have been optimized over many years. These libraries serve as the de facto
-baselines in the majority of applied machine learning studies.
+Spatially-aware prediction with calibrated uncertainty is a recurring need
+across the environmental, urban, and geospatial sciences, where observations
+are geographically structured and decisions depend not only on a predicted
+value but on how much to trust it \citep{Li+Zhao+Liu:2026}. Yet practitioners
+who need this combination must currently stitch together several
+\proglang{Python} or \proglang{R} packages with incompatible application
+programming interfaces (APIs): \pkg{scikit-learn} for modeling,
+\pkg{geoxgboost} for spatial regression, \pkg{MAPIE} for conformal intervals,
+and custom code for spatial resampling. To our knowledge, no existing framework
+integrates Geographical-\pkg{XGBoost} \citep{Grekousis:2025}, spatial
+cross-validation, and conformal prediction
+\citep{Romano+Patterson+Candes:2019} in a single composable library. This
+fragmentation is more than a mere inconvenience. As resampling strategies
+frequently live outside the modeling code, it serves as a persistent source of
+spatial data leakage. Furthermore, spatial predictions are also routinely
+reported without any localized measure of uncertainty \citep{Roberts2017}.
+While recent advances in geospatial artificial intelligence (GeoAI) have
+significantly boosted prediction accuracy, they often neglect the critical
+assessment of prediction uncertainty \citep{Luo+Chen+Gao:2025}. Most current
+approaches assess prediction uncertainty by integrating location in the form
+of coordinates, passed as simple variables to non-spatial models
+\citep{Lou+Luo+Meng:2025}. Consequently, a critical methodological gap
+persists: there is a lack of end-to-end frameworks capable of natively
+assessing spatial prediction accuracy from pure geographical machine learning
+models, whose predictive relationships vary across geographic contexts.
 
+Delivering such an integrated pipeline requires a capable general-purpose
+machine learning framework as its foundation, and a language that can carry
+it, such as \proglang{Rust}.
 \proglang{Rust} \citep{Rust:2024} is a systems programming language that
 guarantees memory safety without garbage collection through its ownership type
 system \citep{Matsakis+Klock:2014}. It generates machine code comparable to
-\proglang{C++} via the LLVM backend while preventing buffer overflows,
-use-after-free, and data races at compile time. Despite these advantages,
-\proglang{Rust}'s ML ecosystem remains nascent: \pkg{linfa} \citep{linfa:2024},
-the primary \proglang{Rust} ML crate, implements only 9 algorithms and does not
-include gradient boosting.
+\proglang{C++} through the LLVM compiler backend while preventing buffer
+overflows, use-after-free, and data races at compile time. Despite these
+advantages, \proglang{Rust}'s machine learning ecosystem remains limited in
+three respects. First, its primary ML crate, \pkg{linfa} \citep{linfa:2024},
+implements only nine algorithms, so most standard methods must be written from
+scratch. Second, it provides no gradient boosting, the dominant method for
+tabular data. Third, no \proglang{Rust} framework offers spatial modeling or
+conformal prediction, so spatially-aware workflows with calibrated uncertainty
+cannot be built without leaving \proglang{Rust}. Consequently, bridging these
+methodological and architectural gaps, particularly the lack of integrated
+spatial uncertainty quantification, necessitates a framework built natively in
+\proglang{Rust} from the ground up.
 
-Beyond the language gap, a practical gap exists in the spatial ML workflow:
-practitioners who need spatially-aware prediction with uncertainty
-quantification must currently combine multiple \proglang{Python} or
-\proglang{R} packages with incompatible APIs (e.g., \pkg{scikit-learn} for
-modeling, \pkg{geoxgboost} for spatial regression, \pkg{MAPIE} for conformal
-intervals, and custom spatial resampling code). To our knowledge, no existing framework integrates
-Geographical-\pkg{XGBoost}, spatial cross-validation, and conformal
-prediction in a single composable library.
-
-In this paper, we present \pkg{smelt-ml}, a comprehensive ML framework in
-\proglang{Rust} that addresses both gaps. Our main contributions are:
+To address these gaps, we present \pkg{smelt-ml}, a \proglang{Rust} machine
+learning framework built around an integrated spatial pipeline. This
+general-purpose architecture ensures the pipeline remains composable,
+high-performance, and memory-safe. Specifically, we make three primary
+contributions:
 
 \begin{enumerate}
-\item An \textbf{integrated spatial ML pipeline} that uniquely combines
-  Geographical-\pkg{XGBoost} \citep{Grekousis:2025}, spatial cross-validation,
-  and conformal prediction \citep{Romano+Patterson+Candes:2019} in a single
-  composable framework --- enabling spatially-aware modeling with
-  distribution-free uncertainty quantification without external dependencies.
-\item \textbf{Cache-optimized gradient boosting} using column-major bin storage
-  with \code{u8} packing, achieving performance competitive with official
-  \proglang{C++} libraries at research-typical scales ($n \leq 10{,}000$)
-  and an order-of-magnitude reduction in memory consumption.
-\item A \textbf{comprehensive ML framework} with 27 supervised learners,
-  clustering, survival analysis, Causal Forest \citep{Wager+Athey:2018},
-  Oblique Forest \citep{Tomita+Browne+Shen:2020}, and streaming Hoeffding
-  Trees --- the most complete ML framework in \proglang{Rust}.
-\item \textbf{Validation} showing accuracy comparable to \pkg{scikit-learn}
-  across standard benchmarks, with zero \code{unsafe} blocks across the
-  entire codebase.
+\item We develop an \textbf{integrated spatial ML pipeline} that uniquely
+  combines Geographical-\pkg{XGBoost}, spatial cross-validation, and conformal
+  prediction in a single composable framework, enabling spatially-aware
+  modeling with distribution-free uncertainty quantification without external
+  dependencies.
+\item We build a \textbf{native \proglang{Rust} framework} of 27 supervised
+  learners plus clustering, causal inference, and survival analysis, all
+  accessible (including Geographical-\pkg{XGBoost}) from \proglang{Python}
+  through \pkg{PyO3} bindings.
+\item We deliver \textbf{high-performance, memory-safe execution}:
+  cache-optimized gradient boosting (column-major histograms, \code{u8}
+  packing) competitive with official \proglang{C++} libraries at research
+  scales ($n \leq 10{,}000$), an order-of-magnitude reduction in memory, which
+  matters for embedded and memory-constrained deployments, and zero
+  \code{unsafe} blocks across the codebase.
 \end{enumerate}
+
+We validate the framework using the King County housing dataset for
+Geographical-\pkg{XGBoost}, checked against the original \pkg{geoxgboost}
+package, and public benchmark datasets for the remaining learners, showing
+accuracy comparable to \pkg{scikit-learn}.
+
+Ultimately, \pkg{smelt-ml} empowers researchers and practitioners to move
+beyond disjointed, error-prone workflows. By combining 27 supervised learners,
+causal and oblique forests, survival analysis, and streaming models with
+Geographical-\pkg{XGBoost}, spatial cross-validation, and conformal prediction,
+the framework provides a unified environment for high-stakes spatial
+analytics. Users can scale from exploratory spatial data analysis to robust
+prediction and reliable uncertainty quantification, all within a single,
+memory-safe, and dependency-free \proglang{Rust} ecosystem. The system
+integrates with \proglang{Python} through its \pkg{PyO3} bindings (published
+on PyPI), giving users the flexibility to combine \pkg{smelt-ml} with the
+broader scientific-\proglang{Python} ecosystem while retaining \proglang{Rust}'s
+performance and memory safety.
+
+The paper follows the order of the contributions. Section~\ref{sec:spatial}
+presents the integrated spatial pipeline, starting from a Geographical-\pkg{XGBoost}
+quick start and ending with the validation against the original package.
+Section~\ref{sec:architecture} describes the general-purpose framework around
+it: its trait-based architecture and the 27 implemented learners.
+Sections~\ref{sec:optimization} and~\ref{sec:performance} cover the
+cache-optimized gradient boosting engines and their performance evaluation.
+Section~\ref{sec:summary} concludes.
+
+
+%% -- Integrated spatial ML pipeline -------------------------------------------
+
+\section{Integrated spatial ML pipeline} \label{sec:spatial}
+
+The central contribution of \pkg{smelt-ml} is the integration of spatial
+modeling, spatial resampling, and distribution-free uncertainty quantification
+in a single composable framework. To our knowledge, no other ML framework
+provides all three capabilities in a single library without external
+dependencies.
+
+\subsection{Quick start: Geographical-XGBoost end to end}
+\label{sec:geo_quickstart}
+
+The following example trains a Geographical-\pkg{XGBoost} model, evaluates a
+learner with spatial block cross-validation, and wraps the spatial predictions
+in split-conformal intervals. Coordinates are passed alongside the data, not
+stored as features, so the spatial components can be combined with any
+learner. The API conventions (\code{Task}, \code{Learner}, \code{Resample})
+are described in Section~\ref{sec:architecture}.
+
+\begin{CodeChunk}
+\begin{CodeInput}
+use smelt_ml::prelude::*;
+
+// 1. Load the data; coordinates travel alongside the Task.
+let task = CsvLoader::from_path("data/king_county_1k.csv")
+    .target("log_price").load_regress()?;
+let coords: Vec<(f64, f64)> = /* (lat, long) of each row */;
+
+// 2. Geographical-XGBoost: local models blended with a global one.
+let mut geo = GeoXGBoost::new(train_coords)
+    .with_bandwidth(30)   // adaptive kernel: 30 nearest neighbors
+    .with_alpha(0.5);     // local/global blend
+let model = geo.train_geo(&train_task)?;
+let pred = model.predict_spatial(&test_features, &test_coords)?;
+
+// 3. Spatial block CV: folds are geographic blocks, not random rows.
+let spatial_cv = SpatialBlockCV::new(4, coords.clone());
+let result = benchmark::resample_regress(
+    &mut XGBoost::new(), &task, &spatial_cv, &[&Rmse])?;
+
+// 4. Split-conformal intervals with guaranteed 1 - alpha coverage.
+let conformal = SplitConformal::calibrate_from_predictions(
+    &cal_predictions, &cal_targets, 0.1)?;
+let intervals = conformal.intervals_for(&test_predictions);
+\end{CodeInput}
+\end{CodeChunk}
+
+\subsection{Components}
+
+\textbf{Geographical-XGBoost} \citep{Grekousis:2025} extends gradient boosting
+with spatial awareness to model spatial non-stationarity using spatial kernels,
+local sub-models, and an adaptive weight $\alpha_{\mathrm{geo}}$ that blends
+local and global predictions. The framework supports both fixed and adaptive
+spatial kernels. For a fixed kernel the bandwidth is defined through a distance
+threshold, whereas for an adaptive kernel it is the number $N$ of nearest
+neighbors used to create the neighborhood. Our implementation trains local
+models on the spatial neighborhood subset (samples with kernel weight $> 0$)
+rather than incorporating spatial weights into the \pkg{XGBoost} objective
+function (Eq.~13 in \citealp{Grekousis:2025}), which would require modifying the
+gradient computation. As shown in Table~\ref{tab:geoxgb_validation}, this
+approximation produces results equivalent to the original package. To our
+knowledge, this is the first implementation outside the original
+\proglang{Python} package \citep{geoxgboost:2024}.
+
+Beyond porting the algorithm, the \pkg{smelt-ml} implementation makes two
+advances over the original: it embeds spatial cross-validation as a native,
+first-class validation mechanism, and it adds conformal prediction as a
+mathematically rigorous measure of predictive uncertainty.
+
+\textbf{Spatial cross-validation} (\code{SpatialBlockCV}, \code{SpatialBufferCV}).
+To account for spatial autocorrelation and prevent data leakage between
+neighboring observations, model performance is evaluated using spatial
+cross-validation. This approach rigorously tests the model's ability to
+generalize across space rather than memorizing local spatial dependencies. By
+partitioning the data into geographically distinct blocks rather than random
+splits, validation folds comprise unsampled regions; this eliminates spatial
+data leakage and yields models that generalize more faithfully to novel
+geographic areas. Both \code{SpatialBlockCV} and \code{SpatialBufferCV}
+implement the \code{Resample} trait, making them interchangeable with standard
+\code{CrossValidation} in any pipeline.
+
+\textbf{Conformal prediction.} To quantify uncertainty without restrictive
+distributional assumptions, we apply conformal prediction as a post-processing
+layer on top of GeoXGBoost. This yields distribution-free prediction intervals
+with guaranteed $(1-\alpha_{\mathrm{cp}})$ coverage via split conformal
+prediction and conformalized quantile regression
+\citep[CQR;][]{Romano+Patterson+Candes:2019}. Here $\alpha_{\mathrm{cp}}$
+denotes the conformal miscoverage level and is distinct from the
+Geographical-\pkg{XGBoost} blend weight $\alpha_{\mathrm{geo}}$ introduced
+above. The \code{ConformalRegressor} wraps any \code{TrainedModel} without
+retraining, so conformal prediction composes with any learner, including
+\code{GeoXGBoost}, pipelines with preprocessing, or stacked ensembles.
+
+{\sloppy
+In \pkg{smelt-ml}, the trait system enforces correct composition:
+\code{SpatialBlockCV} implements \code{Resample}, so it works with
+\fct{benchmark}, \code{GridSearch}, \code{BayesianOptimizer}, and
+\code{Bagging} without adaptation. The same trait discipline lets
+\code{ConformalRegressor} wrap any \code{TrainedModel}, so uncertainty
+quantification and spatial modeling compose without special-casing.\par}
+
+\subsection{Why integration matters}
+
+The value of this integration is not merely convenience but
+\textbf{methodological correctness}. In practice, spatial ML workflows are
+error-prone because spatial leakage, a well-documented source of optimism
+bias in geospatial prediction \citep{Roberts2017}, requires that the resampling
+strategy be spatially aware. Yet most ML frameworks treat resampling and
+modeling as independent concerns. When spatial CV is implemented as an
+external script rather than a first-class \code{Resample} trait, it cannot
+be passed to hyperparameter tuning or model comparison functions, forcing
+users to write custom loops that risk subtle data leakage bugs.
+
+Conformal prediction matters here because it converts GeoXGBoost point estimates
+into intervals that widen in regions of high spatial heterogeneity, calibrating
+non-conformity scores across geographic space and thereby bridging high spatial
+accuracy with risk-aware decision-making. Such distribution-free, spatially
+localized uncertainty is absent not only from GeoXGBoost but from most spatial
+regression paradigms, including Geographically Weighted Regression (GWR) and
+spatial random forests, which typically report point-accuracy metrics alone.
+In contrast to GeoConformal prediction \citep{Lou+Luo+Meng:2025}, a
+model-agnostic uncertainty framework, \pkg{smelt-ml} ships a concrete,
+spatially-localized split-conformal implementation composable with
+Geographical-\pkg{XGBoost}.
+
+Table~\ref{tab:python_comparison} quantifies the integration gap with
+\proglang{Python}.
+
+\begin{table}[t!]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+Capability & \pkg{smelt-ml} & \proglang{Python} equivalent \\
+\midrule
+Spatial regression        & \code{GeoXGBoost}     & \pkg{geoxgboost} \\
+Spatial CV                & \code{SpatialBlockCV}  & custom code or \pkg{spacv} \\
+Conformal prediction      & \code{ConformalRegressor} & \pkg{MAPIE} or \pkg{crepes} \\
+Gradient boosting         & \code{XGBoost}        & \pkg{xgboost} \\
+Preprocessing pipeline    & \code{Pipeline}       & \pkg{scikit-learn} \\
+Statistical validation    & \code{stats} module    & \pkg{scipy.stats} \\
+\midrule
+Packages required         & 1                     & 5--6 \\
+API consistency           & Trait-based, uniform   & Mixed APIs \\
+Data format conversion    & None                  & DataFrame $\leftrightarrow$ array \\
+Thread-safety guarantee   & Compile-time          & Runtime (GIL) \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:python_comparison} Integration comparison for a spatial ML
+workflow with uncertainty quantification.}
+\end{table}
+
+\subsection{Case study: housing price prediction in King County, WA}
+
+We demonstrate the integrated pipeline on a 1{,}000-sample subset of the
+King County housing dataset (21{,}613 sales with coordinates), predicting
+log-price from 11 structural features (living area, bedrooms, grade, etc.)
+\emph{without} including latitude/longitude as model features. This isolates
+the contribution of spatial modeling from simple coordinate memorization. The
+code is the one shown in Section~\ref{sec:geo_quickstart}.
+Table~\ref{tab:casestudy} shows three key findings.
+
+\begin{table}[t!]
+\centering
+\begin{tabular}{lcl}
+\toprule
+Finding & Value & Interpretation \\
+\midrule
+\multicolumn{3}{l}{\textit{Model comparison (holdout, no coords in features)}} \\
+XGBoost RMSE          & 0.330 & Baseline (no spatial info) \\
+XGBoost + coords RMSE & 0.222 & 33\% improvement with location \\
+\midrule
+\multicolumn{3}{l}{\textit{Spatial validation}} \\
+Random CV RMSE        & 0.323 & Optimistic (spatial leakage) \\
+Spatial Block CV RMSE & 0.410 & Honest (no leakage) \\
+Leakage bias          & 27\%  & Random CV underestimates error \\
+\midrule
+\multicolumn{3}{l}{\textit{Uncertainty quantification}} \\
+Conformal coverage    & 92\%  & Target: 90\%, guarantee met \\
+Interval width        & 1.11 log(\$) & Calibrated uncertainty \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:casestudy} Case study results on King County housing
+(1{,}000 samples, 11 features, log-price target).}
+\end{table}
+
+The conformal row in Table~\ref{tab:casestudy} comes from the simple holdout
+split of the case study; Table~\ref{tab:conformal} reports a separate 60/20/20
+(fit/calibration/test) run that conformalizes the spatial predictions and
+compares both models under identical conditions.
+
+\textbf{Spatial heterogeneity.} Adding coordinates as features improves
+\pkg{XGBoost} RMSE by 33\%, confirming that housing price drivers vary
+strongly by location. Geographical-\pkg{XGBoost}'s local models capture
+this non-stationarity through spatially-weighted training rather than
+coordinate memorization, which is preferable when predicting at locations
+outside the training domain (spatial extrapolation).
+
+\textbf{Spatial leakage.} Using the same \pkg{XGBoost} model, standard 5-fold
+CV yields RMSE = 0.323, while \code{SpatialBlockCV} yields RMSE = 0.410, a
+\textbf{27\% optimism bias} from spatial autocorrelation leakage. This
+magnitude is consistent with \citet{Roberts2017}, who report 10--40\% bias in
+geospatial applications. Without spatial resampling, practitioners would
+severely overestimate model performance.
+
+\textbf{Conformal coverage and interval sharpness.} With $\alpha_{\mathrm{cp}} = 0.1$, the
+conformal predictor meets its coverage guarantee (Table~\ref{tab:casestudy}).
+Because that guarantee holds for \emph{any} model, the more informative question
+is interval \emph{width} at a fixed coverage. Table~\ref{tab:conformal}
+conformalizes the spatial predictions directly and compares
+Geographical-\pkg{XGBoost} against the non-spatial \pkg{XGBoost} baseline at
+three nominal levels. Coverage lands on the nominal level for both, as
+guaranteed; but Geo-\pkg{XGBoost}'s sharper local point predictions on this
+split (test RMSE 0.264 vs.\ 0.351; see the table caption) translate into
+intervals that are consistently 16--25\% narrower at the same guaranteed
+coverage: at 90\%, $\pm$54\% of the predicted price versus $\pm$78\%. The
+spatial structure does not merely improve the point estimate; it buys sharper
+honest uncertainty.
+
+\begin{table}[t!]
+\centering
+\begin{tabular}{llccc}
+\toprule
+Nominal & Model & Coverage & $q$ (log) & Interval as \% of price \\
+\midrule
+80\% & Geo-\pkg{XGBoost} & 80.0\% & 0.337 & $\pm$40.0\% \\
+80\% & \pkg{XGBoost}     & 75.5\% & 0.402 & $\pm$49.5\% \\
+90\% & Geo-\pkg{XGBoost} & 88.0\% & 0.434 & $\pm$54.3\% \\
+90\% & \pkg{XGBoost}     & 91.0\% & 0.577 & $\pm$78.1\% \\
+95\% & Geo-\pkg{XGBoost} & 96.0\% & 0.552 & $\pm$73.7\% \\
+95\% & \pkg{XGBoost}     & 94.5\% & 0.682 & $\pm$97.8\% \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:conformal} Split-conformal prediction intervals computed
+over the \emph{spatial} predictions (King County, log-price, projected UTM
+coordinates; 60\% fit / 20\% calibration / 20\% test, $n_\text{test} = 200$,
+seed 42; bandwidth 50 selected by the Eq.~11 leave-one-out criterion over
+candidates $\geq 30$; local/global blend $\alpha_{\mathrm{geo}} = 0.5$). The calibration set's
+absolute residuals give the half-width $q$ at each nominal level, so
+$\hat y \pm q$ carries a finite-sample coverage guarantee for either model.
+Coverage lands on the nominal level for both (the guarantee, which is
+model-agnostic); at equal guaranteed coverage, Geo-\pkg{XGBoost}'s better local
+point accuracy (test RMSE 0.264 vs.\ 0.351) yields intervals 16--25\% narrower
+than the non-spatial baseline. The conformal step is $\approx 5$ lines of
+\proglang{numpy} (replication script \code{conformal\_intervals.py}), so the
+rule is directly verifiable.}
+\end{table}
+
+\subsection{Validation against the original implementation}
+
+Table~\ref{tab:geoxgb_validation} compares our Geographical-\pkg{XGBoost}
+implementation against the original \proglang{Python} package
+(\pkg{geoxgboost}~1.1.1) on the King County dataset (800 train, 200 test,
+identical split). Both use 100 trees, depth~6, learning rate 0.3, bandwidth 30
+(adaptive), and a local/global blend $\alpha_{\mathrm{geo}} = 0.5$, the
+practical operating point also used for the conformal intervals of
+Table~\ref{tab:conformal}. Both implementations evaluate the global model at the
+prediction point, so the comparison checks the full ensemble at its operating
+configuration.
+
+\begin{table}[t!]
+\centering
+\begin{tabular}{lcc}
+\toprule
+Implementation & RMSE & R$^2$ \\
+\midrule
+\pkg{XGBoost} (\proglang{C++}, baseline) & 0.331 & 0.615 \\
+\pkg{XGBoost} (\pkg{smelt-ml}, baseline) & 0.332 & 0.614 \\
+Geo-\pkg{XGBoost} (\pkg{geoxgboost}, \proglang{Python}) & 0.253 & 0.775 \\
+Geo-\pkg{XGBoost} (\pkg{smelt-ml}, \proglang{Rust}) & 0.245 & 0.789 \\
+\bottomrule
+\end{tabular}
+\caption{\label{tab:geoxgb_validation} Validation of \pkg{smelt-ml}'s
+Geographical-\pkg{XGBoost} against the original \proglang{Python} implementation
+(\pkg{geoxgboost}~1.1.1) on King County housing (holdout, 800 train / 200 test,
+11 features, log-price, seed 42), with a local/global blend
+$\alpha_{\mathrm{geo}} = 0.5$, bandwidth 30 adaptive, 100 trees, depth 6,
+learning rate 0.3. The two Geo-\pkg{XGBoost} implementations agree to
+$\Delta\text{RMSE} = 0.008$ and $\Delta$R$^2 = 0.014$; the small residual
+reflects the differing underlying \pkg{XGBoost} engines (pure \proglang{Rust}
+vs.\ official \proglang{C++}), a gap already visible in the non-spatial
+baselines. Training time is not compared here: \pkg{geoxgboost} performs an
+internal 5-fold nested cross-validation per local model that \pkg{smelt-ml} does
+not, so the two are not like-for-like; controlled timing benchmarks appear in
+Section~\ref{sec:performance}.}
+\end{table}
+
+The close agreement ($\Delta\text{RMSE} = 0.008$) confirms that
+\pkg{smelt-ml}'s implementation correctly reproduces the
+Geographical-\pkg{XGBoost} algorithm at its practical operating point. The small
+residual is expected because the underlying \pkg{XGBoost} engines differ (pure
+\proglang{Rust} vs.\ official \proglang{C++}); the non-spatial baselines differ
+by a comparable margin. Both Geo-\pkg{XGBoost} implementations improve
+substantially over the non-spatial baseline (RMSE 0.33 $\to$ 0.25,
+$\approx 24\%$ reduction), confirming the practical value of spatial modeling
+for geographically heterogeneous data.
 
 
 %% -- Software Architecture ---------------------------------------------------
 
-\section{Software architecture} \label{sec:architecture}
+\section{Software architecture and implemented algorithms} \label{sec:architecture}
 
 \subsection{Design principles}
 
-\pkg{smelt-ml} follows a trait-based architecture inspired by \pkg{mlr3}:
+\pkg{smelt-ml} follows a trait-based architecture inspired by \pkg{mlr3}
+\citep{Lang+Binder+Richter:2019} and \pkg{scikit-learn}
+\citep{Pedregosa+Varoquaux+Gramfort:2011}:
 
 \begin{Code}
 Data (CSV) -> Task -> Pipeline(Transformers -> Learner)
@@ -170,7 +515,7 @@ This design enables zero-friction composition: \code{Pipeline} implements
 \code{Learner}, so a pipeline of transformers and a learner can be passed to
 \fct{benchmark}, \code{GridSearch}, or \code{Bagging} without adaptation.
 
-\subsection{Quick start}
+\subsection{Quick start: general learners}
 
 A minimal classification example:
 
@@ -217,7 +562,8 @@ Ensemble Selection (KNORA-E).
 
 \begin{table}[t!]
 \centering
-\begin{tabular}{llcc}
+\small
+\begin{tabular}{lp{8.6cm}cc}
 \toprule
 Category & Algorithm & Classif. & Regress. \\
 \midrule
@@ -228,7 +574,7 @@ Boosting    & XGBoost, LightGBM, CatBoost$^\dagger$ & \checkmark & \checkmark \\
             & Gradient Boosting \citep{Friedman:2001}, Quantile GB, EBM \citep{Lou+Caruana+Gehrke:2012} & \checkmark & \checkmark \\
 Linear      & Linear/Logistic Regression, Ridge, Lasso, Elastic Net & \checkmark & \checkmark \\
 Other       & KNN, Gaussian NB, Linear SVM, Hoeffding Tree \citep{Domingos+Hulten:2000} & \checkmark & \checkmark \\
-Spatial     & Geographical-XGBoost & & \checkmark \\
+Spatial     & Geographical-XGBoost \citep{Grekousis:2025} & & \checkmark \\
 \bottomrule
 \end{tabular}
 \caption{\label{tab:learners} Supervised learners in \pkg{smelt-ml}.
@@ -244,8 +590,22 @@ and Regressor Chains (multi-label/output); Quantile Regression Forest; Conformal
 Prediction with CQR \citep{Romano+Patterson+Candes:2019}; SHAP-based feature
 importance; and built-in non-parametric statistical tests for model comparison
 (Wilcoxon signed-rank, Friedman with Nemenyi post-hoc, McNemar, bootstrap
-confidence intervals) --- eliminating the need for external statistical packages
-when validating that one model significantly outperforms another.
+confidence intervals). The statistical tests eliminate the need for external
+statistical packages when validating that one model significantly outperforms
+another.
+
+\subsection{Additional unique algorithms}
+
+\textbf{Causal Forest.} Honest splitting following
+\citet{Athey+Imbens:2016, Wager+Athey:2018}. Estimates conditional average
+treatment effects (CATE) $\tau(x) = E[Y(1) - Y(0) | X = x]$ with 95\%
+confidence intervals. To our knowledge, the first implementation in a \proglang{Rust} ML framework.
+
+\textbf{Oblique Forest (SPORF).} Sparse random projections following
+\citet{Tomita+Browne+Shen:2020}, enabling oblique decision boundaries.
+
+\textbf{Streaming.} Hoeffding Trees for online learning on data streams,
+using the Hoeffding bound for statistically sound split decisions.
 
 \subsection{Comparison with existing frameworks}
 
@@ -256,7 +616,8 @@ Table~\ref{tab:frameworks} compares \pkg{smelt-ml} with \pkg{linfa}~0.7
 
 \begin{table}[t!]
 \centering
-\small
+\footnotesize
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{lcccc}
 \toprule
 Category & \pkg{smelt-ml} & \pkg{linfa} & \pkg{sklearn} & \pkg{mlr3} \\
@@ -276,7 +637,7 @@ Survival Forest                & \checkmark     & ---        & ---            & 
 Conformal Prediction           & \checkmark     & ---        & ---            & ---        \\
 Geographical-XGBoost           & \checkmark     & ---        & ---            & ---        \\
 Spatial cross-validation       & \checkmark     & ---        & ---            & \checkmark$^c$ \\
-SMOTE \citep{Chawla+Bowyer+Hall:2002} / ADASYN \citep{He+Bai+Garcia:2008} & \checkmark & --- & \checkmark$^e$ & \checkmark$^c$ \\
+SMOTE / ADASYN$^h$            & \checkmark     & ---        & \checkmark$^e$ & \checkmark$^c$ \\
 Bayesian tuning                & \checkmark     & ---        & \checkmark$^f$ & \checkmark \\
 Statistical tests (Wilcoxon, Friedman) & \checkmark & --- & \checkmark$^g$ & \checkmark \\
 \midrule
@@ -289,13 +650,24 @@ Supervised learners            & 27             & 9          & 40+            & 
 $^a$From-scratch implementations. $^b$Via external C++ libraries (XGBoost, LightGBM).
 $^c$Via extension packages. $^d$Available in \proglang{R} via \pkg{grf}.
 $^e$Via \pkg{imbalanced-learn}. $^f$Via \pkg{scikit-optimize} or \pkg{Optuna}.
-$^g$Via \pkg{scipy.stats}.}
+$^g$Via \pkg{scipy.stats}. $^h$SMOTE \citep{Chawla+Bowyer+Hall:2002} and
+ADASYN \citep{He+Bai+Garcia:2008}.}
 \end{table}
 
 
 %% -- Cache-Optimized Gradient Boosting ----------------------------------------
 
 \section{Cache-optimized gradient boosting} \label{sec:optimization}
+
+Gradient boosted decision trees (GBDTs) are the dominant method for supervised
+learning on tabular data \citep{Grinsztajn+Oyallon+Varoquaux:2022}, and the
+three most widely used implementations, \pkg{XGBoost} \citep{Chen+Guestrin:2016},
+\pkg{LightGBM} \citep{Ke+Meng+Finley:2017}, and \pkg{CatBoost}
+\citep{Prokhorenkova+Gusev+Vorobev:2018}, are written in \proglang{C++}, have
+been optimized over many years, and serve as the de facto baselines in most
+applied machine learning studies. This section describes how \pkg{smelt-ml}
+reimplements the three engines in pure \proglang{Rust} and the memory layout
+that makes them competitive.
 
 \subsection{The histogram bottleneck}
 
@@ -313,9 +685,10 @@ memory locations correspond to different features of the same sample.
 
 \subsection{Column-major storage with u8 packing}
 
+{\sloppy
 Our key optimization stores bin indices in \textbf{column-major} order:
 \code{bin\_index[feature][sample]}. When building the histogram for a specific
-feature, all bin accesses are sequential in memory:
+feature, all bin accesses are sequential in memory:\par}
 
 \begin{CodeChunk}
 \begin{CodeInput}
@@ -382,24 +755,30 @@ hardware-specific code (GPU, SIMD intrinsics) or that would substantially
 increase complexity without proportional benefit for typical research
 workflows. Specifically:
 
+{\sloppy
 \textbf{CatBoost} implements oblivious (symmetric) trees and ordered target
 statistics \citep{Prokhorenkova+Gusev+Vorobev:2018}, but not the full
 $O(n^2)$ ordered boosting procedure. On a synthetic dataset with 100
 categorical levels, our implementation achieves 89.5\% accuracy vs.\ 89.8\%
-for the official library.
+for the official library.\par}
 
 \textbf{LightGBM} implements leaf-wise growth and GOSS sampling
 \citep{Ke+Meng+Finley:2017}, but not Exclusive Feature Bundling (EFB) or
 weighted GOSS histograms.
 
 Table~\ref{tab:features} provides a detailed feature-by-feature comparison.
-Features not implemented in any engine include monotone/interaction
-constraints, custom loss functions, and distributed training.
+Features not implemented in any engine include interaction constraints,
+Exclusive Feature Bundling, GPU training, distributed training, and full
+ordered boosting.
 
 \subsection{Feature comparison with official libraries} \label{sec:feature_compare}
 
 Table~\ref{tab:features} summarizes which features of the official libraries
-are implemented in \pkg{smelt-ml} and which are not.
+are implemented in \pkg{smelt-ml} and which are not. The table reflects the
+current release (3.2.1); the benchmarks of Section~\ref{sec:performance} were
+run with version 1.3.0, which predates the native categorical splits, the
+early-stopping support in \pkg{LightGBM} and \pkg{CatBoost}, and the monotone
+constraints and alternative objectives in \pkg{XGBoost}.
 
 \begin{table}[t!]
 \centering
@@ -425,18 +804,19 @@ Row subsampling              & \checkmark & \checkmark & ---        \\
 Column subsampling           & \checkmark & \checkmark & ---        \\
 \midrule
 \multicolumn{4}{l}{\textit{Data handling}} \\
-NaN-aware splits             & \checkmark & \checkmark & ---        \\
-Native categorical features  & ---        & ---        & \checkmark \\
+NaN-aware splits             & \checkmark & \checkmark & \checkmark \\
+Native categorical features  & \checkmark & \checkmark & \checkmark \\
 Multi-class (softmax)        & \checkmark & \checkmark & \checkmark \\
+Per-sample weights           & \checkmark & \checkmark & \checkmark \\
 \midrule
 \multicolumn{4}{l}{\textit{Training control}} \\
-Early stopping               & \checkmark & ---        & ---        \\
-Feature importance (gain)    & \checkmark & \checkmark & ---        \\
+Early stopping (eval set)    & \checkmark & \checkmark & \checkmark \\
+Feature importance (gain)    & \checkmark & \checkmark & \checkmark \\
+Monotone constraints         & \checkmark & ---        & ---        \\
+Alternative objectives (Huber, Poisson, custom) & \checkmark & --- & --- \\
 \midrule
 \multicolumn{4}{l}{\textit{Not implemented in any engine}} \\
-Monotone constraints         & \multicolumn{3}{c}{---} \\
 Interaction constraints      & \multicolumn{3}{c}{---} \\
-Custom loss functions        & \multicolumn{3}{c}{---} \\
 Exclusive Feature Bundling   & \multicolumn{3}{c}{---} \\
 GPU training                 & \multicolumn{3}{c}{---} \\
 Distributed training         & \multicolumn{3}{c}{---} \\
@@ -444,7 +824,7 @@ Full ordered boosting$^*$    & \multicolumn{3}{c}{---} \\
 \bottomrule
 \end{tabular}
 \caption{\label{tab:features} Implemented features in \pkg{smelt-ml}'s gradient
-boosting engines. \checkmark\ = implemented, --- = not implemented.
+boosting engines (release 3.2.1). \checkmark\ = implemented, --- = not implemented.
 $^*$CatBoost's $O(n^2)$ per-sample model approximation.}
 \end{table}
 
@@ -455,6 +835,7 @@ $^*$CatBoost's $O(n^2)$ per-sample model approximation.}
 
 \subsection{Experimental setup}
 
+{\sloppy
 Benchmarks use synthetic datasets generated with 20 features (10 informative),
 at sample sizes from 500 to 100{,}000. Configuration: 100 trees, max depth~6,
 learning rate 0.3 (\pkg{XGBoost}/\pkg{CatBoost}) or 0.1 (\pkg{LightGBM}).
@@ -463,7 +844,7 @@ efficiency from parallelization strategy. \proglang{Rust} compiled with
 \code{target-cpu=native} (release mode). Official \proglang{C++} libraries
 accessed via \proglang{Python} API with \code{n\_jobs=1}. Each benchmark is
 run 10 times; we report mean $\pm$ standard deviation. Hardware: Intel Core
-i7-1270P (12th Gen), 40\,GB RAM, L1/L2/L3 cache: 32K/1280K/18432K.
+i7-1270P (12th Gen), 40\,GB RAM, L1/L2/L3 cache of 32K, 1280K, and 18432K.\par}
 
 Note: \pkg{smelt-ml}'s ensemble learners (Random Forest, Extra Trees, Oblique
 Forest) use \pkg{rayon} for parallel tree construction, and the gradient
@@ -478,14 +859,15 @@ and regression training times across all dataset sizes.
 
 \begin{table}[t!]
 \centering
-\small
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{r rr@{$\;\times$}r rr@{$\;\times$}r rr@{$\;\times$}r}
 \toprule
  & \multicolumn{3}{c}{\pkg{XGBoost}} & \multicolumn{3}{c}{\pkg{LightGBM}} & \multicolumn{3}{c}{\pkg{CatBoost}$^\dagger$} \\
 \cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
 $n$ & C++ & Rust &  & C++ & Rust &  & C++ & Rust &  \\
 \midrule
-500        & $55\pm9$     & $50\pm2$     & 1.1 & $36\pm6$     & $34\pm2$     & 1.1 & $261\pm25$   & $197\pm9$    & 1.3 \\
+500        & $55\pm9$    & $50\pm2$     & 1.1 & $36\pm6$     & $34\pm2$     & 1.1 & $261\pm25$   & $197\pm9$    & 1.3 \\
 1{,}000    & $70\pm13$    & $92\pm7$     & 0.8 & $60\pm3$     & $56\pm3$     & 1.1 & $263\pm10$   & $193\pm7$    & 1.4 \\
 5{,}000    & $234\pm54$   & $336\pm15$   & 0.7 & $122\pm6$    & $209\pm5$    & 0.6 & $384\pm66$   & $366\pm35$   & 1.0 \\
 10{,}000   & $311\pm70$   & $471\pm19$   & 0.7 & $225\pm24$   & $296\pm19$   & 0.8 & $518\pm85$   & $439\pm22$   & 1.2 \\
@@ -499,14 +881,15 @@ Speedup $>1$ means \pkg{smelt-ml} is faster. All values single-threaded.}
 
 \begin{table}[t!]
 \centering
-\small
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{r rr@{$\;\times$}r rr@{$\;\times$}r rr@{$\;\times$}r}
 \toprule
  & \multicolumn{3}{c}{\pkg{XGBoost}} & \multicolumn{3}{c}{\pkg{LightGBM}} & \multicolumn{3}{c}{\pkg{CatBoost}$^\dagger$} \\
 \cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10}
 $n$ & C++ & Rust &  & C++ & Rust &  & C++ & Rust &  \\
 \midrule
-500        & $204\pm4$    & $146\pm5$    & 1.4 & $28\pm1$     & $57\pm3$     & 0.5 & $234\pm6$    & $193\pm15$   & 1.2 \\
+500        & $204\pm4$   & $146\pm5$    & 1.4 & $28\pm1$     & $57\pm3$     & 0.5 & $234\pm6$    & $193\pm15$   & 1.2 \\
 1{,}000    & $242\pm15$   & $211\pm45$   & 1.1 & $58\pm6$     & $109\pm4$    & 0.5 & $272\pm25$   & $337\pm18$   & 0.8 \\
 5{,}000    & $399\pm113$  & $390\pm19$   & 1.0 & $165\pm9$    & $173\pm12$   & 1.0 & $344\pm41$   & $334\pm6$    & 1.0 \\
 10{,}000   & $440\pm107$  & $467\pm25$   & 0.9 & $231\pm26$   & $250\pm16$   & 0.9 & $423\pm50$   & $436\pm16$   & 1.0 \\
@@ -520,7 +903,7 @@ $n$ & C++ & Rust &  & C++ & Rust &  & C++ & Rust &  \\
 \subsection{Scaling analysis}
 
 Figure~\ref{fig:scaling} visualizes the scaling behavior across all dataset
-sizes. The crossover point --- where \proglang{C++} becomes faster --- is
+sizes. The crossover point, where \proglang{C++} becomes faster, is
 clearly visible around $n = 5{,}000$ for \pkg{XGBoost} and $n = 10{,}000$
 for \pkg{CatBoost}.
 
@@ -628,11 +1011,12 @@ disadvantages at $n \geq 10{,}000$ ($p \leq 0.004$) remain significant.
 Borderline results ($p \approx 0.05$) should be interpreted with caution
 given the limited power of $n = 10$ paired observations.
 
+{\sloppy
 This analysis was performed using \pkg{smelt-ml}'s built-in statistical
-testing module (\code{stats::wilcoxon\_signed\_rank},
-\code{stats::bootstrap\_ci}), verified against \pkg{scipy.stats} on the
+testing module, namely \code{stats::wilcoxon\_signed\_rank} and
+\code{stats::bootstrap\_ci}, verified against \pkg{scipy.stats} on the
 same data (see replication package), demonstrating the framework's integrated
-approach to model comparison.
+approach to model comparison.\par}
 
 \subsection{Prediction (inference) time}
 
@@ -681,7 +1065,7 @@ Digits ($1{,}797 \times 64$)   & Decision Tree   & 0.851 & 0.855 & $-$0.004 \\
 \midrule
 \multicolumn{5}{l}{\textit{Regression (RMSE, lower is better)}} \\
 Cal.\ Housing ($20{,}640 \times 8$) & Decision Tree & 0.728 & 0.715 & $+$0.013 \\
-                                    & Random Forest & 0.488 & 0.503 & $-$0.015 \\
+                                    & Random Forest & 0.506 & 0.503 & $+$0.003 \\
                                     & Ridge         & 0.726 & 0.728 & $-$0.002 \\
 \bottomrule
 \end{tabular}
@@ -696,273 +1080,14 @@ on Wine and Breast Cancer is due to automatic feature standardization
 in \pkg{smelt-ml}.
 
 
-%% -- Unique Features ----------------------------------------------------------
-
-\section{Integrated spatial ML pipeline} \label{sec:spatial}
-
-A key contribution of \pkg{smelt-ml} is the integration of spatial modeling,
-spatial resampling, and distribution-free uncertainty quantification in a
-single composable framework. To our knowledge, no other ML framework provides
-all three capabilities in a single library without external dependencies.
-
-\subsection{Components}
-
-\textbf{Geographical-XGBoost} \citep{Grekousis:2025} extends gradient boosting
-with spatial awareness: bi-square kernel weights define local neighborhoods,
-per-location models capture spatially non-stationary relationships, and an
-adaptive $\alpha$ weight blends local and global predictions. Our
-implementation trains local models on the spatial neighborhood subset (samples
-with kernel weight $> 0$) rather than incorporating spatial weights into the
-\pkg{XGBoost} objective function (Eq.~13 in \citealp{Grekousis:2025}), which
-would require modifying the gradient computation. As shown in
-Table~\ref{tab:geoxgb_validation}, this approximation produces equivalent
-results ($\Delta\text{RMSE} = 0.001$).
-To our knowledge, this is the first implementation outside the original
-\proglang{Python} package \citep{geoxgboost:2024}.
-\georgenote{please confirm this characterization of Geographical-XGBoost is
-accurate, and that framing our neighbourhood-subset training as an
-approximation of your Eq.~13 (spatial weights in the objective) is correct ---
-add any nuance on when the two would diverge. Also confirm the ``first
-implementation outside the original library'' claim.}
-
-\textbf{Spatial cross-validation} (\code{SpatialBlockCV}, \code{SpatialBufferCV})
-prevents spatial autocorrelation leakage by ensuring that train and test sets
-are spatially separated. Both implement the \code{Resample} trait, making them
-interchangeable with standard \code{CrossValidation} in any pipeline.
-
-\textbf{Conformal prediction} provides distribution-free prediction intervals
-with guaranteed $(1-\alpha)$ coverage via split conformal prediction and
-conformalized quantile regression \citep[CQR;][]{Romano+Patterson+Candes:2019}.
-The \code{ConformalRegressor} wraps any \code{TrainedModel} without retraining.
-
-\subsection{Why integration matters}
-
-The value of this integration is not merely convenience but
-\textbf{methodological correctness}. In practice, spatial ML workflows are
-error-prone because spatial leakage, a well-documented source of optimism
-bias in geospatial prediction \citep{Roberts2017}, requires that the resampling
-strategy be spatially aware --- yet most ML frameworks treat resampling and
-modeling as independent concerns. When spatial CV is implemented as an
-external script rather than a first-class \code{Resample} trait, it cannot
-be passed to hyperparameter tuning or model comparison functions, forcing
-users to write custom loops that risk subtle data leakage bugs.
-
-In \pkg{smelt-ml}, the trait system enforces correct composition:
-\code{SpatialBlockCV} implements \code{Resample}, so it works with
-\fct{benchmark}, \code{GridSearch}, \code{BayesianOptimizer}, and
-\code{Bagging} without adaptation. Similarly, \code{ConformalRegressor}
-wraps any \code{TrainedModel}, so conformal prediction composes with
-any learner --- including \code{GeoXGBoost}, pipelines with preprocessing,
-or stacked ensembles.
-
-Table~\ref{tab:python_comparison} quantifies the integration gap with
-\proglang{Python}.
-
-\begin{table}[t!]
-\centering
-\small
-\begin{tabular}{lcc}
-\toprule
-Capability & \pkg{smelt-ml} & \proglang{Python} equivalent \\
-\midrule
-Spatial regression        & \code{GeoXGBoost}     & \pkg{geoxgboost} \\
-Spatial CV                & \code{SpatialBlockCV}  & custom code or \pkg{spacv} \\
-Conformal prediction      & \code{ConformalRegressor} & \pkg{MAPIE} or \pkg{crepes} \\
-Gradient boosting         & \code{XGBoost}        & \pkg{xgboost} \\
-Preprocessing pipeline    & \code{Pipeline}       & \pkg{scikit-learn} \\
-Statistical validation    & \code{stats} module    & \pkg{scipy.stats} \\
-\midrule
-Packages required         & 1                     & 5--6 \\
-API consistency           & Trait-based, uniform   & Mixed APIs \\
-Data format conversion    & None                  & DataFrame $\leftrightarrow$ array \\
-Thread-safety guarantee   & Compile-time          & Runtime (GIL) \\
-\bottomrule
-\end{tabular}
-\caption{\label{tab:python_comparison} Integration comparison for a spatial ML
-workflow with uncertainty quantification.}
-\end{table}
-
-\subsection{Case study: housing price prediction in King County, WA}
-
-We demonstrate the integrated pipeline on a 1{,}000-sample subset of the
-King County housing dataset (21{,}613 sales with coordinates), predicting
-log-price from 11 structural features (living area, bedrooms, grade, etc.)
-\emph{without} including latitude/longitude as model features. This isolates
-the contribution of spatial modeling from simple coordinate memorization.
-
-\begin{CodeChunk}
-\begin{CodeInput}
-let task = CsvLoader::from_path("data/king_county_1k.csv")
-    .target("log_price").load_regress()?;
-let coords: Vec<(f64, f64)> = /* extract lat, long */;
-let features = /* drop lat, long columns */;
-
-// GeoXGBoost captures spatial heterogeneity
-let model = GeoXGBoost::new(train_coords)
-    .with_bandwidth(50)
-    .train_regress(&task)?;
-
-// Spatial CV prevents leakage
-let spatial_cv = SpatialBlockCV::new(4, coords);
-
-// Conformal intervals with guaranteed coverage
-let cf = ConformalRegressor::calibrate(
-    &*model, &cal_features, &cal_targets, 0.1)?;
-\end{CodeInput}
-\end{CodeChunk}
-
-Table~\ref{tab:casestudy} shows three key findings.
-
-\begin{table}[t!]
-\centering
-\begin{tabular}{lcl}
-\toprule
-Finding & Value & Interpretation \\
-\midrule
-\multicolumn{3}{l}{\textit{Model comparison (holdout, no coords in features)}} \\
-XGBoost RMSE          & 0.337 & Baseline (no spatial info) \\
-XGBoost + coords RMSE & 0.231 & 32\% improvement with location \\
-\midrule
-\multicolumn{3}{l}{\textit{Spatial validation}} \\
-Random CV RMSE        & 0.324 & Optimistic (spatial leakage) \\
-Spatial Block CV RMSE & 0.424 & Honest (no leakage) \\
-Leakage bias          & 31\%  & Random CV underestimates error \\
-\midrule
-\multicolumn{3}{l}{\textit{Uncertainty quantification}} \\
-Conformal coverage    & 92\%  & Target: 90\% --- guarantee met \\
-Interval width        & 1.13 log(\$) & Calibrated uncertainty \\
-\bottomrule
-\end{tabular}
-\caption{\label{tab:casestudy} Case study results on King County housing
-(1{,}000 samples, 11 features, log-price target).}
-\end{table}
-
-\textbf{Spatial heterogeneity.} Adding coordinates as features improves
-\pkg{XGBoost} RMSE by 32\%, confirming that housing price drivers vary
-strongly by location. Geographical-\pkg{XGBoost}'s local models capture
-this non-stationarity through spatially-weighted training rather than
-coordinate memorization, which is preferable when predicting at locations
-outside the training domain (spatial extrapolation).
-
-\textbf{Spatial leakage.} Standard 5-fold CV yields RMSE = 0.324, while
-\code{SpatialBlockCV} yields RMSE = 0.424 --- a \textbf{31\% optimism bias}
-from spatial autocorrelation leakage. This magnitude is consistent with
-\citet{Roberts2017}, who report 10--40\% bias in geospatial applications.
-Without spatial resampling, practitioners would severely overestimate
-model performance.
-
-\textbf{Conformal coverage and interval sharpness.} With $\alpha = 0.1$, the
-conformal predictor meets its coverage guarantee (Table~\ref{tab:casestudy}).
-Because that guarantee holds for \emph{any} model, the more informative question
-is interval \emph{width} at a fixed coverage. Table~\ref{tab:conformal}
-conformalizes the spatial predictions directly and compares
-Geographical-\pkg{XGBoost} against the non-spatial \pkg{XGBoost} baseline at
-three nominal levels. Coverage lands on the nominal level for both, as
-guaranteed; but Geo-\pkg{XGBoost}'s sharper local point predictions on this
-split (test RMSE 0.264 vs.\ 0.351; see the table caption) translate into
-intervals that are consistently 16--25\% narrower at the same guaranteed
-coverage --- at 90\%, $\pm$54\% of the predicted price versus $\pm$78\%. The
-spatial structure does not merely improve the point estimate; it buys sharper
-honest uncertainty.
-
-\begin{table}[t!]
-\centering
-\begin{tabular}{llccc}
-\toprule
-Nominal & Model & Coverage & $q$ (log) & Interval as \% of price \\
-\midrule
-80\% & Geo-\pkg{XGBoost} & 80.0\% & 0.337 & $\pm$40.0\% \\
-80\% & \pkg{XGBoost}     & 75.5\% & 0.402 & $\pm$49.5\% \\
-90\% & Geo-\pkg{XGBoost} & 88.0\% & 0.434 & $\pm$54.3\% \\
-90\% & \pkg{XGBoost}     & 91.0\% & 0.577 & $\pm$78.1\% \\
-95\% & Geo-\pkg{XGBoost} & 96.0\% & 0.552 & $\pm$73.7\% \\
-95\% & \pkg{XGBoost}     & 94.5\% & 0.682 & $\pm$97.8\% \\
-\bottomrule
-\end{tabular}
-\caption{\label{tab:conformal} Split-conformal prediction intervals computed
-over the \emph{spatial} predictions (King County, log-price, projected UTM
-coordinates; 60\% fit / 20\% calibration / 20\% test, $n_\text{test} = 200$,
-seed 42; bandwidth 50 selected by the Eq.~11 leave-one-out criterion over
-candidates $\geq 30$; local/global blend $\alpha = 0.5$). The calibration set's
-absolute residuals give the half-width $q$ at each nominal level, so
-$\hat y \pm q$ carries a finite-sample coverage guarantee for either model.
-Coverage lands on the nominal level for both (the guarantee, which is
-model-agnostic); at equal guaranteed coverage, Geo-\pkg{XGBoost}'s better local
-point accuracy (test RMSE 0.264 vs.\ 0.351) yields intervals 16--25\% narrower
-than the non-spatial baseline. The conformal step is $\approx 5$ lines of
-\proglang{numpy} (replication script \code{conformal\_intervals.py}), so the
-rule is directly verifiable.}
-\end{table}
-
-\subsection{Validation against the original implementation}
-
-Table~\ref{tab:geoxgb_validation} compares our Geographical-\pkg{XGBoost}
-implementation against the original \proglang{Python} package
-\citep{geoxgboost:2024} on the King County dataset (800 train, 200 test,
-identical split). Both use 100 trees, depth~6, learning rate 0.3,
-bandwidth 30 (adaptive), and pure local prediction ($\alpha = 1$). These
-settings are chosen to match the original package for a controlled comparison;
-the applied case study above instead uses the Eq.~11 leave-one-out-selected
-bandwidth (50) and a local/global blend ($\alpha = 0.5$) representative of
-practical use, which is also the configuration behind the conformal intervals
-of Table~\ref{tab:conformal}.
-
-\begin{table}[t!]
-\centering
-\begin{tabular}{lccc}
-\toprule
-Implementation & RMSE & R$^2$ & Time (s) \\
-\midrule
-\pkg{XGBoost} (\proglang{C++}, baseline) & 0.331 & 0.615 & 2 \\
-\pkg{XGBoost} (\pkg{smelt-ml}, baseline) & 0.327 & 0.625 & 3 \\
-Geo-\pkg{XGBoost} (\pkg{geoxgboost}, \proglang{Python}) & 0.272 & 0.740 & 1{,}884 \\
-Geo-\pkg{XGBoost} (\pkg{smelt-ml}, \proglang{Rust}) & 0.271 & 0.741 & 701 \\
-\bottomrule
-\end{tabular}
-\caption{\label{tab:geoxgb_validation} Validation of \pkg{smelt-ml}'s
-Geographical-\pkg{XGBoost} against the original \proglang{Python}
-implementation on King County housing (holdout, 11 features, log-price).
-Both implementations produce equivalent RMSE ($\Delta = 0.001$) and
-R$^2$ ($\Delta = 0.001$). \pkg{smelt-ml} is 2.7$\times$ faster (701\,s
-vs.\ 1{,}884\,s) due to lower per-model overhead in \proglang{Rust}.}
-\end{table}
-
-The close agreement ($\Delta\text{RMSE} = 0.001$) confirms that
-\pkg{smelt-ml}'s implementation correctly reproduces the
-Geographical-\pkg{XGBoost} algorithm. The residual difference is expected
-because the underlying \pkg{XGBoost} engines differ (pure \proglang{Rust}
-vs.\ official \proglang{C++}). Both Geo-\pkg{XGBoost} implementations
-improve substantially over the non-spatial baseline (RMSE 0.33 $\to$ 0.27,
-$\approx 18\%$ reduction), confirming the practical value of spatial
-modeling for geographically heterogeneous data.
-\georgenote{please confirm this comparison is fair (hyperparameters, split,
-bandwidth 30 / $\alpha = 1$) and add, if you wish, a sentence of methodological
-context on why the two implementations agree and on the residual difference from
-the differing XGBoost engines. This is the validation your co-authorship most
-directly vouches for.}
-
-\subsection{Additional unique algorithms}
-
-\textbf{Causal Forest.} Honest splitting following
-\citet{Athey+Imbens:2016, Wager+Athey:2018}. Estimates conditional average
-treatment effects (CATE) $\tau(x) = E[Y(1) - Y(0) | X = x]$ with 95\%
-confidence intervals. To our knowledge, the first implementation in a \proglang{Rust} ML framework.
-
-\textbf{Oblique Forest (SPORF).} Sparse random projections following
-\citet{Tomita+Browne+Shen:2020}, enabling oblique decision boundaries.
-
-\textbf{Streaming.} Hoeffding Trees for online learning on data streams,
-using the Hoeffding bound for statistically sound split decisions.
-
-
 %% -- Summary ------------------------------------------------------------------
 
 \section{Summary and discussion} \label{sec:summary}
 
 We have presented \pkg{smelt-ml}, a \proglang{Rust} framework that uniquely
 integrates spatial modeling (Geographical-\pkg{XGBoost}), spatial
-cross-validation, and conformal prediction in a single composable pipeline
---- a combination not available in any other ML framework. On the performance
+cross-validation, and conformal prediction in a single composable pipeline,
+a combination not available in any other ML framework. On the performance
 side, our gradient boosting implementations achieve competitive speed with
 the official \proglang{C++} libraries at research-typical scales
 ($n \leq 10{,}000$) while consuming an order of magnitude less memory.
@@ -974,14 +1099,24 @@ explicitly annotated with \code{restrict}. Separately, compiling with
 \pkg{XGBoost} at $n = 10{,}000$, confirming that auto-vectorization
 contributes meaningfully to the observed performance.
 
-\pkg{smelt-ml} provides a comprehensive ML toolkit for \proglang{Rust} with
-unique capabilities in spatial ML, causal inference, and uncertainty
-quantification. The framework contains zero \code{unsafe} blocks across
-17{,}000+ lines of code, demonstrating that memory safety and high performance
-are not mutually exclusive. The test suite comprises 324 tests
-covering all learners, preprocessing, resampling, tuning, serialization, and
-edge cases (empty datasets, single-sample inputs, NaN features, multiclass
-targets, convergence checks against \pkg{scikit-learn}).
+\pkg{smelt-ml} provides a comprehensive ML toolkit for \proglang{Rust}. It
+offers 27 supervised learners for regression and classification, together with
+clustering (K-Means, DBSCAN, Isolation Forest), causal inference, and survival
+analysis, all accessible from \proglang{Python} through \pkg{PyO3} bindings.
+Its three contributions are (1)~an integrated, spatially-aware pipeline that
+unifies Geographical-\pkg{XGBoost}, spatial cross-validation, and
+distribution-free conformal prediction through a common trait system; (2)~the
+first native \proglang{Rust} implementations of these three components, inside
+the most complete ML framework available in \proglang{Rust}; and
+(3)~high-performance, memory-safe execution, with cache-optimized gradient
+boosting competitive with the official \proglang{C++} libraries at research
+scales and an order-of-magnitude lower memory footprint. The framework contains
+zero \code{unsafe} blocks across 45{,}000+ lines of code. Memory safety and
+high performance are therefore not mutually exclusive. The test suite has more
+than 760 unit and integration tests. They cover all learners, preprocessing,
+resampling, tuning, serialization, and edge cases such as empty datasets,
+single-sample inputs, NaN features, and multiclass targets, plus convergence
+checks against \pkg{scikit-learn}.
 
 The primary use cases for \pkg{smelt-ml} over established \proglang{Python}
 alternatives are: (1)~\proglang{Rust} applications requiring embedded ML
@@ -1009,7 +1144,7 @@ and \code{CatBoost}'s native ordered target statistics (which encode
 categoricals during training without a separate preprocessing step).
 
 \proglang{Python} bindings are available via \pkg{PyO3} as the \pkg{smelt}
-package (\code{pip install smelt-ml}), providing an \pkg{scikit-learn}-compatible
+package (\code{pip install smelt-ml}), providing a \pkg{scikit-learn}-compatible
 API (\code{fit}/\code{predict}) backed by \proglang{Rust} performance:
 
 \begin{CodeChunk}
@@ -1024,15 +1159,19 @@ preds = model.predict(X_test)  # 3.7x faster than sklearn
 \end{CodeInput}
 \end{CodeChunk}
 
-The bindings expose gradient boosting (\code{XGBoost}, \code{CatBoost},
-\code{RandomForest}), preprocessing (\code{StandardScaler}), spatial
-resampling (\code{SpatialBlockCV}), and statistical tests
-(\code{wilcoxon\_signed\_rank}, \code{bootstrap\_ci}) --- enabling
-\proglang{Python} users to access the full integrated pipeline without
-writing \proglang{Rust} code.
+{\sloppy
+The bindings expose gradient boosting (\code{XGBoost}, \code{LightGBM},
+\code{CatBoost}, \code{RandomForest}), Geographical-\pkg{XGBoost}
+(\code{GeoXGBoost}), conformal prediction (\code{SplitConformal},
+\code{LocalizedConformal}), preprocessing (\code{StandardScaler}), spatial
+resampling (\code{SpatialBlockCV}, \code{SpatialBufferCV}), and statistical
+tests (\code{wilcoxon\_signed\_rank} and \code{bootstrap\_ci}), so
+\proglang{Python} users can run the full integrated pipeline without writing
+\proglang{Rust} code.\par}
 
-The crate follows semantic versioning; the benchmarks in this paper correspond
-to version 1.3.0.
+The crate follows semantic versioning. The benchmarks in this paper were run
+with version 1.3.0; the code-size, test, and feature-coverage figures refer to
+the current release, 3.2.1.
 
 The software is available at \url{https://crates.io/crates/smelt-ml} under the
 MIT license, with source code at \url{https://github.com/franciscoparrao/smelt}.
@@ -1055,7 +1194,14 @@ reproduces all benchmark tables and figures.
 
 \section*{Acknowledgments}
 
-This work was partially supported by Universidad de Santiago de Chile.
+The authors acknowledge Project 062619MC\_POSTDOC of the Vicerrector\'ia de
+Investigaci\'on, Innovaci\'on y Creaci\'on, Universidad de Santiago de Chile.
+This work was supported by the Direcci\'on de Investigaci\'on Cient\'ifica y
+Tecnol\'ogica (DICYT), Vicerrector\'ia de Investigaci\'on, Innovaci\'on y
+Creaci\'on, Universidad de Santiago de Chile [project code 062619MC\_POSTDOC].
+The funder had no role in study design, in the collection, analysis and
+interpretation of data, in the writing of the report, or in the decision to
+submit the article for publication.
 
 
 %% -- Bibliography -------------------------------------------------------------

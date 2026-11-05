@@ -1,4 +1,4 @@
-\begin{thebibliography}{27}
+\begin{thebibliography}{30}
 \newcommand{\enquote}[1]{``#1''}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
@@ -126,12 +126,28 @@ Lang M, Binder M, Richter J, Schratz P, Pfisterer F, Coors S, Au Q, Casalicchio
 \newblock \emph{Journal of Open Source Software}, \textbf{4}(44), 1903.
 \newblock \doi{10.21105/joss.01903}.
 
+\bibitem[{Li \emph{et~al.}(2026)Li, Zhao, Liu, Abbas, Feng, and
+  Grekousis}]{Li+Zhao+Liu:2026}
+Li Y, Zhao R, Liu Y, Abbas Z, Feng Z, Grekousis G (2026).
+\newblock \enquote{Regional Economy, Physical Environment and Self-Rated Health
+  Among Older Adults in China: Evidence from \pkg{XGBoost} and SHAP.}
+\newblock \emph{Environmental Research}, \textbf{301}, 124421.
+\newblock \doi{10.1016/j.envres.2026.124421}.
+
 \bibitem[{Liu \emph{et~al.}(2008)Liu, Ting, and Zhou}]{Liu+Ting+Zhou:2008}
 Liu FT, Ting KM, Zhou ZH (2008).
 \newblock \enquote{Isolation Forest.}
 \newblock \emph{2008 Eighth IEEE International Conference on Data Mining}, pp.
   413--422.
 \newblock \doi{10.1109/ICDM.2008.17}.
+
+\bibitem[{Lou \emph{et~al.}(2025)Lou, Luo, and Meng}]{Lou+Luo+Meng:2025}
+Lou X, Luo P, Meng L (2025).
+\newblock \enquote{{GeoConformal} Prediction: A Model-Agnostic Framework for
+  Measuring the Uncertainty of Spatial Prediction.}
+\newblock \emph{Annals of the American Association of Geographers},
+  \textbf{115}(8), 1971--1998.
+\newblock \doi{10.1080/24694452.2025.2516091}.
 
 \bibitem[{Lou \emph{et~al.}(2012)Lou, Caruana, and
   Gehrke}]{Lou+Caruana+Gehrke:2012}
@@ -140,6 +156,15 @@ Lou Y, Caruana R, Gehrke J (2012).
 \newblock In \emph{Proceedings of the 18th ACM SIGKDD International Conference
   on Knowledge Discovery and Data Mining}, pp. 150--158.
 \newblock \doi{10.1145/2339530.2339556}.
+
+\bibitem[{Luo \emph{et~al.}(2025)Luo, Chen, Gao, Zhang, Chol, Yang, and
+  Meng}]{Luo+Chen+Gao:2025}
+Luo P, Chen C, Gao S, Zhang X, Chol DM, Yang Z, Meng L (2025).
+\newblock \enquote{Understanding of the Predictability and Uncertainty in
+  Population Distributions Empowered by Visual Analytics.}
+\newblock \emph{International Journal of Geographical Information Science},
+  \textbf{39}(3), 675--705.
+\newblock \doi{10.1080/13658816.2024.2427870}.
 
 \bibitem[{Matsakis and Klock(2014)}]{Matsakis+Klock:2014}
 Matsakis ND, Klock FS (2014).

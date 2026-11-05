@@ -1,40 +1,31 @@
-# Cover Letter — Journal of Statistical Software
+# Cover letter: Journal of Statistical Software (George's version, 2026-11-05)
 
-Dear Editors,
+Dear Editors-in-Chief,
 
-We submit the manuscript "smelt-ml: A Pure-Rust Machine Learning Framework Combining Spatial Modeling, Conformal Prediction, and Cache-Optimized Gradient Boosting" for consideration as a Software Article in the Journal of Statistical Software.
+I am pleased to submit the manuscript "smelt-ml: A Pure-Rust Machine Learning Framework Combining Spatial Modeling, Conformal Prediction, and Cache-Optimized Gradient Boosting" for consideration as a software article in the Journal of Statistical Software.
 
-## Summary
+smelt-ml is an open-source machine learning framework implemented entirely in Rust. It provides 27 supervised learners, clustering, causal inference, survival analysis, and the first Rust implementation of Geographical-XGBoost, using spatial cross-validation and conformal prediction. The crate is published on crates.io (smelt-ml, MIT license) and its Python bindings on PyPI (smelt-ml), so the framework is callable from Python while its core has no Python or R runtime dependencies.
 
-smelt-ml is an open-source machine learning framework implemented entirely in Rust that provides 27 supervised learners, spatial modeling, conformal prediction, and built-in statistical testing for model comparison — all in a single, composable package with zero unsafe code. The software is published on crates.io (v1.3.0) with source code on GitHub.
+The core contributions of this work are:
 
-## Why this paper fits JSS
+1. An integrated spatial ML pipeline. The framework combines Geographical-XGBoost (Grekousis, 2025), spatial block and buffer cross-validation, and split-conformal prediction in one composable trait system. To our knowledge no other library, in any language, offers the three together. The integration is methodological, not cosmetic: because the spatial resampling strategy is a first-class Resample object, it can be passed to tuning and benchmarking functions, which removes the custom loops where spatial leakage usually enters. On the King County housing data, random cross-validation understates the error of the same model by 27% relative to spatial block cross-validation, and the conformal intervals built on Geographical-XGBoost are 16 to 25% narrower than those of the non-spatial baseline at the same guaranteed coverage.
 
-We believe this manuscript is appropriate for JSS for three reasons:
+2. A native Rust framework. The 27 learners, the preprocessing pipeline, tuning (grid, random, Bayesian, Hyperband), and built-in non-parametric tests (Wilcoxon, Friedman with Nemenyi, McNemar, bootstrap intervals) share one Task, Learner, Measure, Resample architecture inspired by mlr3 and scikit-learn. The existing Rust ecosystem (linfa) covers nine algorithms and no gradient boosting.
 
-**1. A genuine integration contribution, not a reimplementation.** While individual algorithms (XGBoost, Random Forest, etc.) exist in many languages, smelt-ml is the only framework — to our knowledge, in any language — that integrates Geographical-XGBoost (Grekousis, 2025), spatial cross-validation, conformal prediction with guaranteed coverage (Romano et al., 2019), and non-parametric statistical tests (Wilcoxon, Friedman) in a single composable pipeline. This integration is not merely convenient but methodologically important: it prevents the spatial leakage bugs that arise when practitioners combine multiple packages with incompatible APIs (Roberts et al., 2017). We demonstrate a 31% optimism bias from spatial leakage on a real housing dataset — a magnitude that would lead to operationally misleading conclusions.
+3. High-performance, memory-safe execution. The three gradient boosting engines use column-major histogram storage with u8 bin packing and histogram subtraction. On single-threaded benchmarks against the official C++ libraries (10 runs per configuration, paired Wilcoxon tests with Bonferroni correction computed with the framework's own statistics module), the CatBoost-inspired engine is competitive at every tested size and XGBoost and LightGBM are competitive up to 10,000 samples, with 23 to 41 times lower peak memory. The codebase contains zero unsafe blocks.
 
-**2. Empirically validated performance.** The gradient boosting implementations employ a cache-optimized column-major histogram accumulation strategy with u8 packing and histogram subtraction. We benchmark against the official C++ libraries (XGBoost 3.1, LightGBM 4.6, CatBoost 1.2) with 10 runs per configuration and apply paired Wilcoxon signed-rank tests with Bonferroni correction — using smelt-ml's own statistical testing module. The CatBoost-inspired implementation is significantly faster than C++ at 5 of 6 dataset sizes (p < 0.05 after correction at N ≤ 1,000), while consuming 25–40× less memory.
+The manuscript is a software article in the sense of the journal's mission: it documents the design of a statistical software system, shows its use on real data, validates it against reference implementations (the original geoxgboost package, scikit-learn), and states its limitations and scope explicitly, including a feature-by-feature comparison with the official boosting libraries. All tables and figures are reproducible from a single replication script included with the submission, with fixed seeds and the software versions recorded in the Computational details section. The paper also serves a readership the journal has not yet covered: statistical practitioners who need a memory-safe, dependency-free ML stack, and spatial analysts who need honest validation and calibrated uncertainty in one place.
 
-**3. Statistical testing as a first-class citizen.** The framework includes built-in Wilcoxon signed-rank, Friedman, Nemenyi post-hoc, McNemar, and bootstrap confidence interval tests — features typically requiring scipy.stats or R's stats package. We use these tools to validate our own benchmark claims within the paper, demonstrating the integrated approach. We believe this is directly relevant to JSS's readership.
+The manuscript has not been published and is not under consideration elsewhere. Geographical-XGBoost was introduced by the corresponding author in the Journal of Geographical Systems (Grekousis, 2025); the present paper is the first implementation of the method outside the original Python package and extends it with spatial validation and conformal uncertainty. The benchmark and validation results have not appeared before.
 
-## Addressing potential concerns
+The submission includes the software source code (crates.io and GitHub), the replication package (paper/replication/, single script replicate.sh, with the output files produced on our hardware), and the King County subset used in the case study.
 
-*"Why Rust instead of Python?"* — The primary use cases are: (1) Rust applications requiring embedded ML without Python runtime dependencies; (2) spatial ML workflows requiring integrated spatial CV + conformal prediction; (3) safety-critical systems where zero unsafe code and compile-time thread safety are requirements; and (4) memory-constrained environments where the 25–40× memory reduction is operationally significant.
-
-*"Is this a complete framework?"* — smelt-ml provides 27 supervised learners (more than linfa's 9, the primary Rust ML crate), plus clustering, survival analysis, causal inference, and spatial ML. We are transparent about implementation scope: our CatBoost and LightGBM are "inspired by" rather than feature-complete reimplementations, and we provide a detailed feature comparison table (Table 4).
-
-## Reproducibility
-
-A complete replication package is provided in `paper/replication/` with scripts that reproduce all benchmark tables and figures. The software is available at https://crates.io/crates/smelt-ml under the MIT license.
-
-## Conflicts of interest
-
-The author declares no conflicts of interest.
+The authors declare no conflicts of interest.
 
 Sincerely,
 
-Francisco Parra
-Departamento de Ingeniería Geográfica
-Universidad de Santiago de Chile
-francisco.parra.o@usach.cl
+George Grekousis (corresponding author, on behalf of the authors)
+College of Arts and Sciences, VinUniversity, Hanoi, Vietnam
+georgios.g@vinuni.edu.vn
+
+Co-authors: Francisco Parra, Carolina Bonacic, Mauricio Marín (Universidad de Santiago de Chile); Verónica Gil-Costa (CONICET / Universidad Nacional de San Luis)
