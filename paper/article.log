@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.3.9)  5 NOV 2026 19:12
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.3.9)  9 NOV 2026 19:41
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1012,17 +1012,17 @@ Overfull \hbox (10.94998pt too wide) has occurred while \output is active
 LaTeX Font Info:    Font shape `T1/lmss/m/it' in size <10.95> not available
 (Font)              Font shape `T1/lmss/m/sl' tried instead on input line 212.
 )
-Underfull \hbox (badness 10000) in paragraph at lines 1212--1212
+Underfull \hbox (badness 10000) in paragraph at lines 1213--1213
 
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1212--1212
+Underfull \hbox (badness 10000) in paragraph at lines 1213--1213
 
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1212--1212
+Underfull \hbox (badness 10000) in paragraph at lines 1213--1213
 
  []
 
@@ -1032,12 +1032,12 @@ Overfull \hbox (10.94998pt too wide) has occurred while \output is active
  []
 
 [21]
-Underfull \hbox (badness 10000) in paragraph at lines 1212--1212
+Underfull \hbox (badness 10000) in paragraph at lines 1213--1213
 
  []
 
 LaTeX Font Info:    Font shape `T1/pzc/m/n' in size <13> not available
-(Font)              Font shape `T1/pzc/m/it' tried instead on input line 1212.
+(Font)              Font shape `T1/pzc/m/it' tried instead on input line 1213.
 
 Overfull \hbox (10.94998pt too wide) has occurred while \output is active
 \T1/lmr/m/n/10.95 22 []
@@ -1077,7 +1077,7 @@ y9.pfb></usr/share/texmf/fonts/type1/public/lm/lmtt10.pfb></usr/share/texmf/fon
 ts/type1/public/lm/lmtt9.pfb></usr/share/texmf/fonts/type1/public/lm/lmtto10.pf
 b></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/symbols/msam10.pfb
 ></usr/share/texlive/texmf-dist/fonts/type1/urw/zapfchan/uzcmi8a.pfb>
-Output written on article.pdf (22 pages, 629248 bytes).
+Output written on article.pdf (22 pages, 629338 bytes).
 PDF statistics:
  722 PDF objects out of 1000 (max. 8388607)
  577 compressed objects within 6 object streams
