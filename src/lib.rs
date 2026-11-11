@@ -88,7 +88,7 @@ pub mod prelude {
         FeatureImportance, permutation_importance_classif, permutation_importance_regress,
     };
     pub use crate::learner::{
-        Activation, AdaBoost, AdaptiveRandomForest, Adwin, AutoTuner, Bagging, BandwidthSelection,
+        Activation, AdaBoost, AdaptiveRandomForest, Adwin, AutoTuner, Bagging, BandwidthSearch, BandwidthSearchResult, BandwidthSelection,
         CalibratedClassifier, CalibrationMethod, CatBoost, CostSensitiveClassifier, DecisionTree,
         DeepForest, DynamicEnsemble, EBM, ElasticNet, ExtraTrees, ExtremeLearningMachine,
         GaussianNB, GaussianProcess, GeoXGBoost, GradientBoosting, HoeffdingTree,

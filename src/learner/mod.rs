@@ -58,7 +58,9 @@ pub use des::DynamicEnsemble;
 pub use ebm::EBM;
 pub use elm::{Activation, ExtremeLearningMachine};
 pub use gaussian_process::{GaussianProcess, TrainedGaussianProcess};
-pub use geo_xgboost::{BandwidthSelection, GeoXGBoost, TrainedGeoXGBoost};
+pub use geo_xgboost::{
+    BandwidthSearch, BandwidthSearchResult, BandwidthSelection, GeoXGBoost, TrainedGeoXGBoost,
+};
 pub use hoeffding::HoeffdingTree;
 pub use kernel_svm::{Kernel, KernelSVM, TrainedKernelSVM};
 pub use knn::KNearestNeighbors;

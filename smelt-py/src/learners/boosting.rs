@@ -577,6 +577,86 @@ impl GeoXGBoost {
         Ok(dict.into())
     }
 
+    /// Coarse-to-fine bandwidth search with the same leave-one-out criterion as
+    /// `select_bandwidth`, but far fewer local fits: one sorted-neighbour index
+    /// shared by all bandwidths, a coarse grid (`step`) that brackets the
+    /// minimum, a golden-section refinement down to `tol` neighbours, and
+    /// early stopping of candidates whose paired per-location errors are
+    /// already significantly worse than the best one.
+    ///
+    /// Args:
+    ///     x, y, coords: training data (same as `fit`).
+    ///     min_bw, max_bw: search range (min_bw >= 30; max_bw capped at n-1).
+    ///     step: coarse grid step (default 20; 10 is the reference
+    ///         implementation's conservative choice). tol: refinement width.
+    ///     early_stop: abandon clearly worse candidates early.
+    ///     seed: order in which locations are visited for the early-stop test.
+    ///
+    /// Returns:
+    ///     dict with ``best`` (int), ``best_score`` (float), ``bandwidths`` and
+    ///     ``cv`` (fully evaluated candidates, ascending), ``pruned`` (list of
+    ///     (bandwidth, partial_rmse, n_locations)), ``local_fits`` and
+    ///     ``exhaustive_local_fits`` (what a step-1 grid would cost).
+    ///     The selected bandwidth is stored so the next `fit()` uses it.
+    #[pyo3(signature = (x, y, coords, min_bw=30, max_bw=300, step=20, tol=2, early_stop=true, seed=42))]
+    #[allow(clippy::too_many_arguments)]
+    fn search_bandwidth(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray2<'_, f64>,
+        y: Vec<f64>,
+        coords: &Bound<'_, PyAny>,
+        min_bw: usize,
+        max_bw: usize,
+        step: usize,
+        tol: usize,
+        early_stop: bool,
+        seed: u64,
+    ) -> PyResult<PyObject> {
+        let parsed = parse_coords(coords)?;
+        let features = to_array2(x);
+        let n = features.nrows();
+        if parsed.len() != n {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "coords length ({}) must match number of samples ({})",
+                parsed.len(),
+                n
+            )));
+        }
+        crate::common::check_finite_target(&y)?;
+        let task = smelt_ml::task::RegressionTask::new("gxgb", features, y).map_err(smelt_err)?;
+        let learner = smelt_ml::prelude::GeoXGBoost::new(parsed)
+            .with_n_estimators(self.n_estimators)
+            .with_max_depth(self.max_depth)
+            .with_learning_rate(self.learning_rate)
+            .with_lambda(self.lambda)
+            .with_seed(self.seed);
+        let cfg = smelt_ml::prelude::BandwidthSearch {
+            min_bandwidth: min_bw,
+            max_bandwidth: max_bw,
+            coarse_step: step,
+            tolerance: tol,
+            early_stop,
+            seed,
+        };
+        let r = py
+            .allow_threads(|| learner.search_bandwidth(&task, &cfg))
+            .map_err(smelt_err)?;
+        self.bandwidth = r.best;
+
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("best", r.best)?;
+        dict.set_item("best_score", r.best_score)?;
+        let bws: Vec<usize> = r.scores.iter().map(|&(bw, _)| bw).collect();
+        let cv: Vec<f64> = r.scores.iter().map(|&(_, s)| s).collect();
+        dict.set_item("bandwidths", bws)?;
+        dict.set_item("cv", cv)?;
+        dict.set_item("pruned", r.pruned)?;
+        dict.set_item("local_fits", r.local_fits)?;
+        dict.set_item("exhaustive_local_fits", r.exhaustive_local_fits)?;
+        Ok(dict.into())
+    }
+
     /// Predict. If `coords` is provided, uses per-sample nearest local model
     /// (spatial prediction); otherwise falls back to in-sample / global model.
     #[pyo3(signature = (x, coords=None))]

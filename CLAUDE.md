@@ -341,6 +341,23 @@ pulled from `docs/roadmap_checklist.md` (Prioridad 4).
       binding is wired correctly rather than claiming that accuracy
       generalizes).
 
+### GeoXGBoost fast bandwidth search (2026-11-11, seed-grant groundwork)
+
+- [x] `GeoXGBoost::search_bandwidth` (`src/learner/geo_xgboost.rs`) + Python
+      `GeoXGBoost.search_bandwidth`. Shared `NeighborIndex` (distances sorted
+      once per location, sliced per k; reproduces `spatial_weights` exactly,
+      tested with duplicated coordinates; also used by `train_geo` and
+      `select_bandwidth`), full coarse grid (default step 20) visited in
+      binary-subdivision order, integer golden-section refinement to a
+      tolerance of 2, and paired-t early stopping of clearly worse candidates.
+      Measured on the pan-Arctic lake data: same optimum as the exhaustive
+      procedure with ~36% fewer local fits than a step-10 grid and ~55% fewer
+      than the reference implementation's step-10 + step-1 scan. Two things
+      learned the hard way and encoded in the design: the LOO curve is NOT
+      unimodal over a wide range (a coarse pass with an early exit misses the
+      optimum), and early stopping needs a good reference early (ascending
+      order never prunes). Details: docs/bandwidth_search_2026-11-11.md.
+
 ### Prioridad 3 quick items (2026-07-04, not part of Fase 3)
 
 Separate initiative, chosen after Prioridad 4 (geospatial differentiators)
