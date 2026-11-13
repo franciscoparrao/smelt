@@ -3,6 +3,11 @@
 //! Classification: Accuracy, Precision, Recall, F1Score, LogLoss, AucRoc,
 //! BalancedAccuracy, CohensKappa, Mcc, Brier.
 //! Regression: Rmse, Mae, RSquared, Mape.
+//! Spatial diagnostic: [`MoranResiduals`] (Moran's I of residuals), plus the
+//! standalone [`morans_i`] / [`morans_i_permutation`] functions in [`moran`].
+
+pub mod moran;
+pub use moran::{morans_i, morans_i_permutation, MoranResiduals, MoranResult, SpatialWeights};
 
 use crate::prediction::Prediction;
 use crate::{Result, SmeltError};

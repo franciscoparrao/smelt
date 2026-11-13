@@ -53,7 +53,7 @@ use learners::trees::{
 use measures::{
     accuracy_score, auc_roc_score, balanced_accuracy_score, brier_score, cohens_kappa_score,
     f1_score, logloss_score, mae_score, mape_score, mcc_score, precision_score, r2_score,
-    recall_score, rmse_score,
+    moran_residuals, morans_i, recall_score, rmse_score,
 };
 use preprocess::{Smote, SpatialSmote, StandardScaler};
 use py_stats::{bootstrap_ci, sign_test, wilcoxon_signed_rank};
@@ -159,6 +159,9 @@ fn _smelt(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(brier_score, m)?)?;
     m.add_function(wrap_pyfunction!(mape_score, m)?)?;
     m.add_function(wrap_pyfunction!(logloss_score, m)?)?;
+    m.add_function(wrap_pyfunction!(morans_i, m)?)?;
+    m.add_function(wrap_pyfunction!(moran_residuals, m)?)?;
+    m.add_class::<measures::PyMoranResult>()?;
 
     // Stats
     m.add_function(wrap_pyfunction!(wilcoxon_signed_rank, m)?)?;

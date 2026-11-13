@@ -103,7 +103,8 @@ pub mod prelude {
     };
     pub use crate::measure::{
         Accuracy, AteBias, AucRoc, BalancedAccuracy, Brier, CohensKappa, F1Score, LogLoss, Mae,
-        Mape, Mcc, Measure, Pehe, Precision, RSquared, Recall, Rmse,
+        Mape, Mcc, Measure, MoranResiduals, MoranResult, Pehe, Precision, RSquared, Recall, Rmse,
+        SpatialWeights, morans_i, morans_i_permutation,
     };
     pub use crate::multilabel::{ClassifierChain, MultiLabelPrediction, TrainedClassifierChain};
     pub use crate::multioutput::{MultiOutputPrediction, RegressorChain, TrainedRegressorChain};

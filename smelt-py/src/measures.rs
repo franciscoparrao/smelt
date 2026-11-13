@@ -218,3 +218,164 @@ pub(crate) fn auc_roc_score(y_true: Vec<usize>, y_proba: &Bound<'_, PyAny>) -> P
     };
     smelt_ml::prelude::AucRoc.score(&pred).map_err(smelt_err)
 }
+
+// ── Moran's I (spatial autocorrelation of residuals) ───────────────────
+
+/// Result of a Moran's I test (see `smelt_ml::measure::MoranResult`).
+///
+/// `variance`/`z_score`/`p_value` use the randomisation assumption; the
+/// `*_normal` fields the normality assumption; `p_value_permutation` is
+/// `None` unless `n_permutations > 0`. All p-values are two-sided.
+#[pyclass(name = "MoranResult")]
+#[derive(Clone)]
+pub(crate) struct PyMoranResult {
+    #[pyo3(get)]
+    i: f64,
+    #[pyo3(get)]
+    expected: f64,
+    #[pyo3(get)]
+    variance: f64,
+    #[pyo3(get)]
+    z_score: f64,
+    #[pyo3(get)]
+    p_value: f64,
+    #[pyo3(get)]
+    variance_normal: f64,
+    #[pyo3(get)]
+    z_score_normal: f64,
+    #[pyo3(get)]
+    p_value_normal: f64,
+    #[pyo3(get)]
+    p_value_permutation: Option<f64>,
+    #[pyo3(get)]
+    n: usize,
+}
+
+#[pymethods]
+impl PyMoranResult {
+    fn __repr__(&self) -> String {
+        match self.p_value_permutation {
+            Some(pp) => format!(
+                "MoranResult(I={:.4}, expected={:.4}, z={:.3}, p={:.3e}, p_perm={:.3e}, n={})",
+                self.i, self.expected, self.z_score, self.p_value, pp, self.n
+            ),
+            None => format!(
+                "MoranResult(I={:.4}, expected={:.4}, z={:.3}, p={:.3e}, n={})",
+                self.i, self.expected, self.z_score, self.p_value, self.n
+            ),
+        }
+    }
+
+    /// Whether the randomisation-assumption p-value is below `alpha`.
+    #[pyo3(signature = (alpha=0.05))]
+    fn significant(&self, alpha: f64) -> bool {
+        self.p_value < alpha
+    }
+}
+
+impl From<smelt_ml::measure::MoranResult> for PyMoranResult {
+    fn from(r: smelt_ml::measure::MoranResult) -> Self {
+        Self {
+            i: r.i,
+            expected: r.expected,
+            variance: r.variance,
+            z_score: r.z_score,
+            p_value: r.p_value,
+            variance_normal: r.variance_normal,
+            z_score_normal: r.z_score_normal,
+            p_value_normal: r.p_value_normal,
+            p_value_permutation: r.p_value_permutation,
+            n: r.n,
+        }
+    }
+}
+
+/// Resolves the Python `weights`/`k`/`bandwidth`/`power` arguments into a
+/// `SpatialWeights`, rejecting unknown scheme names eagerly (same
+/// `resolve_*` pattern as XGBoost's `objective`).
+fn resolve_spatial_weights(
+    weights: &str,
+    k: usize,
+    bandwidth: Option<f64>,
+    power: f64,
+) -> PyResult<smelt_ml::measure::SpatialWeights> {
+    use smelt_ml::measure::SpatialWeights;
+    match weights {
+        "knn" => Ok(SpatialWeights::KNearest { k }),
+        "inverse_distance" => Ok(SpatialWeights::InverseDistance { bandwidth, power }),
+        "distance_band" => match bandwidth {
+            Some(bandwidth) => Ok(SpatialWeights::DistanceBand { bandwidth }),
+            None => Err(PyValueError::new_err(
+                "weights='distance_band' requires a bandwidth",
+            )),
+        },
+        other => Err(PyValueError::new_err(format!(
+            "unknown weights scheme {other:?}; expected 'knn', 'inverse_distance' or 'distance_band'"
+        ))),
+    }
+}
+
+fn run_morans_i(
+    values: &[f64],
+    coords: &Bound<'_, PyAny>,
+    weights: &str,
+    k: usize,
+    bandwidth: Option<f64>,
+    power: f64,
+    n_permutations: usize,
+    seed: u64,
+) -> PyResult<PyMoranResult> {
+    let coords = crate::common::parse_coords(coords)?;
+    let scheme = resolve_spatial_weights(weights, k, bandwidth, power)?;
+    let r = if n_permutations == 0 {
+        smelt_ml::measure::morans_i(values, &coords, &scheme)
+    } else {
+        smelt_ml::measure::morans_i_permutation(values, &coords, &scheme, n_permutations, seed)
+    }
+    .map_err(smelt_err)?;
+    Ok(r.into())
+}
+
+/// Moran's I of `values` observed at `coords` (n×2 array or list of (x, y)).
+///
+/// `weights`: 'knn' (k nearest neighbours, default k=8), 'inverse_distance'
+/// (1/d^power within `bandwidth`, or all pairs when None) or 'distance_band'
+/// (binary within `bandwidth`); all row-standardised. `n_permutations > 0`
+/// adds a two-sided permutation pseudo p-value.
+#[pyfunction]
+#[pyo3(signature = (values, coords, weights="knn", k=8, bandwidth=None, power=1.0, n_permutations=0, seed=42))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn morans_i(
+    values: Vec<f64>,
+    coords: &Bound<'_, PyAny>,
+    weights: &str,
+    k: usize,
+    bandwidth: Option<f64>,
+    power: f64,
+    n_permutations: usize,
+    seed: u64,
+) -> PyResult<PyMoranResult> {
+    run_morans_i(&values, coords, weights, k, bandwidth, power, n_permutations, seed)
+}
+
+/// Moran's I of the regression residuals `y_true - y_pred` at `coords`:
+/// a clearly positive, significant I means the model leaves spatial
+/// structure unexplained. Same arguments as `morans_i`.
+#[pyfunction]
+#[pyo3(signature = (y_true, y_pred, coords, weights="knn", k=8, bandwidth=None, power=1.0, n_permutations=0, seed=42))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn moran_residuals(
+    y_true: Vec<f64>,
+    y_pred: Vec<f64>,
+    coords: &Bound<'_, PyAny>,
+    weights: &str,
+    k: usize,
+    bandwidth: Option<f64>,
+    power: f64,
+    n_permutations: usize,
+    seed: u64,
+) -> PyResult<PyMoranResult> {
+    check_same_len(y_true.len(), "y_pred", y_pred.len())?;
+    let residuals: Vec<f64> = y_true.iter().zip(&y_pred).map(|(t, p)| t - p).collect();
+    run_morans_i(&residuals, coords, weights, k, bandwidth, power, n_permutations, seed)
+}

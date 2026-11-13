@@ -184,6 +184,25 @@ let fitted = model.predict_spatial(task.features(), &coords).unwrap();
 
 Also: `SpatialBlockCV` and `SpatialBufferCV` for spatially-aware cross-validation.
 
+**Is a spatial model even needed?** Test the residuals of a non-spatial model
+for spatial autocorrelation with Moran's I (inference per Cliff & Ord 1981,
+matches PySAL's `esda.Moran` to 1e-9):
+
+```rust
+use smelt_ml::measure::{morans_i, MoranResiduals, SpatialWeights};
+
+let res = morans_i(&residuals, &coords, &SpatialWeights::KNearest { k: 8 })?;
+println!("I = {:.3}, z = {:.2}, p = {:.2e}", res.i, res.z_score, res.p_value);
+
+// Or as a `Measure` on a hold-out prediction whose rows match `test_coords`:
+let moran = MoranResiduals::new(test_coords);
+let i = moran.score(&prediction)?;            // signed I; ≈ 0 means no structure left
+let full = moran.test_permutation(&prediction, 999, 42)?; // adds a permutation p-value
+```
+
+Python: `smelt.morans_i(values, coords, k=8)` and
+`smelt.moran_residuals(y_true, y_pred, coords, weights="knn" | "inverse_distance" | "distance_band", ...)`.
+
 ## Dimensionality Reduction (PCA)
 
 ```rust
@@ -299,6 +318,7 @@ let task = CsvLoader::from_path("data.csv")
 | MAE | Regression | minimize |
 | R-squared | Regression | maximize |
 | MAPE | Regression | minimize |
+| Moran's I of residuals (`MoranResiduals`) | Regression, spatial diagnostic | ≈ 0 is ideal (reported as minimize) |
 | Silhouette | Clustering | maximize |
 
 ## Preprocessing & Feature Engineering

@@ -358,6 +358,20 @@ pulled from `docs/roadmap_checklist.md` (Prioridad 4).
       optimum), and early stopping needs a good reference early (ascending
       order never prunes). Details: docs/bandwidth_search_2026-11-11.md.
 
+### Moran's I residual diagnostic (2026-11-12)
+
+- [x] `src/measure/moran.rs`: `morans_i` / `morans_i_permutation` (Cliff & Ord
+      1981 inference, randomisation assumption as headline + normality +
+      optional permutation p), `SpatialWeights` (kNN / inverse distance /
+      distance band, all row-standardised), and `MoranResiduals` as a
+      `Measure` over `truth - predicted`. Golden-tested against esda 2.10.0
+      to 1e-9 (fixture in the module). Python: `smelt.morans_i`,
+      `smelt.moran_residuals`, `MoranResult`. **Gotcha**: `MoranResiduals`
+      needs the prediction rows aligned with its coords, so it works on a
+      hold-out but NOT inside `benchmark::resample_*` (per-fold `Prediction`
+      carries no row indices) — same gap as GeoXGBoost + SpatialBlockCV.
+      Details: docs/moran_residuals_2026-11-12.md.
+
 ### Prioridad 3 quick items (2026-07-04, not part of Fase 3)
 
 Separate initiative, chosen after Prioridad 4 (geospatial differentiators)

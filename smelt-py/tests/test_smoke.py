@@ -366,3 +366,36 @@ def test_benchmark_probabilistic_metrics_use_predict_proba():
     assert res["hard"]["accuracy"]["mean"] > 0.8
     assert np.isnan(res["hard"]["auc"]["mean"])
     assert "predict_proba" in res["hard"]["_error"]
+
+
+def test_morans_i_matches_esda_reference_and_residual_form():
+    # 20-site fixture shared with src/measure/moran.rs (esda 2.10.0 golden values).
+    coords = np.array([
+        (6.552, 3.048), (6.75, 1.068), (5.166, 4.897), (6.025, 3.7), (2.567, 3.742),
+        (8.256, 1.727), (2.978, 6.435), (7.897, 9.878), (8.006, 4.643), (5.39, 6.255),
+        (2.5, 7.039), (7.163, 9.795), (3.29, 4.455), (7.084, 7.399), (1.728, 0.157),
+        (7.826, 0.412), (5.974, 2.457), (5.565, 5.152), (3.975, 1.826), (6.46, 7.165),
+    ])
+    values = [1.5213, 1.1865, 2.3132, 1.7978, 1.752, 0.6992, 2.4786, 2.9718, 1.6762,
+              2.6595, 2.469, 3.233, 2.039, 2.4081, 0.5464, 0.4939, 1.5452, 2.2089,
+              1.3214, 2.7174]
+    r = smelt.morans_i(values, coords, weights="knn", k=4)
+    assert isinstance(r, smelt.MoranResult)
+    assert abs(r.i - 0.604394436932) < 1e-9
+    assert abs(r.z_score - 5.3141030054) < 1e-8
+    assert r.p_value_permutation is None and r.n == 20 and r.significant()
+
+    r = smelt.morans_i(values, coords, weights="distance_band", bandwidth=3.0, n_permutations=499)
+    assert abs(r.i - 0.603942988882) < 1e-9
+    assert r.p_value_permutation is not None and r.p_value_permutation < 0.05
+
+    # constant prediction -> residuals are the values themselves
+    rr = smelt.moran_residuals(values, [1.0] * 20, coords, k=4)
+    assert abs(rr.i - 0.604394436932) < 1e-9
+
+    with pytest.raises(ValueError, match="unknown weights scheme"):
+        smelt.morans_i(values, coords, weights="bogus")
+    with pytest.raises(ValueError, match="requires a bandwidth"):
+        smelt.morans_i(values, coords, weights="distance_band")
+    with pytest.raises(ValueError, match="length mismatch"):
+        smelt.moran_residuals(values, [1.0] * 19, coords)
