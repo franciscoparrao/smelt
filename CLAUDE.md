@@ -356,7 +356,8 @@ pulled from `docs/roadmap_checklist.md` (Prioridad 4).
       learned the hard way and encoded in the design: the LOO curve is NOT
       unimodal over a wide range (a coarse pass with an early exit misses the
       optimum), and early stopping needs a good reference early (ascending
-      order never prunes). Details: docs/bandwidth_search_2026-11-11.md.
+      order never prunes). The measurement notes are kept outside the repo
+      (Arctic collaboration material is not versioned here).
 
 ### Task-carried coordinates (2026-11-14)
 

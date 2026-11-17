@@ -1,0 +1,24 @@
+# Python dependencies for the smelt-ml paper replication (Python 3.12).
+#
+# Exact pins are the versions with which the numbers in the manuscript were
+# produced (see README.md, "Software versions"). The comparison libraries are
+# pinned exactly because their training-time and accuracy numbers are what
+# Tables 9-13 compare against; the utility libraries have floors only.
+#
+#   python3 -m venv .venv && . .venv/bin/activate
+#   pip install -r requirements.txt
+#
+numpy>=2.1,<3
+pandas>=2.2,<4
+scipy>=1.14
+matplotlib>=3.9
+scikit-learn==1.8.0
+xgboost==3.1.1
+lightgbm==4.6.0
+catboost==1.2.8
+# Reference implementation of Geographical-XGBoost (Grekousis 2025), Part D.
+geoxgboost==1.1.1
+# Python bindings of smelt-ml (Part D conformal intervals and the case-study
+# demo). Built from the same source tree as the Rust crate; the PyPI wheel of
+# the matching version is equivalent.
+smelt-ml==0.8.1

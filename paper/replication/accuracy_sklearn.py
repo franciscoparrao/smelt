@@ -9,6 +9,9 @@ from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.multiclass import OneVsRestClassifier
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, mean_squared_error
 from sklearn.datasets import (
     fetch_california_housing, load_digits, load_wine, load_breast_cancer
@@ -59,7 +62,19 @@ for ds_name, loader in [("Wine", load_wine), ("Breast Cancer", load_breast_cance
     print(f"\n{ds_name} ({X.shape[0]} samples, {X.shape[1]} features, {len(np.unique(y))} classes)")
     cv_classif(X, y, lambda: DecisionTreeClassifier(random_state=SEED), "Decision Tree")
     cv_classif(X, y, lambda: RandomForestClassifier(n_estimators=100, random_state=SEED), "Random Forest")
-    cv_classif(X, y, lambda: LogisticRegression(max_iter=1000, random_state=SEED), "Logistic Regression")
+    # Default scikit-learn configuration: L2 penalty (C=1) on RAW features. The
+    # penalty makes the fit scale-dependent, which is why this row differs from
+    # the standardized one below (JSS pre-screening question on Table 13).
+    cv_classif(X, y, lambda: LogisticRegression(max_iter=1000, random_state=SEED),
+               "Logistic Regression (default)")
+    # Configuration matched to smelt-ml: features standardized inside each
+    # fold, no penalty, one-vs-rest for multiclass (smelt-ml's
+    # LogisticRegression is unpenalized gradient descent on auto-standardized
+    # features, one-vs-rest). This is the apples-to-apples row for Table 13.
+    cv_classif(X, y, lambda: make_pipeline(
+        StandardScaler(),
+        OneVsRestClassifier(LogisticRegression(penalty=None, max_iter=5000, random_state=SEED))),
+        "Logistic Regression (std, no penalty, OvR)")
 
 # ── Regression datasets ──
 

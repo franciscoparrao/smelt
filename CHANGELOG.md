@@ -62,7 +62,6 @@ patch; defensible as a bug fix, not a precedent to repeat).
   golden-section refinement and paired early stopping of clearly worse
   candidates; same optimum as the exhaustive scan on the pan-Arctic lake
   data with ~55% fewer local fits. Python: `GeoXGBoost.search_bandwidth`.
-  See `docs/bandwidth_search_2026-11-11.md`.
 
 ## [smelt-ml 3.2.1] / [smelt-py 0.8.1] - 2026-09-03
 

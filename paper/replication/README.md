@@ -2,18 +2,59 @@
 
 This directory contains scripts to reproduce all benchmark tables in the paper.
 
+## Quick start
+
+`replicate.sh` is the single entry point; every table and figure of the
+manuscript maps to one of its steps (table below).
+
+```bash
+# inside a checkout of https://github.com/franciscoparrao/smelt (this folder
+# is paper/replication/), or from this folder extracted on its own -- in the
+# second case the tagged source is cloned automatically into ./smelt-src
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+bash replicate.sh            # all parts, about one hour
+bash replicate.sh A B        # selected parts
+PYTHON=.venv/bin/python bash replicate.sh D   # explicit interpreter
+```
+
+## Map from manuscript to scripts
+
+| Manuscript element | Part / step | Command (run by replicate.sh) | Output |
+|---|---|---|---|
+| Table 2 and the case-study listing | D1 | `cargo run --release --example case_study_walkthrough` (the listing printed in the manuscript, verbatim) | `case_study_walkthrough_output.txt` |
+| Case study, extended comparison (RF, XGBoost + coordinates) | D1b | `cargo run --release --example case_study_king_county` | stdout |
+| Table 3, split-conformal intervals | D4 | `conformal_intervals.py` | stdout, `conformal_*.json` |
+| Table 4, Geo-XGBoost vs geoxgboost 1.1.1 | D2, D3 | `GXGB_ALPHA=0.5 cargo run --release --example validate_geoxgboost_blend`; `validate_geoxgboost_blend.py` | `geoxgb_validation_blend.json`, `smelt_geoxgb_test_preds_a05.csv` |
+| Figure 2, local-importance map | (demo) | `demo_geoxgboost.py`, `local_importance_map.py` | `figs/local_importance_map.png` |
+| Table 7, histogram-kernel ablation | C1 | `cargo run --release --example ablation_study` | stdout |
+| Tables 9-10, training time | A1, A2, A3 | `benchmark_cpp.py`; `cargo run --release --example benchmark_large`; `compare_results.py` | `benchmark_cpp_results.json`, `benchmark_rust_results.json`, `comparison_tables.txt` |
+| Figure 1, scaling | A4 | `plot_scaling.py` | `../scaling.pdf` |
+| Table 11, significance tests | A5 | `statistical_analysis.py` | `statistical_analysis.txt` |
+| Table 12, prediction time | B1, B2 | `cargo run --release --example benchmark_prediction`; `prediction_sklearn.py` | stdout |
+| Table 13, accuracy validation | B3, B4 | `cargo run --release --example accuracy_validation`; `accuracy_sklearn.py` | stdout |
+
+Scripts not in the table (`huasco_validation.py`, `revalidate_python.py`,
+`benchmark_rust_cooled.sh`) are auxiliary checks referenced in the text, not
+sources of a table.
+
 ## Requirements
 
 ### Rust
-- Rust 1.89+ (via rustup)
-- smelt-ml is compiled from source (parent directory)
+- Rust 1.89+ (via rustup) and `git`
+- smelt-ml is compiled from source: the repository two levels up, or the
+  clone that `replicate.sh` makes into `./smelt-src` when run on its own
 
 ### Python
-```bash
-pip install xgboost lightgbm catboost scikit-learn numpy
-```
+Python 3.12 and the pinned packages in `requirements.txt`
+(`pip install -r requirements.txt`).
 
-Tested versions: xgboost 3.1.1, lightgbm 4.6.0, catboost 1.2.8, scikit-learn 1.8.0
+### Software versions
+The numbers in the manuscript were produced with xgboost 3.1.1, lightgbm
+4.6.0, catboost 1.2.8, scikit-learn 1.8.0 and geoxgboost 1.1.1; those are the
+pins in `requirements.txt`. Later versions of the comparison libraries change
+their timings and, for scikit-learn, some default solvers, so Table 13 should
+be re-derived with the pinned versions.
 
 ## Hardware
 
@@ -52,12 +93,7 @@ PGO typically provides 1.3-2.1x additional speedup over LTO alone.
 
 ## Reproducing tables and figures
 
-Run the master script from this directory:
-
-```bash
-bash replicate.sh          # all parts, about one hour
-bash replicate.sh A B      # selected parts
-```
+See "Quick start" and the map above; `replicate.sh` prints the step label (A1, B3, ...) before each command.
 
 | Part | What it reproduces | Scripts | Time |
 |---|---|---|---|

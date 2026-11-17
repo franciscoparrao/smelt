@@ -7,3 +7,9 @@ __pycache__/
 # (~/proyectos/Contaminacion/PM25_Santiago) and stays out of this repo by
 # the author's decision. examples/pm25_spatial_loso.rs reads it from here.
 data/pm25_santiago_spatial.csv
+
+# Arctic lakes collaboration: scripts and notes stay local (data belong to the data team)
+examples/arctic_lakes/
+docs/memo-sota-arctic-*.md
+artic/
+docs/bandwidth_search_2026-11-11.md

@@ -169,6 +169,16 @@ fn main() {
     );
 
     // ── Regression: California Housing (20,640 samples, 8 features) ──
+    // 10-class problem: smelt's LogisticRegression fits one-vs-rest binary
+    // models on auto-standardized features (JSS pre-screening asked for this
+    // row and for the fitting scheme to be stated).
+    cv_classif(
+        &df,
+        &dt,
+        || Box::new(LogisticRegression::new()),
+        "Logistic Regression",
+    );
+
     let cal = CsvLoader::from_path("data/california_housing.csv")
         .target("target")
         .load_regress()

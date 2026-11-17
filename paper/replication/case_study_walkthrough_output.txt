@@ -1,0 +1,12 @@
+1000 samples, 11 features, coordinates attached to the task
+
+Hold-out RMSE (log price)
+  XGBoost, no coordinates      0.330
+  Geo-XGBoost, k = 50, alpha 0.5 0.260
+  Geo-XGBoost global part only 0.330
+
+5-fold CV: RMSE / residual Moran's I
+  random folds    XGBoost 0.323 / +0.371   Geo-XGBoost 0.249 / +0.212
+  spatial blocks   XGBoost 0.357 / +0.194   Geo-XGBoost 0.298 / +0.235
+
+Split-conformal 90% intervals on Geo-XGBoost: coverage 88.0% (176/200), mean width 0.77 log($)
