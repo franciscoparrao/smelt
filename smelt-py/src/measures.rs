@@ -355,7 +355,16 @@ pub(crate) fn morans_i(
     n_permutations: usize,
     seed: u64,
 ) -> PyResult<PyMoranResult> {
-    run_morans_i(&values, coords, weights, k, bandwidth, power, n_permutations, seed)
+    run_morans_i(
+        &values,
+        coords,
+        weights,
+        k,
+        bandwidth,
+        power,
+        n_permutations,
+        seed,
+    )
 }
 
 /// Moran's I of the regression residuals `y_true - y_pred` at `coords`:
@@ -377,5 +386,14 @@ pub(crate) fn moran_residuals(
 ) -> PyResult<PyMoranResult> {
     check_same_len(y_true.len(), "y_pred", y_pred.len())?;
     let residuals: Vec<f64> = y_true.iter().zip(&y_pred).map(|(t, p)| t - p).collect();
-    run_morans_i(&residuals, coords, weights, k, bandwidth, power, n_permutations, seed)
+    run_morans_i(
+        &residuals,
+        coords,
+        weights,
+        k,
+        bandwidth,
+        power,
+        n_permutations,
+        seed,
+    )
 }

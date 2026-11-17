@@ -251,7 +251,11 @@ impl WeightMatrix {
                 // one must account for both halves.
                 let w_ji = self.get(j, i);
                 let sym = w + w_ji;
-                s1 += if w_ji != 0.0 { 0.5 * sym * sym } else { sym * sym };
+                s1 += if w_ji != 0.0 {
+                    0.5 * sym * sym
+                } else {
+                    sym * sym
+                };
             }
         }
         let s2 = self
@@ -331,8 +335,8 @@ fn prepare(values: &[f64], coords: &[(f64, f64)], weights: &SpatialWeights) -> R
     let expected = -1.0 / (nf - 1.0);
 
     // Cliff & Ord (1981): normality assumption.
-    let variance_normal =
-        (nf * nf * s1 - nf * s2 + 3.0 * s0 * s0) / ((nf * nf - 1.0) * s0 * s0) - expected * expected;
+    let variance_normal = (nf * nf * s1 - nf * s2 + 3.0 * s0 * s0) / ((nf * nf - 1.0) * s0 * s0)
+        - expected * expected;
     // Randomisation assumption, with sample kurtosis b2.
     let b2 = nf * m4 / (m2 * m2);
     let num = nf * ((nf * nf - 3.0 * nf + 3.0) * s1 - nf * s2 + 3.0 * s0 * s0)
@@ -393,7 +397,11 @@ fn prepare(values: &[f64], coords: &[(f64, f64)], weights: &SpatialWeights) -> R
 /// assert!(res.i > 0.5);
 /// assert!(res.p_value < 0.001);
 /// ```
-pub fn morans_i(values: &[f64], coords: &[(f64, f64)], weights: &SpatialWeights) -> Result<MoranResult> {
+pub fn morans_i(
+    values: &[f64],
+    coords: &[(f64, f64)],
+    weights: &SpatialWeights,
+) -> Result<MoranResult> {
     Ok(prepare(values, coords, weights)?.result)
 }
 
@@ -426,7 +434,8 @@ pub fn morans_i_permutation(
         .map(|p| {
             // Independent stream per permutation so the result doesn't depend
             // on rayon's scheduling.
-            let mut rng = StdRng::seed_from_u64(seed.wrapping_add(p.wrapping_mul(0x9E37_79B9_7F4A_7C15)));
+            let mut rng =
+                StdRng::seed_from_u64(seed.wrapping_add(p.wrapping_mul(0x9E37_79B9_7F4A_7C15)));
             let mut z = prep.z.clone();
             z.shuffle(&mut rng);
             prep.scale * prep.w.cross_product(&z)
@@ -454,8 +463,8 @@ fn standard_normal_cdf(x: f64) -> f64 {
     let sign = if z < 0.0 { -1.0 } else { 1.0 };
     let z = z.abs();
     let t = 1.0 / (1.0 + 0.3275911 * z);
-    let poly = ((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
-        + 0.254829592;
+    let poly =
+        ((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592;
     let erf = 1.0 - poly * t * (-z * z).exp();
     0.5 * (1.0 + sign * erf)
 }
@@ -471,17 +480,24 @@ fn standard_normal_cdf(x: f64) -> f64 {
 /// significance use [`MoranResiduals::test`], which returns the full
 /// [`MoranResult`].
 ///
-/// # Row alignment
+/// # Where the coordinates come from
 ///
-/// The prediction's rows must correspond one-to-one, in order, with the
-/// coordinates this measure was built with: `score` errors when the lengths
-/// differ. That makes it a natural fit for a hold-out set whose coordinates
-/// you hold (`MoranResiduals::new(test_coords)`), but **not** for the
-/// per-fold predictions inside `benchmark::resample_regress`, which carry no
-/// record of which rows of the task they came from. For cross-validation,
-/// take the splits from the [`Resample`](crate::resample::Resample) yourself,
-/// slice the coordinates with each `test_idx`, and call [`morans_i`] on that
-/// fold's residuals.
+/// Two constructors:
+///
+/// - [`MoranResiduals::new`]`(coords)`: the measure owns the coordinates and
+///   `score` requires the prediction's rows to correspond one-to-one, in
+///   order, with them (it errors when the lengths differ). Natural for a
+///   hold-out set whose coordinates you hold.
+/// - [`MoranResiduals::coords_from_task`]`()`: no coordinates of its own.
+///   `score` errors; the measure only works through
+///   [`Measure::score_spatial`], which `benchmark::resample_*` calls with
+///   each test fold's slice of the task's coordinates
+///   ([`crate::task::RegressionTask::with_coords`]). This is how you get a
+///   per-fold Moran's I of the residuals inside an ordinary (spatial) CV
+///   benchmark, next to RMSE.
+///
+/// When both are available (`new(coords)` scored via `score_spatial`), the
+/// coordinates passed in win: they are the ones aligned with the rows.
 ///
 /// # Examples
 ///
@@ -502,7 +518,7 @@ fn standard_normal_cdf(x: f64) -> f64 {
 /// assert!(m.test(&pred).unwrap().p_value < 0.001);
 /// ```
 pub struct MoranResiduals {
-    coords: Vec<(f64, f64)>,
+    coords: Option<Vec<(f64, f64)>>,
     weights: SpatialWeights,
 }
 
@@ -511,7 +527,18 @@ impl MoranResiduals {
     /// (`SpatialWeights::KNearest { k: 8 }`).
     pub fn new(coords: Vec<(f64, f64)>) -> Self {
         Self {
-            coords,
+            coords: Some(coords),
+            weights: SpatialWeights::default(),
+        }
+    }
+
+    /// Measure with no coordinates of its own: they must arrive through
+    /// [`Measure::score_spatial`] (as `benchmark::resample_*` does for a
+    /// task built with `with_coords`). Default weights
+    /// (`SpatialWeights::KNearest { k: 8 }`); plain `score` is an error.
+    pub fn coords_from_task() -> Self {
+        Self {
+            coords: None,
             weights: SpatialWeights::default(),
         }
     }
@@ -522,9 +549,21 @@ impl MoranResiduals {
         self
     }
 
-    /// The coordinates this measure scores against.
-    pub fn coords(&self) -> &[(f64, f64)] {
-        &self.coords
+    /// The coordinates this measure owns (`None` for
+    /// [`Self::coords_from_task`]).
+    pub fn coords(&self) -> Option<&[(f64, f64)]> {
+        self.coords.as_deref()
+    }
+
+    fn own_coords(&self) -> Result<&[(f64, f64)]> {
+        self.coords.as_deref().ok_or_else(|| {
+            SmeltError::InvalidParameter(
+                "MoranResiduals::coords_from_task() has no coordinates of its own: score it \
+                 through Measure::score_spatial (benchmark::resample_* does this for a task \
+                 built with with_coords), or construct it with MoranResiduals::new(coords)"
+                    .into(),
+            )
+        })
     }
 
     /// The weight scheme in use.
@@ -532,7 +571,7 @@ impl MoranResiduals {
         &self.weights
     }
 
-    fn residuals(&self, prediction: &Prediction) -> Result<Vec<f64>> {
+    fn residuals(&self, prediction: &Prediction, n_coords: usize) -> Result<Vec<f64>> {
         match prediction {
             Prediction::Regression {
                 predicted,
@@ -544,9 +583,9 @@ impl MoranResiduals {
                         got: predicted.len(),
                     });
                 }
-                if predicted.len() != self.coords.len() {
+                if predicted.len() != n_coords {
                     return Err(SmeltError::DimensionMismatch {
-                        expected: self.coords.len(),
+                        expected: n_coords,
                         got: predicted.len(),
                     });
                 }
@@ -558,9 +597,24 @@ impl MoranResiduals {
         }
     }
 
-    /// Full Moran's I test (statistic, z-score, p-values) on the residuals.
+    /// Full Moran's I test (statistic, z-score, p-values) on the residuals,
+    /// against the measure's own coordinates.
     pub fn test(&self, prediction: &Prediction) -> Result<MoranResult> {
-        morans_i(&self.residuals(prediction)?, &self.coords, &self.weights)
+        self.test_with_coords(prediction, self.own_coords()?)
+    }
+
+    /// Full Moran's I test on the residuals, with the prediction's rows
+    /// georeferenced by `coords` (used by [`Measure::score_spatial`]).
+    pub fn test_with_coords(
+        &self,
+        prediction: &Prediction,
+        coords: &[(f64, f64)],
+    ) -> Result<MoranResult> {
+        morans_i(
+            &self.residuals(prediction, coords.len())?,
+            coords,
+            &self.weights,
+        )
     }
 
     /// As [`MoranResiduals::test`], adding a permutation p-value.
@@ -570,9 +624,10 @@ impl MoranResiduals {
         n_permutations: usize,
         seed: u64,
     ) -> Result<MoranResult> {
+        let coords = self.own_coords()?;
         morans_i_permutation(
-            &self.residuals(prediction)?,
-            &self.coords,
+            &self.residuals(prediction, coords.len())?,
+            coords,
             &self.weights,
             n_permutations,
             seed,
@@ -589,6 +644,9 @@ impl Measure for MoranResiduals {
     }
     fn score(&self, prediction: &Prediction) -> Result<f64> {
         Ok(self.test(prediction)?.i)
+    }
+    fn score_spatial(&self, prediction: &Prediction, coords: &[(f64, f64)]) -> Result<f64> {
+        Ok(self.test_with_coords(prediction, coords)?.i)
     }
 }
 
@@ -662,7 +720,12 @@ mod tests {
             r.variance,
             var_rand
         );
-        assert!(close(r.z_score, z_rand, 1e-8), "z_rand {} vs esda {}", r.z_score, z_rand);
+        assert!(
+            close(r.z_score, z_rand, 1e-8),
+            "z_rand {} vs esda {}",
+            r.z_score,
+            z_rand
+        );
         // p-value goes through the A&S erf approximation (|err| < 1.5e-7).
         assert!(
             (r.p_value - p_rand).abs() < 1e-6,
@@ -759,7 +822,12 @@ mod tests {
     fn distance_band_matches_esda() {
         // libpysal: DistanceBand(threshold=3.0, binary=True)
         let (coords, values) = fixture();
-        let r = morans_i(&values, &coords, &SpatialWeights::DistanceBand { bandwidth: 3.0 }).unwrap();
+        let r = morans_i(
+            &values,
+            &coords,
+            &SpatialWeights::DistanceBand { bandwidth: 3.0 },
+        )
+        .unwrap();
         assert_matches_esda(
             &r,
             0.603942988882,
@@ -807,7 +875,10 @@ mod tests {
         let a = morans_i_permutation(&values, &coords, &w, 500, 42).unwrap();
         let b = morans_i_permutation(&values, &coords, &w, 500, 42).unwrap();
         assert_eq!(a.p_value_permutation, b.p_value_permutation);
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
         let c = pool.install(|| morans_i_permutation(&values, &coords, &w, 500, 42).unwrap());
         assert_eq!(a.p_value_permutation, c.p_value_permutation);
     }
@@ -822,10 +893,17 @@ mod tests {
         ));
         assert!(matches!(
             morans_i(&values[..5], &coords, &k4),
-            Err(SmeltError::DimensionMismatch { expected: 5, got: 20 })
+            Err(SmeltError::DimensionMismatch {
+                expected: 5,
+                got: 20
+            })
         ));
         assert!(matches!(
-            morans_i(&values[..3], &coords[..3], &SpatialWeights::KNearest { k: 1 }),
+            morans_i(
+                &values[..3],
+                &coords[..3],
+                &SpatialWeights::KNearest { k: 1 }
+            ),
             Err(SmeltError::InvalidParameter(_))
         ));
         assert!(matches!(
@@ -865,7 +943,11 @@ mod tests {
         assert!(morans_i(&values, &dup, &k4).is_ok());
         // Bandwidth so small that every site is an island.
         assert!(matches!(
-            morans_i(&values, &coords, &SpatialWeights::DistanceBand { bandwidth: 0.01 }),
+            morans_i(
+                &values,
+                &coords,
+                &SpatialWeights::DistanceBand { bandwidth: 0.01 }
+            ),
             Err(SmeltError::InvalidParameter(_))
         ));
     }
@@ -875,7 +957,12 @@ mod tests {
         // Bandwidth 1.5 leaves some sites without neighbours; the statistic
         // must still be computable over the connected ones.
         let (coords, values) = fixture();
-        let r = morans_i(&values, &coords, &SpatialWeights::DistanceBand { bandwidth: 1.5 }).unwrap();
+        let r = morans_i(
+            &values,
+            &coords,
+            &SpatialWeights::DistanceBand { bandwidth: 1.5 },
+        )
+        .unwrap();
         assert!(r.i.is_finite());
         assert!(r.variance.is_finite() && r.variance > 0.0);
     }
@@ -910,7 +997,10 @@ mod tests {
         let short = Prediction::regression_with_truth(vec![1.0; 19], values[..19].to_vec());
         assert!(matches!(
             m.score(&short),
-            Err(SmeltError::DimensionMismatch { expected: 20, got: 19 })
+            Err(SmeltError::DimensionMismatch {
+                expected: 20,
+                got: 19
+            })
         ));
         let no_truth = Prediction::regression(vec![1.0; 20]);
         assert!(matches!(
@@ -921,6 +1011,43 @@ mod tests {
         assert!(matches!(
             m.score(&classif),
             Err(SmeltError::IncompatiblePrediction(_))
+        ));
+    }
+
+    #[test]
+    fn coords_from_task_scores_only_through_score_spatial() {
+        let (coords, values) = fixture();
+        let m = MoranResiduals::coords_from_task().with_weights(SpatialWeights::KNearest { k: 4 });
+        assert!(m.coords().is_none());
+        let pred = Prediction::regression_with_truth(vec![1.0; 20], values.clone());
+        assert!(matches!(
+            m.score(&pred),
+            Err(SmeltError::InvalidParameter(_))
+        ));
+        assert!(matches!(
+            m.test(&pred),
+            Err(SmeltError::InvalidParameter(_))
+        ));
+        assert!(close(
+            m.score_spatial(&pred, &coords).unwrap(),
+            0.604394436932,
+            1e-9
+        ));
+        // Supplied coordinates win over owned ones (they are the row-aligned ones).
+        let owned = MoranResiduals::new(vec![(0.0, 0.0); 20])
+            .with_weights(SpatialWeights::KNearest { k: 4 });
+        assert!(close(
+            owned.score_spatial(&pred, &coords).unwrap(),
+            0.604394436932,
+            1e-9
+        ));
+        // Misaligned supplied coordinates are an error, not a silent truncation.
+        assert!(matches!(
+            m.score_spatial(&pred, &coords[..19]),
+            Err(SmeltError::DimensionMismatch {
+                expected: 19,
+                got: 20
+            })
         ));
     }
 

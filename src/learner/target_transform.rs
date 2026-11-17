@@ -256,6 +256,12 @@ impl Learner for TargetTransformRegressor {
         if let Some(w) = task.weights() {
             transformed_task = transformed_task.with_weights(w.to_vec());
         }
+        // Coordinates propagate unchanged for the same reason (row-preserving
+        // transform); without this a spatial base learner built with
+        // `coords_from_task()` would fail to train under the wrapper.
+        if let Some(c) = task.coords() {
+            transformed_task = transformed_task.with_coords(c.to_vec());
+        }
 
         // (4) Train the base learner from the factory.
         let mut base = (self.factory)();
@@ -275,9 +281,9 @@ pub struct TrainedTargetTransformRegressor {
     fitted: FittedTransform,
 }
 
-impl TrainedModel for TrainedTargetTransformRegressor {
-    fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
-        let pred = self.base.predict(features)?;
+impl TrainedTargetTransformRegressor {
+    /// Maps a base-model prediction back to the original target scale.
+    fn inverse(&self, pred: Prediction) -> Result<Prediction> {
         match pred {
             Prediction::Regression { predicted, truth } => Ok(Prediction::Regression {
                 predicted: predicted.iter().map(|&x| self.fitted.inverse(x)).collect(),
@@ -288,6 +294,19 @@ impl TrainedModel for TrainedTargetTransformRegressor {
                     .into(),
             )),
         }
+    }
+}
+
+impl TrainedModel for TrainedTargetTransformRegressor {
+    fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        self.inverse(self.base.predict(features)?)
+    }
+
+    /// Forwards the coordinates to the base model's `predict_spatial`, then
+    /// back-transforms, so a spatial base (GeoXGBoost, KrigingHybrid) stays
+    /// spatial under a target transform.
+    fn predict_spatial(&self, features: &Array2<f64>, coords: &[(f64, f64)]) -> Result<Prediction> {
+        self.inverse(self.base.predict_spatial(features, coords)?)
     }
 
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {

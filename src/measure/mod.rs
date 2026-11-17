@@ -7,7 +7,7 @@
 //! standalone [`morans_i`] / [`morans_i_permutation`] functions in [`moran`].
 
 pub mod moran;
-pub use moran::{morans_i, morans_i_permutation, MoranResiduals, MoranResult, SpatialWeights};
+pub use moran::{MoranResiduals, MoranResult, SpatialWeights, morans_i, morans_i_permutation};
 
 use crate::prediction::Prediction;
 use crate::{Result, SmeltError};
@@ -18,6 +18,20 @@ pub trait Measure: Send + Sync {
     fn id(&self) -> &str;
     /// Compute score. Higher is better for maximize=true, lower for maximize=false.
     fn score(&self, prediction: &Prediction) -> Result<f64>;
+    /// Compute the score for a prediction whose rows are georeferenced by
+    /// `coords` (one `(x, y)` per row).
+    ///
+    /// The default ignores `coords` and is exactly [`Self::score`]: an
+    /// aspatial metric has no use for locations. Spatial diagnostics
+    /// ([`MoranResiduals`]) override it. `benchmark::resample_*` calls this
+    /// instead of `score` whenever the task carries coordinates, passing the
+    /// test fold's slice, so a spatial measure built with
+    /// [`MoranResiduals::coords_from_task`] works per fold without ever
+    /// seeing the full dataset.
+    fn score_spatial(&self, prediction: &Prediction, coords: &[(f64, f64)]) -> Result<f64> {
+        let _ = coords;
+        self.score(prediction)
+    }
     /// Whether higher values are better.
     fn maximize(&self) -> bool;
 }

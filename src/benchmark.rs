@@ -58,16 +58,36 @@ pub fn resample_classif(
         if let Some(w) = task.weights() {
             train_task = train_task.with_weights(train_idx.iter().map(|&i| w[i]).collect());
         }
+        // Coordinates are sliced with the same indices too, so a spatial
+        // learner built with `coords_from_task()` sees a row-aligned
+        // georeference in every fold. Unlike weights, the test side DOES
+        // need them: spatial prediction and spatial measures are
+        // location-aware, so the test slice goes to `predict_spatial` /
+        // `score_spatial` (both no-ops for aspatial models and measures).
+        if let Some(c) = task.coords() {
+            train_task = train_task.with_coords(train_idx.iter().map(|&i| c[i]).collect());
+        }
+        let test_coords: Option<Vec<(f64, f64)>> = task
+            .coords()
+            .map(|c| test_idx.iter().map(|&i| c[i]).collect());
 
         let model = learner.train_classif(&train_task)?;
 
         let test_features = features.select(Axis(0), test_idx);
         let test_target: Vec<usize> = test_idx.iter().map(|&i| target[i]).collect();
-        let pred = model
-            .predict(&test_features)?
-            .with_truth_classif(test_target);
+        let pred = match &test_coords {
+            Some(c) => model.predict_spatial(&test_features, c)?,
+            None => model.predict(&test_features)?,
+        }
+        .with_truth_classif(test_target);
 
-        let fold_scores: Result<Vec<f64>> = measures.iter().map(|m| m.score(&pred)).collect();
+        let fold_scores: Result<Vec<f64>> = measures
+            .iter()
+            .map(|m| match &test_coords {
+                Some(c) => m.score_spatial(&pred, c),
+                None => m.score(&pred),
+            })
+            .collect();
         scores.push(fold_scores?);
     }
 
@@ -104,16 +124,36 @@ pub fn resample_regress(
         if let Some(w) = task.weights() {
             train_task = train_task.with_weights(train_idx.iter().map(|&i| w[i]).collect());
         }
+        // Coordinates are sliced with the same indices too, so a spatial
+        // learner built with `coords_from_task()` sees a row-aligned
+        // georeference in every fold. Unlike weights, the test side DOES
+        // need them: spatial prediction and spatial measures are
+        // location-aware, so the test slice goes to `predict_spatial` /
+        // `score_spatial` (both no-ops for aspatial models and measures).
+        if let Some(c) = task.coords() {
+            train_task = train_task.with_coords(train_idx.iter().map(|&i| c[i]).collect());
+        }
+        let test_coords: Option<Vec<(f64, f64)>> = task
+            .coords()
+            .map(|c| test_idx.iter().map(|&i| c[i]).collect());
 
         let model = learner.train_regress(&train_task)?;
 
         let test_features = features.select(Axis(0), test_idx);
         let test_target: Vec<f64> = test_idx.iter().map(|&i| target[i]).collect();
-        let pred = model
-            .predict(&test_features)?
-            .with_truth_regress(test_target);
+        let pred = match &test_coords {
+            Some(c) => model.predict_spatial(&test_features, c)?,
+            None => model.predict(&test_features)?,
+        }
+        .with_truth_regress(test_target);
 
-        let fold_scores: Result<Vec<f64>> = measures.iter().map(|m| m.score(&pred)).collect();
+        let fold_scores: Result<Vec<f64>> = measures
+            .iter()
+            .map(|m| match &test_coords {
+                Some(c) => m.score_spatial(&pred, c),
+                None => m.score(&pred),
+            })
+            .collect();
         scores.push(fold_scores?);
     }
 

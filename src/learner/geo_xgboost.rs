@@ -18,9 +18,9 @@ use crate::resample::{CrossValidation, Resample};
 use crate::task::{RegressionTask, Task};
 use crate::{Result, SmeltError};
 use ndarray::Array2;
+use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
-use rand::SeedableRng;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 
@@ -91,6 +91,46 @@ impl GeoXGBoost {
             seed: 42,
             alpha: None, // adaptive by default
         }
+    }
+
+    /// Creates a `GeoXGBoost` learner that takes its coordinates from the
+    /// task (`RegressionTask::with_coords`) instead of owning them.
+    ///
+    /// This is the form that composes with `benchmark::resample_regress`,
+    /// `benchmark_design`, `GridSearch`/`RandomSearch`/`AutoTuner` and
+    /// `Pipeline`: each fold's task arrives with its own slice of the
+    /// coordinates, so there is nothing for the learner to misalign. Training
+    /// a task without coordinates is an error. Registered in
+    /// [`super::learner_from_id`] as `"geo_xgboost"` in this form.
+    pub fn coords_from_task() -> Self {
+        Self::new(Vec::new())
+    }
+
+    /// The coordinates to use for `task`: the task's own when present (they
+    /// are row-aligned by construction), otherwise the learner's, validated
+    /// for length and finiteness. The algorithm downstream is identical
+    /// either way — only the source of the coordinates differs.
+    fn coords_for<'a>(&'a self, task: &'a RegressionTask) -> Result<&'a [(f64, f64)]> {
+        if let Some(c) = task.coords() {
+            return Ok(c);
+        }
+        let n = task.n_samples();
+        if self.coords.is_empty() {
+            return Err(SmeltError::InvalidParameter(
+                "GeoXGBoost has no coordinates: pass them to GeoXGBoost::new(coords), or \
+                 attach them to the task with RegressionTask::with_coords when using \
+                 GeoXGBoost::coords_from_task()"
+                    .into(),
+            ));
+        }
+        if self.coords.len() != n {
+            return Err(SmeltError::DimensionMismatch {
+                expected: n,
+                got: self.coords.len(),
+            });
+        }
+        crate::validate::check_coords_finite(&self.coords)?;
+        Ok(&self.coords)
     }
 
     /// Sets the number of nearest neighbors used by the bi-square spatial
@@ -176,13 +216,7 @@ impl GeoXGBoost {
         candidates: &[usize],
     ) -> Result<BandwidthSelection> {
         let n = task.n_samples();
-        if self.coords.len() != n {
-            return Err(SmeltError::DimensionMismatch {
-                expected: n,
-                got: self.coords.len(),
-            });
-        }
-        crate::validate::check_coords_finite(&self.coords)?;
+        let coords = self.coords_for(task)?;
         if candidates.is_empty() {
             return Err(SmeltError::InvalidParameter(
                 "select_bandwidth requires at least one candidate bandwidth".into(),
@@ -219,7 +253,7 @@ impl GeoXGBoost {
         // One sorted-neighbour index serves every candidate: neighbourhoods
         // are nested (the k nearest are the first k of the k' nearest), so the
         // O(n² log n) distance work is paid once, not once per bandwidth.
-        let index = NeighborIndex::build(&self.coords);
+        let index = NeighborIndex::build(coords);
         let mut scores: Vec<(usize, f64)> = Vec::with_capacity(candidates.len());
         for &bw in candidates {
             scores.push((bw, self.loo_cv_criterion(task, &index, bw)?));
@@ -315,8 +349,8 @@ impl GeoXGBoost {
         reference: Option<&[f64]>,
         min_frac: f64,
     ) -> Result<LooEval> {
-        use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
         use std::sync::Mutex;
+        use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 
         let n = task.n_samples();
         let bw = bandwidth.min(n - 1);
@@ -406,13 +440,7 @@ impl GeoXGBoost {
         config: &BandwidthSearch,
     ) -> Result<BandwidthSearchResult> {
         let n = task.n_samples();
-        if self.coords.len() != n {
-            return Err(SmeltError::DimensionMismatch {
-                expected: n,
-                got: self.coords.len(),
-            });
-        }
-        crate::validate::check_coords_finite(&self.coords)?;
+        let coords = self.coords_for(task)?;
         if config.min_bandwidth < MIN_BANDWIDTH {
             return Err(SmeltError::InvalidParameter(format!(
                 "min_bandwidth {} is below the minimum of {MIN_BANDWIDTH} neighbours",
@@ -441,7 +469,7 @@ impl GeoXGBoost {
             )));
         }
 
-        let index = NeighborIndex::build(&self.coords);
+        let index = NeighborIndex::build(coords);
         let mut order: Vec<usize> = (0..n).collect();
         let mut rng = StdRng::seed_from_u64(config.seed);
         order.shuffle(&mut rng);
@@ -454,11 +482,11 @@ impl GeoXGBoost {
 
         // Evaluate one bandwidth (memoised). Returns +inf for a pruned candidate.
         let eval = |bw: usize,
-                        memo: &mut BTreeMap<usize, f64>,
-                        pruned: &mut Vec<(usize, f64, usize)>,
-                        best: &mut Option<(usize, f64)>,
-                        best_errors: &mut Option<Vec<f64>>,
-                        local_fits: &mut usize|
+                    memo: &mut BTreeMap<usize, f64>,
+                    pruned: &mut Vec<(usize, f64, usize)>,
+                    best: &mut Option<(usize, f64)>,
+                    best_errors: &mut Option<Vec<f64>>,
+                    local_fits: &mut usize|
          -> Result<f64> {
             if let Some(&s) = memo.get(&bw) {
                 return Ok(s);
@@ -466,7 +494,11 @@ impl GeoXGBoost {
             if pruned.iter().any(|p| p.0 == bw) {
                 return Ok(f64::INFINITY);
             }
-            let reference = if config.early_stop { best_errors.as_deref() } else { None };
+            let reference = if config.early_stop {
+                best_errors.as_deref()
+            } else {
+                None
+            };
             let e = self.loo_errors_ordered(task, &index, bw, &order, reference, PRUNE_MIN_FRAC)?;
             *local_fits += e.n_fit;
             if e.pruned {
@@ -497,7 +529,14 @@ impl GeoXGBoost {
         }
         let visit = subdivision_order(coarse.len());
         for &k in &visit {
-            eval(coarse[k], &mut memo, &mut pruned, &mut best, &mut best_errors, &mut local_fits)?;
+            eval(
+                coarse[k],
+                &mut memo,
+                &mut pruned,
+                &mut best,
+                &mut best_errors,
+                &mut local_fits,
+            )?;
         }
         let (best_bw, _) = best.ok_or_else(|| {
             SmeltError::InvalidParameter("no candidate bandwidth could be evaluated".into())
@@ -506,7 +545,11 @@ impl GeoXGBoost {
         // Bracket around the coarse minimum (its grid neighbours).
         let pos = coarse.iter().position(|&b| b == best_bw).unwrap_or(0);
         let mut lo = if pos > 0 { coarse[pos - 1] } else { best_bw };
-        let mut hi = if pos + 1 < coarse.len() { coarse[pos + 1] } else { best_bw };
+        let mut hi = if pos + 1 < coarse.len() {
+            coarse[pos + 1]
+        } else {
+            best_bw
+        };
 
         // Golden-section search on integers inside [lo, hi].
         const PHI: f64 = 0.618_033_988_749_895;
@@ -526,8 +569,22 @@ impl GeoXGBoost {
             if x2 >= hi {
                 break;
             }
-            let f1 = eval(x1, &mut memo, &mut pruned, &mut best, &mut best_errors, &mut local_fits)?;
-            let f2 = eval(x2, &mut memo, &mut pruned, &mut best, &mut best_errors, &mut local_fits)?;
+            let f1 = eval(
+                x1,
+                &mut memo,
+                &mut pruned,
+                &mut best,
+                &mut best_errors,
+                &mut local_fits,
+            )?;
+            let f2 = eval(
+                x2,
+                &mut memo,
+                &mut pruned,
+                &mut best,
+                &mut best_errors,
+                &mut local_fits,
+            )?;
             if f1 < f2 {
                 hi = x2;
             } else {
@@ -681,10 +738,12 @@ impl NeighborIndex {
             .into_par_iter()
             .map(|i| {
                 let ci = coords[i];
-                let mut d: Vec<(usize, f64)> =
-                    (0..n).map(|j| (j, dist(ci, coords[j]))).collect();
+                let mut d: Vec<(usize, f64)> = (0..n).map(|j| (j, dist(ci, coords[j]))).collect();
                 d.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-                (d.iter().map(|p| p.0).collect(), d.iter().map(|p| p.1).collect())
+                (
+                    d.iter().map(|p| p.0).collect(),
+                    d.iter().map(|p| p.1).collect(),
+                )
             })
             .collect();
         let mut order = Vec::with_capacity(n);
@@ -721,7 +780,10 @@ impl NeighborIndex {
             }
         }
         pairs.sort_by_key(|p| p.0);
-        (pairs.iter().map(|p| p.0).collect(), pairs.iter().map(|p| p.1).collect())
+        (
+            pairs.iter().map(|p| p.0).collect(),
+            pairs.iter().map(|p| p.1).collect(),
+        )
     }
 }
 
@@ -839,6 +901,35 @@ impl TrainedGeoXGBoost {
     pub fn feature_names(&self) -> &[String] {
         &self.feature_names
     }
+}
+
+impl TrainedGeoXGBoost {
+    /// Inherent alias of [`TrainedModel::predict_spatial`], so callers holding
+    /// the concrete type (as returned by the `*_geo` training methods) can
+    /// call it without importing the trait.
+    pub fn predict_spatial(
+        &self,
+        features: &Array2<f64>,
+        new_coords: &[(f64, f64)],
+    ) -> Result<Prediction> {
+        TrainedModel::predict_spatial(self, features, new_coords)
+    }
+}
+
+impl TrainedModel for TrainedGeoXGBoost {
+    /// Global-model-only prediction.
+    ///
+    /// The `TrainedModel` trait has no notion of spatial coordinates, so this
+    /// method cannot know whether `features` is the training set, a genuinely
+    /// new dataset, or a new dataset that coincidentally has the same number
+    /// of rows as the training set — matching on row count would silently
+    /// apply the wrong local model to unrelated points. To get spatially-aware
+    /// predictions (including "fitted values" on the training set, by passing
+    /// the training coordinates back), use [`TrainedGeoXGBoost::predict_spatial`].
+    fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        crate::validate::check_n_features(features, self.feature_names.len())?;
+        self.global_model.predict(features)
+    }
 
     /// Predict on new data using the nearest local model for each point.
     ///
@@ -849,8 +940,9 @@ impl TrainedGeoXGBoost {
     /// To get **in-sample fitted values** (the training-set predictions that
     /// exercise each point's own local model), call this with the training
     /// features and [`Self::coords`] — each point then matches itself exactly
-    /// (distance 0).
-    pub fn predict_spatial(
+    /// (distance 0). `benchmark::resample_regress` calls this with each test
+    /// fold's coordinates when the task carries them.
+    fn predict_spatial(
         &self,
         features: &Array2<f64>,
         new_coords: &[(f64, f64)],
@@ -911,22 +1003,6 @@ impl TrainedGeoXGBoost {
 
         Ok(Prediction::regression(predicted))
     }
-}
-
-impl TrainedModel for TrainedGeoXGBoost {
-    /// Global-model-only prediction.
-    ///
-    /// The `TrainedModel` trait has no notion of spatial coordinates, so this
-    /// method cannot know whether `features` is the training set, a genuinely
-    /// new dataset, or a new dataset that coincidentally has the same number
-    /// of rows as the training set — matching on row count would silently
-    /// apply the wrong local model to unrelated points. To get spatially-aware
-    /// predictions (including "fitted values" on the training set, by passing
-    /// the training coordinates back), use [`TrainedGeoXGBoost::predict_spatial`].
-    fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
-        crate::validate::check_n_features(features, self.feature_names.len())?;
-        self.global_model.predict(features)
-    }
 
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
         // Average local importances across all spatial units
@@ -983,14 +1059,7 @@ impl GeoXGBoost {
         let features = task.features();
         let target = task.target();
         let n_samples = task.n_samples();
-
-        if self.coords.len() != n_samples {
-            return Err(SmeltError::DimensionMismatch {
-                expected: n_samples,
-                got: self.coords.len(),
-            });
-        }
-        crate::validate::check_coords_finite(&self.coords)?;
+        let coords = self.coords_for(task)?;
 
         // 5th audit, M-1 (train-path companion of the select_bandwidth
         // check): a nominal bandwidth that satisfies the documented
@@ -1047,7 +1116,7 @@ impl GeoXGBoost {
             f64,
             Option<Vec<(String, f64)>>,
         );
-        let index = NeighborIndex::build(&self.coords);
+        let index = NeighborIndex::build(coords);
         let fits: Vec<Result<LocalFit>> = (0..n_samples)
             .into_par_iter()
             .map(|i| -> Result<LocalFit> {
@@ -1122,7 +1191,7 @@ impl GeoXGBoost {
             global_model,
             local_models,
             alphas,
-            coords: self.coords.clone(),
+            coords: coords.to_vec(),
             feature_names: task.feature_names().to_vec(),
             local_importances,
         })
@@ -1352,9 +1421,13 @@ mod tests {
         let mut coords: Vec<(f64, f64)> = Vec::new();
         let mut s = 7u64;
         for _ in 0..90 {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let x = (s >> 33) as f64 / (1u64 << 31) as f64;
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let y = (s >> 33) as f64 / (1u64 << 31) as f64;
             coords.push((x * 100.0, y * 100.0));
         }
@@ -1396,15 +1469,30 @@ mod tests {
         };
         let r = gxgb.search_bandwidth(&task, &cfg).unwrap();
         assert!(r.best >= 30 && r.best <= 120);
-        assert!(r.scores.iter().any(|&(b, s)| b == r.best && s == r.best_score));
+        assert!(
+            r.scores
+                .iter()
+                .any(|&(b, s)| b == r.best && s == r.best_score)
+        );
         assert!(r.scores.iter().all(|&(_, s)| s >= r.best_score));
         assert!(r.pruned.iter().all(|p| p.0 != r.best));
-        assert!(r.local_fits < r.exhaustive_local_fits / 3, "{} vs {}", r.local_fits, r.exhaustive_local_fits);
+        assert!(
+            r.local_fits < r.exhaustive_local_fits / 3,
+            "{} vs {}",
+            r.local_fits,
+            r.exhaustive_local_fits
+        );
         // Without early stopping the same search evaluates the same or more
         // candidates in full and must agree on the best fully evaluated score
         // being no worse.
         let full = gxgb
-            .search_bandwidth(&task, &BandwidthSearch { early_stop: false, ..cfg })
+            .search_bandwidth(
+                &task,
+                &BandwidthSearch {
+                    early_stop: false,
+                    ..cfg
+                },
+            )
             .unwrap();
         assert!(full.pruned.is_empty());
         assert!(full.scores.len() >= r.scores.len());
@@ -1431,9 +1519,15 @@ mod tests {
     fn search_bandwidth_rejects_bad_config() {
         let (task, coords) = toy_task(8);
         let gxgb = GeoXGBoost::new(coords).with_n_estimators(5);
-        let bad = BandwidthSearch { min_bandwidth: 10, ..Default::default() };
+        let bad = BandwidthSearch {
+            min_bandwidth: 10,
+            ..Default::default()
+        };
         assert!(gxgb.search_bandwidth(&task, &bad).is_err());
-        let bad = BandwidthSearch { coarse_step: 0, ..Default::default() };
+        let bad = BandwidthSearch {
+            coarse_step: 0,
+            ..Default::default()
+        };
         assert!(gxgb.search_bandwidth(&task, &bad).is_err());
     }
 

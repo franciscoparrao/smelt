@@ -87,6 +87,24 @@ fn validate_weights(weights: &[f64], n_samples: usize) {
     );
 }
 
+/// Validates a coordinate vector for `with_coords`: one `(x, y)` per
+/// sample, every component finite. Panics with a clear message on the
+/// first violation — same precedent as [`validate_weights`].
+fn validate_coords(coords: &[(f64, f64)], n_samples: usize) {
+    assert!(
+        coords.len() == n_samples,
+        "with_coords: {} coordinate(s) provided for {} sample(s) — one (x, y) per sample is required",
+        coords.len(),
+        n_samples
+    );
+    for (i, &(x, y)) in coords.iter().enumerate() {
+        assert!(
+            x.is_finite() && y.is_finite(),
+            "with_coords: coordinate at index {i} is ({x}, {y}) — every sample needs a finite georeference"
+        );
+    }
+}
+
 /// Core trait for all task types.
 pub trait Task {
     /// Task identifier.
@@ -105,6 +123,15 @@ pub trait Task {
     fn feature_names(&self) -> &[String];
     /// Per-column feature types (Numeric unless marked categorical).
     fn feature_types(&self) -> &[FeatureType];
+    /// Per-sample `(x, y)` coordinates, if the task was georeferenced via
+    /// `with_coords`. `None` for the (default) aspatial task. Spatial
+    /// learners ([`crate::learner::GeoXGBoost`], [`crate::learner::KrigingHybrid`])
+    /// and measures ([`crate::measure::MoranResiduals`]) read them from
+    /// here when present, and `benchmark::resample_*` slices them per fold
+    /// alongside features/target/weights.
+    fn coords(&self) -> Option<&[(f64, f64)]> {
+        None
+    }
     /// Indices of the categorical feature columns.
     fn categorical_features(&self) -> Vec<usize> {
         self.feature_types()
@@ -126,6 +153,7 @@ pub struct ClassificationTask {
     class_names: Vec<String>,
     feature_types: Vec<FeatureType>,
     weights: Option<Vec<f64>>,
+    coords: Option<Vec<(f64, f64)>>,
 }
 
 impl ClassificationTask {
@@ -156,6 +184,7 @@ impl ClassificationTask {
             target,
             class_names: (0..n_classes).map(|i| format!("class_{i}")).collect(),
             weights: None,
+            coords: None,
         })
     }
 
@@ -269,6 +298,38 @@ impl ClassificationTask {
         self.weights.as_deref()
     }
 
+    /// Attach one `(x, y)` coordinate per sample, georeferencing the task.
+    ///
+    /// Coordinates are *metadata*, not features: they are never fed to a
+    /// learner's split finding or regression, only read by components that
+    /// are explicitly spatial — [`crate::learner::GeoXGBoost`] /
+    /// [`crate::learner::KrigingHybrid`] (which then need no coordinates of
+    /// their own, see their `coords_from_task` constructors), the
+    /// [`crate::measure::MoranResiduals`] diagnostic, and
+    /// `benchmark::resample_*`, which slices them per fold with the same
+    /// indices as features/target/weights and hands the test-fold
+    /// coordinates to [`crate::learner::TrainedModel::predict_spatial`] and
+    /// [`crate::measure::Measure::score_spatial`]. This is what lets a
+    /// spatial learner go through `SpatialBlockCV` in the ordinary benchmark
+    /// and tuning loops (mlr3spatiotempcv's "coordinate" column role).
+    /// Aspatial learners and measures ignore them.
+    ///
+    /// # Panics
+    ///
+    /// Panics (same precedent as [`Self::with_weights`]) if
+    /// `coords.len() != n_samples` or any coordinate component is NaN or
+    /// ±infinity.
+    pub fn with_coords(mut self, coords: Vec<(f64, f64)>) -> Self {
+        validate_coords(&coords, self.features.nrows());
+        self.coords = Some(coords);
+        self
+    }
+
+    /// Per-sample coordinates, if any were attached via [`Self::with_coords`].
+    pub fn coords(&self) -> Option<&[(f64, f64)]> {
+        self.coords.as_deref()
+    }
+
     /// Integer target labels, one per sample.
     pub fn target(&self) -> &[usize] {
         &self.target
@@ -296,6 +357,9 @@ impl Task for ClassificationTask {
     fn feature_types(&self) -> &[FeatureType] {
         &self.feature_types
     }
+    fn coords(&self) -> Option<&[(f64, f64)]> {
+        self.coords.as_deref()
+    }
 }
 
 /// Regression task with continuous target values.
@@ -307,6 +371,7 @@ pub struct RegressionTask {
     feature_names: Vec<String>,
     feature_types: Vec<FeatureType>,
     weights: Option<Vec<f64>>,
+    coords: Option<Vec<(f64, f64)>>,
 }
 
 impl RegressionTask {
@@ -335,6 +400,7 @@ impl RegressionTask {
             features,
             target,
             weights: None,
+            coords: None,
         })
     }
 
@@ -419,6 +485,38 @@ impl RegressionTask {
         self.weights.as_deref()
     }
 
+    /// Attach one `(x, y)` coordinate per sample, georeferencing the task.
+    ///
+    /// Coordinates are *metadata*, not features: they are never fed to a
+    /// learner's split finding or regression, only read by components that
+    /// are explicitly spatial — [`crate::learner::GeoXGBoost`] /
+    /// [`crate::learner::KrigingHybrid`] (which then need no coordinates of
+    /// their own, see their `coords_from_task` constructors), the
+    /// [`crate::measure::MoranResiduals`] diagnostic, and
+    /// `benchmark::resample_*`, which slices them per fold with the same
+    /// indices as features/target/weights and hands the test-fold
+    /// coordinates to [`crate::learner::TrainedModel::predict_spatial`] and
+    /// [`crate::measure::Measure::score_spatial`]. This is what lets a
+    /// spatial learner go through `SpatialBlockCV` in the ordinary benchmark
+    /// and tuning loops (mlr3spatiotempcv's "coordinate" column role).
+    /// Aspatial learners and measures ignore them.
+    ///
+    /// # Panics
+    ///
+    /// Panics (same precedent as [`Self::with_weights`]) if
+    /// `coords.len() != n_samples` or any coordinate component is NaN or
+    /// ±infinity.
+    pub fn with_coords(mut self, coords: Vec<(f64, f64)>) -> Self {
+        validate_coords(&coords, self.features.nrows());
+        self.coords = Some(coords);
+        self
+    }
+
+    /// Per-sample coordinates, if any were attached via [`Self::with_coords`].
+    pub fn coords(&self) -> Option<&[(f64, f64)]> {
+        self.coords.as_deref()
+    }
+
     /// Continuous target values, one per sample.
     pub fn target(&self) -> &[f64] {
         &self.target
@@ -438,6 +536,9 @@ impl Task for RegressionTask {
     fn feature_types(&self) -> &[FeatureType] {
         &self.feature_types
     }
+    fn coords(&self) -> Option<&[(f64, f64)]> {
+        self.coords.as_deref()
+    }
 }
 
 #[cfg(test)]
@@ -453,6 +554,31 @@ mod tests {
     fn regress_task() -> RegressionTask {
         let features = array![[1.0], [2.0], [3.0], [4.0]];
         RegressionTask::new("t", features, vec![1.0, 2.0, 3.0, 4.0]).unwrap()
+    }
+
+    #[test]
+    fn coords_default_to_none_and_attach_round_trips() {
+        let c = classif_task();
+        assert!(c.coords().is_none());
+        assert!(Task::coords(&c).is_none());
+        let coords = vec![(0.0, 0.0), (1.0, 2.0), (3.0, 4.0), (5.0, 6.0)];
+        let r = regress_task().with_coords(coords.clone());
+        assert_eq!(r.coords(), Some(&coords[..]));
+        assert_eq!(Task::coords(&r), Some(&coords[..]));
+        // Coordinates are metadata: the feature matrix is untouched.
+        assert_eq!(r.n_features(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "one (x, y) per sample is required")]
+    fn with_coords_panics_on_length_mismatch() {
+        regress_task().with_coords(vec![(0.0, 0.0); 3]);
+    }
+
+    #[test]
+    #[should_panic(expected = "finite georeference")]
+    fn with_coords_panics_on_nan() {
+        classif_task().with_coords(vec![(0.0, 0.0), (f64::NAN, 1.0), (2.0, 2.0), (3.0, 3.0)]);
     }
 
     #[test]

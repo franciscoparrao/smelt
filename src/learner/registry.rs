@@ -6,7 +6,7 @@
 
 use super::{
     AdaBoost, AdaptiveRandomForest, CatBoost, DecisionTree, DeepForest, EBM, ElasticNet,
-    ExtraTrees, ExtremeLearningMachine, GaussianNB, GaussianProcess, GradientBoosting,
+    ExtraTrees, ExtremeLearningMachine, GaussianNB, GaussianProcess, GeoXGBoost, GradientBoosting,
     HoeffdingTree, KNearestNeighbors, KernelSVM, Lasso, Learner, LearnerProperties, LightGBM,
     LinearRegression, LinearSVM, LogisticRegression, MondrianForest, MondrianTree, ObliqueForest,
     ObliqueTree, QuantileForest, QuantileGB, RandomForest, Ridge, XGBoost,
@@ -22,11 +22,13 @@ use crate::{Result, SmeltError};
 /// [`super::KrigingHybrid`] wrap *other* learners via a base-learner factory
 /// that has no sensible default (`CostSensitiveClassifier` additionally
 /// needs an explicit cost matrix with no sensible default either, and
-/// `AutoTuner` a tuner spec + parameter space), and
-/// [`super::GeoXGBoost`] needs training coordinates supplied externally.
+/// `AutoTuner` a tuner spec + parameter space).
 /// [`super::ObliqueForest`] and [`EBM`], by contrast, are self-contained
-/// (no factory, no external coordinates) and *are* registered. See
-/// [`registered_learner_ids`] for the full list.
+/// (no factory) and *are* registered, as is [`super::GeoXGBoost`] in its
+/// [`super::GeoXGBoost::coords_from_task`] form, which reads the
+/// coordinates from the task (`RegressionTask::with_coords`) instead of
+/// needing them supplied externally. See [`registered_learner_ids`] for the
+/// full list.
 pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
     Ok(match id {
         "adaboost" => Box::new(AdaBoost::default()),
@@ -39,6 +41,7 @@ pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
         "elm" => Box::new(ExtremeLearningMachine::default()),
         "extra_trees" => Box::new(ExtraTrees::default()),
         "gaussian_nb" => Box::new(GaussianNB),
+        "geo_xgboost" => Box::new(GeoXGBoost::coords_from_task()),
         "gaussian_process" => Box::new(GaussianProcess::default()),
         "gradient_boosting" => Box::new(GradientBoosting::default()),
         "hoeffding_tree" => Box::new(HoeffdingTree::default()),
@@ -62,7 +65,7 @@ pub fn learner_from_id(id: &str) -> Result<Box<dyn Learner>> {
             return Err(SmeltError::InvalidParameter(format!(
                 "unknown learner id \"{other}\" (or not registry-constructible: \
                  ensembles like bagging/stacking/dynamic_ensemble/kriging_hybrid need a \
-                 base-learner factory, and geo_xgboost needs training coordinates)"
+                 base-learner factory)"
             )));
         }
     })
@@ -108,6 +111,7 @@ pub fn registered_learner_ids() -> &'static [&'static str] {
         "extra_trees",
         "gaussian_nb",
         "gaussian_process",
+        "geo_xgboost",
         "gradient_boosting",
         "hoeffding_tree",
         "kernel_svm",
@@ -160,7 +164,6 @@ mod tests {
             "calibrated",
             "thresholded",
             "kriging_hybrid",
-            "geo_xgboost",
         ] {
             assert!(
                 learner_from_id(id).is_err(),
@@ -181,7 +184,7 @@ mod tests {
     fn registered_learner_count_matches_readme_claim() {
         assert_eq!(
             registered_learner_ids().len(),
-            29,
+            30,
             "registry count changed -- update the \"Model registry\" bullet \
              and \"All Supervised Learners\" table in README.md to match"
         );

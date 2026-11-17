@@ -387,6 +387,11 @@ impl TrainedModel for TrainedAutoTuner {
         self.inner.predict(features)
     }
 
+    /// Forwarded, so a tuned spatial learner stays spatial.
+    fn predict_spatial(&self, features: &Array2<f64>, coords: &[(f64, f64)]) -> Result<Prediction> {
+        self.inner.predict_spatial(features, coords)
+    }
+
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
         self.inner.feature_importance()
     }

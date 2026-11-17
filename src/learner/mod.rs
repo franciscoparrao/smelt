@@ -157,6 +157,24 @@ pub trait TrainedModel: Send + Sync {
     /// Predict on new feature data.
     fn predict(&self, features: &Array2<f64>) -> Result<Prediction>;
 
+    /// Predict on new feature data whose rows are georeferenced by `coords`
+    /// (one `(x, y)` per row).
+    ///
+    /// The default ignores `coords` and is exactly [`Self::predict`]: an
+    /// aspatial model has nothing to do with a location. Spatial models
+    /// ([`TrainedGeoXGBoost`], [`TrainedKrigingHybrid`]) override it with
+    /// their location-aware prediction, and wrappers that delegate
+    /// (`TrainedPipeline`, `TrainedTargetTransformRegressor`,
+    /// `TrainedAutoTuner`) forward it so a spatial model stays spatial inside
+    /// them. `benchmark::resample_*` calls this instead of `predict` whenever
+    /// the task carries coordinates ([`crate::task::RegressionTask::with_coords`]),
+    /// which is what lets `GeoXGBoost` run through `SpatialBlockCV` in the
+    /// ordinary benchmark and tuning loops.
+    fn predict_spatial(&self, features: &Array2<f64>, coords: &[(f64, f64)]) -> Result<Prediction> {
+        let _ = coords;
+        self.predict(features)
+    }
+
     /// Feature importances (if available).
     ///
     /// Contract: implementations must return exactly one entry per feature,

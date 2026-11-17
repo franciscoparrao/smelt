@@ -184,6 +184,22 @@ let fitted = model.predict_spatial(task.features(), &coords).unwrap();
 
 Also: `SpatialBlockCV` and `SpatialBufferCV` for spatially-aware cross-validation.
 
+**Spatial CV in the ordinary benchmark loop.** Attach the coordinates to the
+task and build the learner with `coords_from_task()`; `resample_regress`
+slices the coordinates per fold and calls `predict_spatial` on the test fold,
+so GeoXGBoost, KrigingHybrid and the residual Moran's I diagnostic compose
+with `SpatialBlockCV`, `benchmark_regress`, `GridSearch` and `Pipeline` with
+no special casing (the task's coordinates also win over a learner's own):
+
+```rust
+let task = RegressionTask::new("lakes", features, target)?.with_coords(coords.clone());
+let cv = SpatialBlockCV::new(5, coords);
+let mut gxgb = GeoXGBoost::coords_from_task().with_bandwidth(60);
+let moran = MoranResiduals::coords_from_task();
+let bench = benchmark::resample_regress(&mut gxgb, &task, &cv, &[&Rmse, &moran])?;
+println!("RMSE {:.3}  residual Moran's I {:.3}", bench.mean_scores()[0], bench.mean_scores()[1]);
+```
+
 **Is a spatial model even needed?** Test the residuals of a non-spatial model
 for spatial autocorrelation with Moran's I (inference per Cliff & Ord 1981,
 matches PySAL's `esda.Moran` to 1e-9):
@@ -365,10 +381,9 @@ let task = CsvLoader::from_path("data.csv")
 - **CSV loading** — with auto label encoding
 - **Input validation** — dimension checks, NaN detection
 - **Model registry** — `learner_from_id("xgboost")` constructs any of the
-  29 self-contained learners by name, for data-driven experiment loops
-  (excludes learners needing a base-learner factory or external
-  coordinates: Bagging, Stacking, DynamicEnsemble, CostSensitiveClassifier,
-  KrigingHybrid, GeoXGBoost)
+  30 self-contained learners by name, for data-driven experiment loops
+  (excludes learners needing a base-learner factory: Bagging, Stacking,
+  DynamicEnsemble, CostSensitiveClassifier, KrigingHybrid)
 
 ## Architecture
 

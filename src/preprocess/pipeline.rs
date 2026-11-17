@@ -86,13 +86,28 @@ struct TrainedPipeline {
     model: Box<dyn TrainedModel>,
 }
 
-impl TrainedModel for TrainedPipeline {
-    fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+impl TrainedPipeline {
+    fn transform(&self, features: &Array2<f64>) -> Result<Array2<f64>> {
         let mut transformed = features.clone();
         for transformer in &self.transformers {
             transformed = transformer.transform(&transformed)?;
         }
-        self.model.predict(&transformed)
+        Ok(transformed)
+    }
+}
+
+impl TrainedModel for TrainedPipeline {
+    fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        self.model.predict(&self.transform(features)?)
+    }
+
+    /// Transforms the features, then forwards the coordinates to the inner
+    /// model's `predict_spatial`, so a spatial final learner stays spatial
+    /// inside the pipeline (the default would silently fall back to its
+    /// global/base-only `predict`).
+    fn predict_spatial(&self, features: &Array2<f64>, coords: &[(f64, f64)]) -> Result<Prediction> {
+        self.model
+            .predict_spatial(&self.transform(features)?, coords)
     }
 
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {
@@ -127,6 +142,17 @@ impl Learner for Pipeline {
                     "resampling a weighted task is not supported; the synthetic samples' \
                      weights are undefined — remove with_weights() or drop the Pipeline's \
                      resampler stage"
+                        .into(),
+                ));
+            }
+            // Same for coordinates: a plain resampler stage has nowhere to
+            // put a synthetic sample's location (SpatialSmote, used outside
+            // the Pipeline, returns the synthetic coordinates alongside).
+            if task.coords().is_some() {
+                return Err(SmeltError::InvalidParameter(
+                    "resampling a task with coordinates is not supported inside a Pipeline; \
+                     the synthetic samples' coordinates are undefined — remove with_coords(), \
+                     drop the resampler stage, or use SpatialSmote outside the Pipeline"
                         .into(),
                 ));
             }
@@ -175,6 +201,10 @@ impl Learner for Pipeline {
         if let Some(w) = task.weights() {
             transformed_task = transformed_task.with_weights(w.to_vec());
         }
+        // Coordinates likewise ride through unchanged (row-preserving stages).
+        if let Some(c) = task.coords() {
+            transformed_task = transformed_task.with_coords(c.to_vec());
+        }
 
         let model = self.learner.train_classif(&transformed_task)?;
 
@@ -218,6 +248,12 @@ impl Learner for Pipeline {
         // inner learner's guard decides whether weights are supported.
         if let Some(w) = task.weights() {
             transformed_task = transformed_task.with_weights(w.to_vec());
+        }
+        // Coordinates likewise ride through unchanged, so a spatial final
+        // learner (GeoXGBoost::coords_from_task(), KrigingHybrid) behind
+        // scalers/selectors still sees its georeference.
+        if let Some(c) = task.coords() {
+            transformed_task = transformed_task.with_coords(c.to_vec());
         }
 
         let model = self.learner.train_regress(&transformed_task)?;

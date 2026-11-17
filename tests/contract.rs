@@ -54,9 +54,17 @@ fn classif_task() -> ClassificationTask {
     ClassificationTask::new("contract_cls", x, y).unwrap()
 }
 
+/// Georeferenced, so the registry's spatial learner (`geo_xgboost`, built via
+/// `GeoXGBoost::coords_from_task()`) can train like any other regressor;
+/// aspatial learners ignore the coordinates.
 fn regress_task() -> RegressionTask {
     let (x, y) = regress_features_target();
-    RegressionTask::new("contract_reg", x, y).unwrap()
+    let coords: Vec<(f64, f64)> = (0..N)
+        .map(|i| (i as f64, ((i * 7) % 11) as f64))
+        .collect();
+    RegressionTask::new("contract_reg", x, y)
+        .unwrap()
+        .with_coords(coords)
 }
 
 /// Train on whichever task type the learner declares support for (classification

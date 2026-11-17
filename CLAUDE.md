@@ -358,6 +358,27 @@ pulled from `docs/roadmap_checklist.md` (Prioridad 4).
       optimum), and early stopping needs a good reference early (ascending
       order never prunes). Details: docs/bandwidth_search_2026-11-11.md.
 
+### Task-carried coordinates (2026-11-14)
+
+- [x] `RegressionTask/ClassificationTask::with_coords` + `Task::coords()`
+      (metadata, sliced per fold by `benchmark::resample_*` exactly like
+      `weights`), `TrainedModel::predict_spatial` and `Measure::score_spatial`
+      (default-implemented no-ops that spatial types override),
+      `GeoXGBoost::coords_from_task()` / `KrigingHybrid::coords_from_task(f)`
+      / `MoranResiduals::coords_from_task()`. This is what lets GeoXGBoost
+      run under `SpatialBlockCV` inside `resample_regress`, `benchmark_regress`,
+      `GridSearch`, `AutoTuner`, `Pipeline`, `TargetTransformRegressor`
+      with no special casing; `tests/spatial_benchmark.rs` asserts exact
+      equality with the manual per-fold loop. **GeoXGBoost's algorithm is
+      untouched** (only the source of the coordinates changed — the
+      Grekousis-collaboration rule in memory still applies to anything
+      algorithmic). `"geo_xgboost"` is now in the registry (30 learners;
+      `tests/contract.rs` georeferences its regression task for it).
+      **Rule for new code that rebuilds a Task from the same rows**:
+      propagate `coords` next to `weights`/`feature_types` (M-3 metadata-loss
+      class); the `TargetTransformRegressor` case was caught by the tests.
+      Details: docs/spatial_task_coords_2026-11-14.md.
+
 ### Moran's I residual diagnostic (2026-11-12)
 
 - [x] `src/measure/moran.rs`: `morans_i` / `morans_i_permutation` (Cliff & Ord

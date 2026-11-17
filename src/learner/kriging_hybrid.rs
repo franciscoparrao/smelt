@@ -471,6 +471,42 @@ impl KrigingHybrid {
         }
     }
 
+    /// Creates a `KrigingHybrid` that takes its coordinates from the task
+    /// (`RegressionTask::with_coords`) instead of owning them — the form that
+    /// composes with `benchmark::resample_regress`, tuning and `Pipeline`,
+    /// since each fold's task arrives with its own slice of the coordinates.
+    /// Training a task without coordinates is an error.
+    pub fn coords_from_task(
+        factory: impl Fn() -> Box<dyn Learner> + Send + Sync + 'static,
+    ) -> Self {
+        Self::new(factory, Vec::new())
+    }
+
+    /// The task's own coordinates when present (row-aligned by construction),
+    /// otherwise the learner's, validated for length and finiteness.
+    fn coords_for<'a>(&'a self, task: &'a RegressionTask) -> Result<&'a [(f64, f64)]> {
+        if let Some(c) = task.coords() {
+            return Ok(c);
+        }
+        if self.coords.is_empty() {
+            return Err(SmeltError::InvalidParameter(
+                "KrigingHybrid has no coordinates: pass them to KrigingHybrid::new(factory, \
+                 coords), or attach them to the task with RegressionTask::with_coords when \
+                 using KrigingHybrid::coords_from_task(factory)"
+                    .into(),
+            ));
+        }
+        let n_samples = task.n_samples();
+        if self.coords.len() != n_samples {
+            return Err(SmeltError::DimensionMismatch {
+                expected: n_samples,
+                got: self.coords.len(),
+            });
+        }
+        crate::validate::check_coords_finite(&self.coords)?;
+        Ok(&self.coords)
+    }
+
     /// Sets the semivariogram model family.
     pub fn with_variogram_model(mut self, model: VariogramModel) -> Self {
         self.model = model;
@@ -497,14 +533,7 @@ impl KrigingHybrid {
         // Guard here (not in `Learner::train_regress`, which just boxes this)
         // so BOTH public entry points reject weighted tasks.
         crate::validate::check_no_weights(task.weights(), "KrigingHybrid")?;
-        let n_samples = task.n_samples();
-        if self.coords.len() != n_samples {
-            return Err(SmeltError::DimensionMismatch {
-                expected: n_samples,
-                got: self.coords.len(),
-            });
-        }
-        crate::validate::check_coords_finite(&self.coords)?;
+        let coords = self.coords_for(task)?;
 
         let mut base_learner = (self.factory)();
         let base_model = base_learner.train_regress(task)?;
@@ -521,14 +550,14 @@ impl KrigingHybrid {
         let target = task.target();
         let residuals: Vec<f64> = target.iter().zip(&base_vals).map(|(y, p)| y - p).collect();
 
-        let max_lag = (2.0 / 3.0) * max_pairwise_distance(&self.coords);
+        let max_lag = (2.0 / 3.0) * max_pairwise_distance(coords);
         let (lags, semivariances, weights) =
-            empirical_variogram(&self.coords, &residuals, self.n_lags, max_lag);
+            empirical_variogram(coords, &residuals, self.n_lags, max_lag);
         let fit = fit_variogram(&lags, &semivariances, &weights, self.model, max_lag);
 
         Ok(TrainedKrigingHybrid {
             base_model,
-            coords: self.coords.clone(),
+            coords: coords.to_vec(),
             residuals,
             fit,
             n_neighbors: self.n_neighbors,
@@ -565,6 +594,33 @@ impl TrainedKrigingHybrid {
     pub fn variogram_fit(&self) -> &VariogramFit {
         &self.fit
     }
+}
+
+impl TrainedKrigingHybrid {
+    /// Inherent alias of [`TrainedModel::predict_spatial`], so callers holding
+    /// the concrete type (as returned by the `*_geo` training methods) can
+    /// call it without importing the trait.
+    pub fn predict_spatial(
+        &self,
+        features: &Array2<f64>,
+        new_coords: &[(f64, f64)],
+    ) -> Result<Prediction> {
+        TrainedModel::predict_spatial(self, features, new_coords)
+    }
+}
+
+impl TrainedModel for TrainedKrigingHybrid {
+    /// Base-model-only prediction.
+    ///
+    /// The `TrainedModel` trait has no notion of spatial coordinates, so
+    /// this method cannot apply the kriging correction (which needs new
+    /// coordinates). Use [`TrainedKrigingHybrid::predict_spatial`] to get
+    /// the spatially-corrected prediction -- matching how
+    /// [`crate::learner::TrainedGeoXGBoost::predict`] is also base/global-only
+    /// for the same reason.
+    fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
+        self.base_model.predict(features)
+    }
 
     /// Predicts `base_model(features) + kriged_residual(new_coords)`.
     ///
@@ -573,7 +629,7 @@ impl TrainedKrigingHybrid {
     /// fitted variogram. Passing the training coordinates back with the
     /// training features reproduces the training residuals exactly (kriging
     /// is an exact interpolator at data locations).
-    pub fn predict_spatial(
+    fn predict_spatial(
         &self,
         features: &Array2<f64>,
         new_coords: &[(f64, f64)],
@@ -616,20 +672,6 @@ impl TrainedKrigingHybrid {
         }
 
         Ok(Prediction::regression(predicted))
-    }
-}
-
-impl TrainedModel for TrainedKrigingHybrid {
-    /// Base-model-only prediction.
-    ///
-    /// The `TrainedModel` trait has no notion of spatial coordinates, so
-    /// this method cannot apply the kriging correction (which needs new
-    /// coordinates). Use [`TrainedKrigingHybrid::predict_spatial`] to get
-    /// the spatially-corrected prediction -- matching how
-    /// [`crate::learner::TrainedGeoXGBoost::predict`] is also base/global-only
-    /// for the same reason.
-    fn predict(&self, features: &Array2<f64>) -> Result<Prediction> {
-        self.base_model.predict(features)
     }
 
     fn feature_importance(&self) -> Option<Vec<(String, f64)>> {

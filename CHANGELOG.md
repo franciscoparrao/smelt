@@ -12,6 +12,58 @@ patch; defensible as a bug fix, not a precedent to repeat).
 
 ## [Unreleased]
 
+### Added — task-carried coordinates: spatial learners and measures in the ordinary benchmark/tuning loops (2026-11-14)
+
+- **`RegressionTask::with_coords` / `ClassificationTask::with_coords`** attach
+  one `(x, y)` per sample as metadata (never fed to split finding), exposed
+  through `Task::coords()`. `benchmark::resample_classif/regress` slice them
+  per fold with the same indices as features/target/weights, train on the
+  georeferenced fold, and hand the test fold's slice to two new
+  default-implemented trait methods: **`TrainedModel::predict_spatial(features,
+  coords)`** (default = `predict`, ignoring coords) and
+  **`Measure::score_spatial(prediction, coords)`** (default = `score`).
+  Aspatial learners and measures are byte-for-byte unaffected (tested).
+- **`GeoXGBoost::coords_from_task()`** and **`KrigingHybrid::coords_from_task(factory)`**
+  take the coordinates from the task instead of owning them, which is what
+  lets them run under `SpatialBlockCV`/`SpatialBufferCV` through
+  `resample_regress`, `benchmark_regress`, `GridSearch`/`RandomSearch`/
+  `AutoTuner`, `Pipeline` and `TargetTransformRegressor` with no special
+  casing. When both the task and the learner have coordinates, the task's
+  (fold-aligned) win. The algorithms are unchanged: the integration tests
+  assert exact equality with the hand-written per-fold `train_geo` +
+  `predict_spatial` loop. `TrainedGeoXGBoost::predict_spatial` /
+  `TrainedKrigingHybrid::predict_spatial` are now the trait method (an
+  inherent alias is kept, so existing callers need no import).
+- **`"geo_xgboost"` is registered** in `learner_from_id` (30 learners).
+- **`MoranResiduals::coords_from_task()`**: the Moran's I diagnostic scores
+  each CV fold against that fold's own coordinates via `score_spatial`,
+  so "RMSE + residual Moran's I per fold" is one `resample_regress` call.
+- `Pipeline` and `TargetTransformRegressor` propagate coordinates when
+  rebuilding the task (row-preserving) and forward `predict_spatial`;
+  `TrainedAutoTuner` forwards it too. A `Pipeline` with a resampler stage
+  rejects a georeferenced task (synthetic samples have no location).
+  Classification wrappers that slice rows (Stacking, DES, Calibrated/
+  Thresholded) do not propagate coordinates — there is no spatial
+  classifier to consume them yet.
+
+### Added — Moran's I spatial-autocorrelation diagnostic for residuals (2026-11-12)
+
+- `smelt_ml::measure::{morans_i, morans_i_permutation, SpatialWeights,
+  MoranResiduals, MoranResult}`: Moran's I with Cliff & Ord (1981)
+  inference (randomisation assumption as the headline `z_score`/`p_value`,
+  normality alongside, optional seed-deterministic permutation p), kNN /
+  inverse-distance / distance-band weights (row-standardised), and a
+  `Measure` over `truth - predicted`. Golden-tested against `esda 2.10.0`
+  to 1e-9. Python: `smelt.morans_i`, `smelt.moran_residuals`, `MoranResult`.
+
+### Added — `GeoXGBoost::search_bandwidth` fast bandwidth search (2026-11-11)
+
+- Coarse-to-fine search with a shared sorted-neighbour index, integer
+  golden-section refinement and paired early stopping of clearly worse
+  candidates; same optimum as the exhaustive scan on the pan-Arctic lake
+  data with ~55% fewer local fits. Python: `GeoXGBoost.search_bandwidth`.
+  See `docs/bandwidth_search_2026-11-11.md`.
+
 ## [smelt-ml 3.2.1] / [smelt-py 0.8.1] - 2026-09-03
 
 Patch release: one numerical bug fix in `EBM` (predictions change for any
